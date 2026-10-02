@@ -459,9 +459,13 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request, u *auth.Use
 // ── goals ──────────────────────────────────────────────────────────────────
 
 func goalView(g *engine.Goal) map[string]any {
-	return map[string]any{"id": g.ID, "title": g.Title, "objective": g.Objective, "domain": g.Domain, "skill": g.Skill,
+	v := map[string]any{"id": g.ID, "title": g.Title, "objective": g.Objective, "domain": g.Domain, "skill": g.Skill, "kind": g.Skill,
 		"status": g.Status, "criteria": g.Criteria, "milestones": g.Milestones, "usage": g.Usage, "limits": g.Limits,
 		"attention_reason": g.AttentionReason, "conversation_id": g.ConversationID, "created_at": g.CreatedAt, "updated_at": g.UpdatedAt}
+	if g.GameID != "" {
+		v["game_id"] = g.GameID // the game a studio build produces
+	}
+	return v
 }
 
 func (s *Server) goals(w http.ResponseWriter, r *http.Request, u *auth.User) {
@@ -475,7 +479,7 @@ func (s *Server) goals(w http.ResponseWriter, r *http.Request, u *auth.User) {
 		v := goalView(g)
 		var done, total int
 		_ = s.Pool.QueryRow(r.Context(), `SELECT count(*) FILTER (WHERE status IN ('succeeded','skipped')), count(*) FILTER (WHERE status NOT IN ('cancelled'))
-			FROM tasks WHERE goal_id=$1 AND kind IN ('llm','wait')`, g.ID).Scan(&done, &total)
+			FROM tasks WHERE goal_id=$1 AND kind IN ('llm','wait','tool')`, g.ID).Scan(&done, &total)
 		v["progress"] = map[string]int{"done": done, "total": total}
 		out = append(out, v)
 	}
@@ -510,7 +514,7 @@ func (s *Server) goal(w http.ResponseWriter, r *http.Request, u *auth.User) {
 	for _, t := range ts {
 		tasks = append(tasks, map[string]any{"id": t.ID, "key": t.Key, "title": t.Title, "kind": t.Kind, "status": t.Status,
 			"attempts": t.Attempts, "deps": t.Deps, "error": t.Error, "run_after": t.RunAfter, "started_at": t.StartedAt,
-			"finished_at": t.FinishedAt, "summary": outputSummary(t.Output), "mode": t.Spec.Mode, "activity": activity[t.ID]})
+			"finished_at": t.FinishedAt, "summary": outputSummary(t.Output), "mode": t.Spec.Mode, "role": t.Spec.Role, "activity": activity[t.ID]})
 	}
 	out := goalView(g)
 	out["tasks"], out["approvals"] = tasks, s.approvalList(r, u, g.ID)

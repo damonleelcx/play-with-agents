@@ -35,6 +35,7 @@ import (
 	"github.com/damonleelcx/play-with-agents/internal/mail"
 	"github.com/damonleelcx/play-with-agents/internal/rooms"
 	"github.com/damonleelcx/play-with-agents/internal/rooms/talk"
+	"github.com/damonleelcx/play-with-agents/internal/studio"
 	"github.com/damonleelcx/play-with-agents/internal/tts"
 	"github.com/damonleelcx/play-with-agents/internal/web"
 )
@@ -138,6 +139,14 @@ func run(mode string) error {
 	}
 	start(func() { tables.Listen(ctx) })
 
+	// The game studio (internal/studio): its tools, roles, playbook and plan
+	// hook are registered by the import; the service starts builds for Aoi
+	// and the API. The bundled example games go on the community shelf.
+	studioSvc := &studio.Service{Pool: pool, Store: store}
+	if err := studio.SeedCommunity(ctx, pool); err != nil {
+		slog.Error("seed community games", "err", err)
+	}
+
 	if mode == "serve" || mode == "worker" {
 		planner := &engine.Planner{Store: store, Model: model, LLM: cfg.LLMModel}
 		for i := 0; i < cfg.WorkerCount; i++ {
@@ -159,7 +168,7 @@ func run(mode string) error {
 		// service (tables, catalog) and the studio plug in as
 		// agent.Tables, agent.Catalog and agent.Studio.
 		ag := &agent.Agent{Store: store, Model: model, LLM: cfg.LLMModel, FastLLM: cfg.LLMFastModel, Mailer: mailer,
-			Tables: aoiTables{tables}, Studio: nil, Catalog: aoiCatalog{tables}}
+			Tables: aoiTables{tables}, Studio: studioSvc, Catalog: aoiCatalog{tables}}
 		api := &httpapi.Server{Pool: pool, Auth: authSvc, Store: store, Agent: ag, Static: web.FS(), CookieSecure: cfg.CookieSecure,
 			MailEnabled: mailer.Enabled(), Hub: hub, Rooms: tables, Speech: speech}
 		srv = &http.Server{Addr: cfg.Addr, Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second}

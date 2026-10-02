@@ -175,6 +175,33 @@ var ErrBlocked = errors.New("this action is never automated on this platform")
 // and a person looks.
 var ErrAmbiguous = errors.New("a previous attempt of this side effect has no recorded outcome; not retrying automatically")
 
+// ErrDeclined is a G1 call the owner already declined, asked again with the
+// same arguments in the same task.
+var ErrDeclined = errors.New("the owner already declined exactly this action; do not ask again")
+
+// decidedBefore looks for the same G1 call (tool and arguments) earlier in
+// this task: one that succeeded (its output), or one the owner declined.
+func decidedBefore(ctx context.Context, env *Env, tool string, rawArgs json.RawMessage) (map[string]any, bool, error) {
+	if env.TaskID == "" || env.Pool == nil {
+		return nil, false, nil
+	}
+	var out []byte
+	err := env.Pool.QueryRow(ctx, `SELECT coalesce(output::text,'{}') FROM tool_calls
+		WHERE task_id=$1 AND tool=$2 AND status='succeeded' AND input=$3::jsonb ORDER BY id DESC LIMIT 1`, env.TaskID, tool, string(rawArgs)).Scan(&out)
+	if err == nil {
+		var m map[string]any
+		_ = json.Unmarshal(out, &m)
+		return m, false, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return nil, false, err
+	}
+	var declined bool
+	err = env.Pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM approvals WHERE task_id=$1 AND tool=$2 AND status='rejected' AND args=$3::jsonb)`,
+		env.TaskID, tool, string(rawArgs)).Scan(&declined)
+	return nil, declined, err
+}
+
 type InvalidInput struct{ Err error }
 
 func (e *InvalidInput) Error() string { return "invalid arguments: " + e.Err.Error() }
@@ -213,6 +240,16 @@ func Invoke(ctx context.Context, env *Env, name string, rawArgs json.RawMessage,
 	case G0:
 	case G1:
 		if !approved {
+			// The same call again in the same task is not a new action: once
+			// approved and done it returns the recorded result; once declined
+			// it is not put to the owner a second time.
+			if prev, declined, err := decidedBefore(ctx, env, t.Name, rawArgs); err != nil {
+				return nil, err
+			} else if prev != nil {
+				return &Result{Output: prev, Duplicate: true}, nil
+			} else if declined {
+				return nil, ErrDeclined
+			}
 			preview := ""
 			if t.Preview != nil {
 				preview = t.Preview(args)

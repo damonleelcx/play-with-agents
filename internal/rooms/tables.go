@@ -39,6 +39,15 @@ func (s *Service) playable(ctx context.Context, userID, gameID string) (games.Me
 	if owner != userID && (status != "published" || vis == "private") {
 		return games.Meta{}, 0, ErrNotFound
 	}
+	if owner == userID && owner != "" {
+		// The owner plays the newest version that passed the studio's
+		// playtest (a draft, or a revision of a published game not yet
+		// approved); everyone else plays the published current_version.
+		if err := s.Pool.QueryRow(ctx, `SELECT greatest($2::int, coalesce(max(version),0)) FROM game_versions
+			WHERE game_id=$1 AND coalesce((report->'verdict'->>'pass')::boolean, false)`, gameID, version).Scan(&version); err != nil {
+			return games.Meta{}, 0, err
+		}
+	}
 	if version == 0 {
 		return games.Meta{}, 0, fmt.Errorf("%w: the game is still being built", ErrConflict)
 	}

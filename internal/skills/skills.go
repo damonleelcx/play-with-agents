@@ -14,8 +14,11 @@ import (
 )
 
 type Step struct {
-	Key          string
-	Title        string
+	Key   string
+	Title string
+	// Role is the specialist that runs the step (the studio's designer,
+	// engineer, playtester, critic, coordinator); the UI shows it.
+	Role         string
 	Instructions string
 	Tools        []string
 	Deps         []string
@@ -26,6 +29,10 @@ type Step struct {
 	// dependencies finish.
 	WaitDays int
 	MaxSteps int
+	// Tool makes the step deterministic: the engine invokes this one tool
+	// with Args, no model involved (e.g. the studio's playtest).
+	Tool string
+	Args map[string]any
 }
 
 type Skill struct {
@@ -40,6 +47,10 @@ type Skill struct {
 	// Recurring skills re-plan themselves after the last step instead of
 	// finishing, until the owner closes them.
 	Recurring bool
+	// Fixed playbooks are instantiated as written, without a tailoring call:
+	// their steps already read everything request-specific from their
+	// context (the studio's build is one).
+	Fixed bool
 }
 
 var (

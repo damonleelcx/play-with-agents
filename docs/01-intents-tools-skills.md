@@ -67,11 +67,19 @@ unknown tool.
 
 | Tool | Effect | Gate | What it does |
 |---|---|---|---|
-| `save_rules` | W | G0 | Save the rules document (Markdown) for the game being built |
+| `save_rules` | W | G0 | Save the rules document (Markdown), name, summary, seat range and hidden-info flag for the game being built |
 | `save_module` | W | G0 | Save a version of the game's JavaScript module |
 | `check_module` | R | G0 | Load the module in the sandbox and run the contract checks |
+| `read_example` | R | G0 | Read one of the bundled reference modules (the Engineer's templates) |
 | `playtest` | R | G0 | Simulate hundreds of games deterministically; report outcomes, stalls, errors |
-| `publish_game` | W | **G1**, `Notify: "build_ready"` | Publish the approved version; the owner is emailed that the game is ready |
+| `submit_review` | W | G0 | The Critic's verdict (`pass`/`revise`) and findings, stored on the reviewed version |
+| `publish_game` | W | **G1**, `Notify: "build_ready"` | Publish the approved version; the owner is emailed that the game is ready. Refuses a version that has not passed both the playtest and the critic |
+
+`save_module` stores a version and returns the check report; it rewrites the
+build's working draft in place until that draft is playtested. `playtest`
+runs as a deterministic **tool task** (no model; `internal/studio`). The same
+G1 call repeated in one task is never put to the owner twice: once done it
+returns the recorded result, once declined it is refused.
 
 ### 2.3 The tool contract (enforced in `internal/tools`)
 
@@ -101,7 +109,7 @@ owner, and on a daily review.
 | Skill | DAG | Gates | Done when |
 |---|---|---|---|
 | `general-task` | work → report | none | the request is fulfilled and the player told; also the fallback for an unknown skill |
-| `build_game` *(with the studio)* | design rules → engineer module → check → playtest → critic review → publish | **G1** publish | the module passes `check_module` and the playtest gate, the critic accepts, and the owner approved publishing |
+| `build_game` *(fixed playbook, `internal/studio`)* | design rules → engineer module (until `save_module` checks clean) → playtest (tool task) → critic review → publish. A failed playtest or a critic `revise` adds a round (revise → playtest → critic → publish), deterministically, up to `max_replans` (4); then Aoi asks the owner and the goal waits in `needs_attention` | **G1** publish | the module passes the check and the playtest gate, the critic accepts, and the owner decided on publishing (approved, or kept it as a draft) |
 
 ### 3.1 Verifiers
 

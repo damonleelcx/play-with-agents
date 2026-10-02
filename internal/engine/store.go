@@ -25,7 +25,9 @@ type Goal struct {
 	PlanVersion, Replans            int
 	AttentionReason, Summary        string
 	Language                        string
-	CreatedAt, UpdatedAt            time.Time
+	// GameID is the game a studio build produces ("" for other goals).
+	GameID               string
+	CreatedAt, UpdatedAt time.Time
 }
 
 type Task struct {
@@ -44,11 +46,18 @@ type Task struct {
 }
 
 type TaskSpec struct {
+	// Role is the specialist that runs the task (designer, engineer, …). A
+	// registered Role supplies its system prompt, context and model.
+	Role         string   `json:"role,omitempty"`
 	Instructions string   `json:"instructions,omitempty"`
 	Tools        []string `json:"tools,omitempty"`
 	Verify       []string `json:"verify,omitempty"`
 	MaxSteps     int      `json:"max_steps,omitempty"`
 	WaitDays     float64  `json:"wait_days,omitempty"`
+	// Tool tasks (kind "tool"): the engine invokes Tool with Args once, no
+	// model involved, then runs Verify.
+	Tool string         `json:"tool,omitempty"`
+	Args map[string]any `json:"args,omitempty"`
 	// Plan tasks
 	Mode   string `json:"mode,omitempty"`   // initial | replan | review | change | finish
 	Reason string `json:"reason,omitempty"` // why this plan task exists
@@ -59,13 +68,13 @@ var ErrLeaseLost = errors.New("lease lost: another worker owns this task now")
 type Store struct{ Pool *pgxpool.Pool }
 
 const goalCols = `id, user_id, coalesce(conversation_id::text,''), title, objective, domain, skill, status,
-	completion_criteria, milestones, limits, usage, plan_version, replans, attention_reason, summary, language, created_at, updated_at`
+	completion_criteria, milestones, limits, usage, plan_version, replans, attention_reason, summary, language, coalesce(game_id,''), created_at, updated_at`
 
 func scanGoal(row pgx.Row) (*Goal, error) {
 	var g Goal
 	var crit, ms, lim, use []byte
 	err := row.Scan(&g.ID, &g.UserID, &g.ConversationID, &g.Title, &g.Objective, &g.Domain, &g.Skill, &g.Status,
-		&crit, &ms, &lim, &use, &g.PlanVersion, &g.Replans, &g.AttentionReason, &g.Summary, &g.Language, &g.CreatedAt, &g.UpdatedAt)
+		&crit, &ms, &lim, &use, &g.PlanVersion, &g.Replans, &g.AttentionReason, &g.Summary, &g.Language, &g.GameID, &g.CreatedAt, &g.UpdatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -105,26 +114,33 @@ func (s *Store) Goals(ctx context.Context, userID string, limit int) ([]*Goal, e
 // CreateGoal inserts the goal and its first task — the planning task — in one
 // transaction, so a goal can never exist without the work that plans it.
 func (s *Store) CreateGoal(ctx context.Context, g *Goal) error {
+	return pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error { return CreateGoalTx(ctx, tx, g) })
+}
+
+// CreateGoalTx is CreateGoal inside the caller's transaction, for callers
+// that create the goal together with what it works on (the studio's game row).
+func CreateGoalTx(ctx context.Context, tx pgx.Tx, g *Goal) error {
 	crit, _ := json.Marshal(g.Criteria)
 	ms, _ := json.Marshal(g.Milestones)
 	lim, _ := json.Marshal(g.Limits.WithDefaults())
-	return pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
-		err := tx.QueryRow(ctx, `INSERT INTO goals (user_id, conversation_id, title, objective, domain, skill, status,
-			completion_criteria, milestones, limits, language, next_review_at)
-			VALUES ($1, nullif($2,'')::uuid, $3, $4, $5, $6, 'planning', $7, $8, $9, $10, now() + interval '1 day')
-			RETURNING id, created_at`, g.UserID, g.ConversationID, g.Title, g.Objective, g.Domain, g.Skill, crit, ms, lim, g.Language).
-			Scan(&g.ID, &g.CreatedAt)
-		if err != nil {
-			return err
-		}
-		g.Status = "planning"
-		spec, _ := json.Marshal(TaskSpec{Mode: "initial", Reason: "new goal"})
-		if _, err := tx.Exec(ctx, `INSERT INTO tasks (goal_id, key, title, kind, spec, status, max_attempts)
-			VALUES ($1, 'plan-0', 'Plan the work', 'plan', $2, 'ready', 4)`, g.ID, spec); err != nil {
-			return err
-		}
-		return eventTx(ctx, tx, g.UserID, g.ID, "", "goal.created", map[string]any{"title": g.Title, "skill": g.Skill, "why": "client asked: " + truncate(g.Objective, 200)})
-	})
+	err := tx.QueryRow(ctx, `INSERT INTO goals (user_id, conversation_id, title, objective, domain, skill, status,
+		completion_criteria, milestones, limits, language, game_id, next_review_at)
+		VALUES ($1, nullif($2,'')::uuid, $3, $4, $5, $6, 'planning', $7, $8, $9, $10, nullif($11,''), now() + interval '1 day')
+		RETURNING id, created_at`, g.UserID, g.ConversationID, g.Title, g.Objective, g.Domain, g.Skill, crit, ms, lim, g.Language, g.GameID).
+		Scan(&g.ID, &g.CreatedAt)
+	if err != nil {
+		return err
+	}
+	g.Status = "planning"
+	spec, _ := json.Marshal(TaskSpec{Mode: "initial", Reason: "new goal"})
+	if _, err := tx.Exec(ctx, `INSERT INTO tasks (goal_id, key, title, kind, spec, status, max_attempts)
+		VALUES ($1, 'plan-0', 'Plan the work', 'plan', $2, 'ready', 4)`, g.ID, spec); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx, `SELECT pg_notify('play_work', $1)`, g.ID); err != nil {
+		return err
+	}
+	return eventTx(ctx, tx, g.UserID, g.ID, "", "goal.created", map[string]any{"title": g.Title, "skill": g.Skill, "why": "client asked: " + truncate(g.Objective, 200)})
 }
 
 // EnqueuePlan adds a planning task (replan/review/change/finish). The key makes

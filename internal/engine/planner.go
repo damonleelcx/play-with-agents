@@ -21,11 +21,16 @@ import (
 type PlannedTask struct {
 	Key          string  `json:"key"`
 	Title        string  `json:"title"`
+	Role         string  `json:"role,omitempty"`
 	Instructions string  `json:"instructions"`
 	Tools        strList `json:"tools"`
 	Deps         strList `json:"deps"`
 	Verify       strList `json:"verify"`
 	WaitDays     flexNum `json:"wait_days"`
+	MaxSteps     int     `json:"max_steps,omitempty"`
+	// Tool + Args make a deterministic tool task (no model).
+	Tool string         `json:"tool,omitempty"`
+	Args map[string]any `json:"args,omitempty"`
 }
 
 // strList accepts ["a","b"], "a", "a, b" or null — models are inconsistent
@@ -81,8 +86,8 @@ var reKey = regexp.MustCompile(`^[a-z0-9][a-z0-9\-]{0,40}$`)
 func fromSkill(sk *skills.Skill) []PlannedTask {
 	out := make([]PlannedTask, 0, len(sk.Steps))
 	for _, s := range sk.Steps {
-		out = append(out, PlannedTask{Key: s.Key, Title: s.Title, Instructions: s.Instructions, Tools: s.Tools,
-			Deps: s.Deps, Verify: s.Verify, WaitDays: flexNum(s.WaitDays)})
+		out = append(out, PlannedTask{Key: s.Key, Title: s.Title, Role: s.Role, Instructions: s.Instructions, Tools: s.Tools,
+			Deps: s.Deps, Verify: s.Verify, WaitDays: flexNum(s.WaitDays), MaxSteps: s.MaxSteps, Tool: s.Tool, Args: s.Args})
 	}
 	return out
 }
@@ -116,7 +121,20 @@ func validate(proposed []PlannedTask, existing map[string]int, lim Limits) (map[
 		if p.WaitDays < 0 || p.WaitDays > 60 {
 			return nil, fmt.Errorf("task %q waits %v days", p.Key, p.WaitDays)
 		}
-		if p.WaitDays == 0 && strings.TrimSpace(p.Instructions) == "" {
+		if p.Tool != "" {
+			// A tool task runs unattended, so it may only use a tool that
+			// needs nobody's approval.
+			tl, ok := tools.Get(p.Tool)
+			if !ok {
+				return nil, fmt.Errorf("task %q runs unknown tool %q", p.Key, p.Tool)
+			}
+			if tl.Gate != tools.G0 || tl.GateFor != nil {
+				return nil, fmt.Errorf("task %q: tool %q needs approval and cannot run as a tool task", p.Key, p.Tool)
+			}
+			if p.WaitDays != 0 {
+				return nil, fmt.Errorf("task %q cannot both run a tool and wait", p.Key)
+			}
+		} else if p.WaitDays == 0 && strings.TrimSpace(p.Instructions) == "" {
 			return nil, fmt.Errorf("task %q has no instructions", p.Key)
 		}
 		for _, t := range p.Tools {
@@ -176,10 +194,14 @@ func validate(proposed []PlannedTask, existing map[string]int, lim Limits) (map[
 func insertTasks(ctx context.Context, tx pgx.Tx, goalID string, planVersion int, ts []PlannedTask, depth map[string]int) error {
 	for _, p := range ts {
 		kind := "llm"
-		if p.WaitDays > 0 && p.Instructions == "" {
+		switch {
+		case p.Tool != "":
+			kind = "tool"
+		case p.WaitDays > 0 && p.Instructions == "":
 			kind = "wait"
 		}
-		spec, _ := json.Marshal(TaskSpec{Instructions: p.Instructions, Tools: p.Tools, Verify: p.Verify, WaitDays: float64(p.WaitDays)})
+		spec, _ := json.Marshal(TaskSpec{Role: p.Role, Instructions: p.Instructions, Tools: p.Tools, Verify: p.Verify,
+			WaitDays: float64(p.WaitDays), MaxSteps: p.MaxSteps, Tool: p.Tool, Args: p.Args})
 		if _, err := tx.Exec(ctx, `INSERT INTO tasks (goal_id, key, title, kind, spec, status, depth, plan_version)
 			VALUES ($1,$2,$3,$4,$5,'blocked',$6,$7) ON CONFLICT (goal_id, key) DO NOTHING`,
 			goalID, p.Key, p.Title, kind, spec, depth[p.Key], planVersion); err != nil {
@@ -226,6 +248,9 @@ func (p *Planner) Initial(ctx context.Context, g *Goal, t *Task) error {
 		sk, _ = skills.Get(skills.Fallback)
 	}
 	template := fromSkill(sk)
+	if sk.Fixed {
+		return p.instantiate(ctx, g, t, sk, template, "playbook used as written (a fixed playbook)")
+	}
 	tmplJSON, _ := json.MarshalIndent(template, "", " ")
 	var memories []string
 	if c, _ := p.Store.Client(ctx, g.UserID); c != nil && c.Prefs["memory_enabled"] != false {
@@ -260,6 +285,7 @@ Rules: keep every verify check and approval step the playbook has — never remo
 	}
 	if err == nil {
 		var reverted bool
+		plan.Tasks = keepTemplateFields(plan.Tasks, template)
 		if plan.Tasks, reverted = keepSafetySteps(plan.Tasks, template); reverted {
 			why = "playbook used as written (the tailored plan dropped a guard check)"
 		}
@@ -310,6 +336,71 @@ Rules: keep every verify check and approval step the playbook has — never remo
 		}
 		return eventTx(ctx, tx, g.UserID, g.ID, t.ID, "goal.planned", map[string]any{"tasks": keys, "why": why})
 	})
+}
+
+// instantiate writes a playbook as written: the goal keeps the title and
+// criteria it was created with (the skill's own when it has none).
+func (p *Planner) instantiate(ctx context.Context, g *Goal, t *Task, sk *skills.Skill, plan []PlannedTask, why string) error {
+	depth, err := validate(plan, map[string]int{}, g.Limits)
+	if err != nil {
+		return fmt.Errorf("playbook %s is invalid: %w", sk.Name, err)
+	}
+	crit := g.Criteria
+	if len(crit) == 0 {
+		crit = sk.Criteria
+	}
+	ms := g.Milestones
+	if len(ms) == 0 {
+		ms = sk.Milestones
+	}
+	return pgx.BeginFunc(ctx, p.Store.Pool, func(tx pgx.Tx) error {
+		if err := insertTasks(ctx, tx, g.ID, 1, plan, depth); err != nil {
+			return err
+		}
+		cj, _ := json.Marshal(crit)
+		mj, _ := json.Marshal(ms)
+		if _, err := tx.Exec(ctx, `UPDATE goals SET status='active', plan_version=1, completion_criteria=$2, milestones=$3, updated_at=now()
+			WHERE id=$1 AND status='planning'`, g.ID, cj, mj); err != nil {
+			return err
+		}
+		if err := completePlanTx(ctx, tx, t, map[string]any{"summary": fmt.Sprintf("Planned %d tasks. %s", len(plan), why)}); err != nil {
+			return err
+		}
+		if err := promoteTx(ctx, tx, g.ID); err != nil {
+			return err
+		}
+		titles := make([]string, len(plan))
+		for i, x := range plan {
+			titles[i] = x.Title
+		}
+		return eventTx(ctx, tx, g.UserID, g.ID, t.ID, "goal.planned", map[string]any{"tasks": titles, "why": why})
+	})
+}
+
+// keepTemplateFields carries what a model tends to drop when it rewrites a
+// step — its role, tool, arguments and step budget — over from the playbook
+// step with the same key.
+func keepTemplateFields(proposed, template []PlannedTask) []PlannedTask {
+	byKey := map[string]PlannedTask{}
+	for _, x := range template {
+		byKey[x.Key] = x
+	}
+	for i, x := range proposed {
+		tm, ok := byKey[x.Key]
+		if !ok {
+			continue
+		}
+		if x.Role == "" {
+			proposed[i].Role = tm.Role
+		}
+		if x.Tool == "" && tm.Tool != "" {
+			proposed[i].Tool, proposed[i].Args = tm.Tool, tm.Args
+		}
+		if x.MaxSteps == 0 {
+			proposed[i].MaxSteps = tm.MaxSteps
+		}
+	}
+	return proposed
 }
 
 // keepSafetySteps restores the guard verifiers the model dropped. A plan may
@@ -376,6 +467,15 @@ func (p *Planner) Replan(ctx context.Context, g *Goal, t *Task) error {
 			continue
 		}
 		fmt.Fprintf(&state, "- key=%s status=%s title=%q deps=%v", x.Key, x.Status, x.Title, x.Deps)
+		if x.Spec.Role != "" {
+			fmt.Fprintf(&state, " role=%s", x.Spec.Role)
+		}
+		if x.Spec.Tool != "" {
+			fmt.Fprintf(&state, " tool_step=%s", x.Spec.Tool)
+		}
+		if len(x.Spec.Verify) > 0 {
+			fmt.Fprintf(&state, " verify=%v", x.Spec.Verify)
+		}
 		if x.Error != "" {
 			fmt.Fprintf(&state, " error=%q", truncate(x.Error, 300))
 		}
@@ -418,7 +518,7 @@ ops: {"op":"retry","key","instructions","why"} re-run a failed/cancelled task wi
      {"op":"skip","key","why"} mark a blocked/failed task not needed so its dependents can proceed;
      {"op":"cancel","key","why"} drop a task that no longer serves the goal;
      {"op":"update","key","instructions","why"} change a task that has not started;
-     {"op":"add","task":{key,title,instructions,tools,deps,verify,wait_days},"why"} add a task (deps may name existing keys).
+     {"op":"add","task":{key,title,role,instructions,tools,deps,verify,wait_days,max_steps,tool,args},"why"} add a task (deps may name existing keys; role is who does it, e.g. one of the roles above; "tool"+"args" instead of instructions make a deterministic step that runs that one tool, like an existing tool step).
 Never skip or cancel a task that carries one of these guard checks while the goal still needs it: %v. Use goal_status "needs_attention" when only a person can unblock it (e.g. missing information from the player — then ask for it in message_to_player). Allowed tools: %v. At most %d new tasks.`,
 		t.Spec.Mode, t.Spec.Reason, g.Title, g.Objective, g.Criteria, state.String(), p.Store.History(ctx, g.ID, 15),
 		p.Store.RecentConversation(ctx, g.ConversationID, 6), persona.LangName(g.Language), guardNames(), allowed, g.Limits.MaxTasksPerPlan)
@@ -469,8 +569,8 @@ Never skip or cancel a task that carries one of these guard checks while the goa
 				continue
 			case x.Status == "succeeded" && (op.Op == "retry" || op.Op == "update") && op.Instructions != "":
 				nk := fmt.Sprintf("v%d-%s-redo", pv, x.Key)
-				adds = append(adds, PlannedTask{Key: nk, Title: x.Title, Instructions: op.Instructions,
-					Tools: x.Spec.Tools, Verify: x.Spec.Verify})
+				adds = append(adds, PlannedTask{Key: nk, Title: x.Title, Role: x.Spec.Role, Instructions: op.Instructions,
+					Tools: x.Spec.Tools, Verify: x.Spec.Verify, MaxSteps: x.Spec.MaxSteps, Tool: x.Spec.Tool, Args: x.Spec.Args})
 				continue
 			case x.Status == "succeeded":
 				dropped = append(dropped, fmt.Sprintf("op %d: %q already succeeded", i, op.Key))

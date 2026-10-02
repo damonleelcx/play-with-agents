@@ -105,7 +105,7 @@ func (s *Scheduler) Tick(ctx context.Context) {
 	// 2. Promotion safety net and 3. finish / failure pickup, per active goal.
 	goals, err := p.Query(ctx, `SELECT g.id, g.plan_version, g.replans,
 			count(*) FILTER (WHERE t.status IN ('blocked','ready','leased','waiting_approval')) AS open,
-			count(*) FILTER (WHERE t.status='failed' AND t.kind='llm') AS failed,
+			count(*) FILTER (WHERE t.status='failed' AND t.kind IN ('llm','tool')) AS failed,
 			count(*) FILTER (WHERE t.status='blocked') AS blocked
 		FROM goals g JOIN tasks t ON t.goal_id=g.id
 		WHERE g.status='active' GROUP BY g.id`)

@@ -22,6 +22,11 @@ type Verifier struct {
 	// and a replan may not skip or cancel a task that carries one. The
 	// studio's "playtest passed" check is a guard; "rules saved" is not.
 	Guard bool
+	// Final marks a verdict rather than a mistake: when it reports a
+	// problem the task fails at once, without asking the model to correct
+	// it (a critic asked to "fix" its own rejection would just flip it).
+	// The replanner decides what follows.
+	Final bool
 	Check func(ctx context.Context, s *Store, t *Task) []string
 }
 

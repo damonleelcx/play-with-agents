@@ -64,7 +64,7 @@ export default function Mission() {
   const approvals = g.approvals || []
   const live = g.status === 'active' || g.status === 'planning'
   const report = playtestReport(tasks, game)
-  const critic = [...tasks].reverse().find((x) => roleOf(x) === 'critic' && x.summary)
+  const critic = criticReview(game) || [...tasks].reverse().find((x) => roleOf(x) === 'critic' && x.summary)?.summary || ''
 
   return (
     <div className="page mission">
@@ -136,7 +136,7 @@ export default function Mission() {
           </section>
           <section className="side-card">
             <h3><RoleBadge role="critic" size={24} /> {t.mission.critic}</h3>
-            {critic ? <div className="prose sm" dangerouslySetInnerHTML={{ __html: md(critic.summary) }} /> : <p className="muted">{t.mission.noCritic}</p>}
+            {critic ? <div className="prose sm" dangerouslySetInnerHTML={{ __html: md(critic) }} /> : <p className="muted">{t.mission.noCritic}</p>}
           </section>
           <section className="side-card">
             <h3><IconClock size={16} /> {t.mission.next}</h3>
@@ -159,6 +159,16 @@ export default function Mission() {
       </div>
     </div>
   )
+}
+
+// The critic's review stored on the newest reviewed version (a "revise"
+// verdict fails its task, so the task summary alone would hide it).
+function criticReview(game: GameDetail | null): string {
+  for (const v of (game?.versions || []).slice().sort((a, b) => b.version - a.version)) {
+    const r: any = v.report
+    if (r && typeof r === 'object' && r.review && typeof r.review.markdown === 'string') return r.review.markdown
+  }
+  return ''
 }
 
 // The playtest report: the game's latest version report when there is one,

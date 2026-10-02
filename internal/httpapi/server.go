@@ -102,6 +102,7 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/goals/{id}/{action}", s.verified(s.goalAction))
 	m.HandleFunc("GET /api/approvals", s.verified(s.approvals))
 	m.HandleFunc("POST /api/approvals/{id}", s.verified(s.decide))
+	m.HandleFunc("POST /api/studio/build", s.limit("studio-build", studioBuildsPerMinute, s.verified(s.studioBuild)))
 
 	// Aoi's voice: GET says whether it exists; POST returns MP3.
 	m.HandleFunc("GET /api/speech", s.authed(s.speechStatus))

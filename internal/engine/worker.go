@@ -108,23 +108,34 @@ func (w *Worker) Execute(parent context.Context, t *Task) {
 	start := time.Now()
 
 	var out map[string]any
-	switch t.Kind {
-	case "plan":
+	handled := false
+	if h := planHook(g.Skill); h != nil && (t.Kind == "finish" || (t.Kind == "plan" && t.Spec.Mode != "initial")) {
+		handled, err = h(ctx, w.Planner, g, t)
+	}
+	switch {
+	case handled:
+	case err != nil:
+	case t.Kind == "plan":
 		switch t.Spec.Mode {
 		case "initial":
 			err = w.Planner.Initial(ctx, g, t)
 		default:
 			err = w.Planner.Replan(ctx, g, t)
 		}
-	case "finish":
+	case t.Kind == "finish":
 		err = w.Planner.Finish(ctx, g, t)
-	case "wait":
+	case t.Kind == "wait":
 		// A wait task is claimable only once its run_after passed; being here
 		// IS the wake-up.
 		err = w.Store.Complete(ctx, t, map[string]any{"summary": "waited " + fmt.Sprint(t.Spec.WaitDays) + " days"})
-	case "llm":
+	case t.Kind == "llm":
 		out, err = w.runLLM(ctx, g, t)
 		if err == nil && out != nil {
+			err = w.Store.Complete(ctx, t, out)
+		}
+	case t.Kind == "tool":
+		out, err = w.runTool(ctx, g, t)
+		if err == nil {
 			err = w.Store.Complete(ctx, t, out)
 		}
 	default:
@@ -148,7 +159,7 @@ func (w *Worker) settle(ctx, parent context.Context, g *Goal, t *Task, out map[s
 	var budget *ErrBudget
 	switch {
 	case err == nil:
-		if out != nil || t.Kind != "llm" {
+		if out != nil || (t.Kind != "llm" && t.Kind != "tool") {
 			data := map[string]any{"task": t.Title, "ms": took.Milliseconds()}
 			if sm, ok := out["summary"].(string); ok && sm != "" {
 				data["summary"] = truncate(sm, 300)
@@ -236,6 +247,15 @@ func (w *Worker) runLLM(ctx context.Context, g *Goal, t *Task) (map[string]any, 
 		}
 	}
 
+	role := lookupRole(t.Spec.Role)
+	model, temp := w.LLM, 0.3
+	if role != nil && role.Model != "" {
+		model = role.Model
+	}
+	if role != nil && role.Temperature > 0 {
+		temp = role.Temperature
+	}
+
 	cp, err := w.Store.LatestCheckpoint(ctx, t.ID)
 	if err != nil {
 		return nil, err
@@ -243,10 +263,19 @@ func (w *Worker) runLLM(ctx context.Context, g *Goal, t *Task) (map[string]any, 
 	var msgs []llm.Message
 	if cp == nil {
 		// Fresh start: the whole working context is rebuilt from the database.
-		msgs = []llm.Message{
-			{Role: "system", Content: persona.WorkerSystem(g.Language, time.Now())},
-			{Role: "user", Content: w.Store.BuildTaskContext(ctx, g, t, client)},
+		system := persona.WorkerSystem(g.Language, time.Now())
+		if role != nil && role.System != nil {
+			system = role.System(g, t)
 		}
+		var taskCtx string
+		if role != nil && role.Context != nil {
+			if taskCtx, err = role.Context(ctx, w.Store, g, t, client); err != nil {
+				return nil, err
+			}
+		} else {
+			taskCtx = w.Store.BuildTaskContext(ctx, g, t, client)
+		}
+		msgs = []llm.Message{{Role: "system", Content: system}, {Role: "user", Content: taskCtx}}
 		cp = &Checkpoint{}
 	} else {
 		msgs = decodeMessages(cp.Messages)
@@ -301,7 +330,7 @@ func (w *Worker) runLLM(ctx context.Context, g *Goal, t *Task) (map[string]any, 
 			msgs = append(msgs, llm.Message{Role: "user", Content: note})
 		}
 		resp, err := w.Model.Chat(ctx, CallMeta{Purpose: "task", UserID: g.UserID, GoalID: g.ID, TaskID: t.ID, CountIteration: true},
-			llm.Request{Model: w.LLM, Messages: msgs, Tools: stepDefs, Temperature: 0.3})
+			llm.Request{Model: model, Messages: msgs, Tools: stepDefs, Temperature: temp})
 		if err != nil {
 			return nil, err
 		}
@@ -311,10 +340,14 @@ func (w *Worker) runLLM(ctx context.Context, g *Goal, t *Task) (map[string]any, 
 
 		if len(msg.ToolCalls) == 0 {
 			// The model says it is done. Verify before believing it.
-			problems := w.verifyStep(ctx, t)
+			problems, final := w.verifyStep(ctx, t)
 			if len(problems) == 0 {
 				w.Store.Event(ctx, g.UserID, g.ID, t.ID, "task.verified", map[string]any{"task": t.Title, "checks": t.Spec.Verify})
 				return map[string]any{"summary": truncate(msg.Content, 4000)}, nil
+			}
+			if final {
+				// A verdict, not a slip: no correction round.
+				return nil, fmt.Errorf("%w: %s", errPermanentTask, strings.Join(problems, "; "))
 			}
 			if cp.Verifier >= 2 {
 				return nil, fmt.Errorf("%w: verification still failing after corrections: %s", errPermanentTask, strings.Join(problems, "; "))
@@ -395,17 +428,61 @@ func (w *Worker) checkGoal(ctx context.Context, goalID string) error {
 // account of what it did. An unknown verifier is a problem, not a pass: the
 // planner validated the name, so it can only be unknown here if the process
 // running this task lacks a registration the planner had — fail closed.
-func (w *Worker) verifyStep(ctx context.Context, t *Task) []string {
-	var problems []string
+//
+// final reports that a failing check is a Final verdict (no corrections).
+func (w *Worker) verifyStep(ctx context.Context, t *Task) (problems []string, final bool) {
 	for _, name := range t.Spec.Verify {
 		v, ok := lookupVerifier(name)
 		if !ok {
 			problems = append(problems, fmt.Sprintf("verifier %q is not available in this worker", name))
 			continue
 		}
-		problems = append(problems, v.Check(ctx, w.Store, t)...)
+		p := v.Check(ctx, w.Store, t)
+		if len(p) > 0 && v.Final {
+			final = true
+		}
+		problems = append(problems, p...)
 	}
-	return problems
+	return problems, final
+}
+
+// runTool executes a deterministic tool task: one tool, fixed arguments, no
+// model. Its checks run exactly as for a model task, but there is nobody to
+// correct anything, so a failing check fails the task and the replanner
+// decides what follows.
+func (w *Worker) runTool(ctx context.Context, g *Goal, t *Task) (map[string]any, error) {
+	if err := w.checkGoal(ctx, g.ID); err != nil {
+		return nil, err
+	}
+	client, err := w.Store.Client(ctx, g.UserID)
+	if err != nil {
+		return nil, err
+	}
+	env := &tools.Env{Pool: w.Store.Pool, Mailer: w.Mailer, UserID: g.UserID, UserEmail: client.Email,
+		UserName: client.Name, GoalID: g.ID, TaskID: t.ID, ConversationID: g.ConversationID, Lang: g.Language}
+	args, _ := json.Marshal(t.Spec.Args)
+	if t.Spec.Args == nil {
+		args = []byte("{}")
+	}
+	_ = w.Store.AddUsage(ctx, g.ID, Usage{ToolCalls: 1})
+	res, err := tools.Invoke(ctx, env, t.Spec.Tool, args, false)
+	w.Store.Event(ctx, g.UserID, g.ID, t.ID, "tool.called", map[string]any{"tool": t.Spec.Tool, "error": errText(err)})
+	var inv *tools.InvalidInput
+	var need *tools.NeedsApproval
+	switch {
+	case err == nil:
+	case errors.As(err, &inv), errors.As(err, &need), errors.Is(err, tools.ErrBlocked):
+		return nil, fmt.Errorf("%w: %v", errPermanentTask, err)
+	default:
+		return nil, err // transient: the task retries
+	}
+	if problems, _ := w.verifyStep(ctx, t); len(problems) > 0 {
+		w.Store.Event(ctx, g.UserID, g.ID, t.ID, "task.verify_failed", map[string]any{"task": t.Title, "why": strings.Join(problems, "; ")})
+		return nil, fmt.Errorf("%w: %s", errPermanentTask, strings.Join(problems, "; "))
+	}
+	w.Store.Event(ctx, g.UserID, g.ID, t.ID, "task.verified", map[string]any{"task": t.Title, "checks": t.Spec.Verify})
+	out := map[string]any{"summary": summariseOutput(res.Output, 4000)}
+	return out, nil
 }
 
 func allowed(list []string, name string) bool {
