@@ -131,6 +131,12 @@ without hints render as buttons. A `range` renders as a slider + input.
 
 Player colours `p0..p7`: `#4f8cff #ff5d73 #ffc04d #3ddc97 #b07cff #ff8f40 #3fd2ff #e6e6e6`.
 
+### Event and status text
+
+Games never know player names. `Event.Text` and `View.Status` refer to seats
+as `{s:N}` (e.g. `"{s:2} raises to 120"`); the rooms service substitutes display
+names before anything reaches a client or an agent prompt.
+
 ## Texas Hold'em (`internal/games/holdem`, id `holdem`)
 
 No-limit hold'em, 2 to 9 seats, play-money chips. Options (defaults):
