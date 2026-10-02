@@ -19,10 +19,17 @@ import (
 
 // Limits on table talk.
 const (
-	maxChatRunes   = 300 // a person's line
-	maxAgentRunes  = 140 // an agent's line
-	agentGap       = 6 * time.Second
-	agentPer10Min  = 20
+	maxChatRunes  = 300 // a person's line
+	maxAgentRunes = 140 // an agent's line
+	agentGap      = 6 * time.Second
+	agentPer10Min = 20 // every agent line, replies to @mentions included
+	// Unprompted lines (reactions to play, greetings, replies nobody asked
+	// for) have a tighter table-wide cap, and each agent a cooldown that
+	// grows the quieter its persona is (agentCooldown).
+	agentUnpromptedPer10Min = 8
+	agentCooldownBase       = 45 * time.Second
+	// Lines remembered per agent to avoid repeating itself.
+	ownLines       = 5
 	humanBurst     = 5 // lines per 10 seconds
 	humanPerMinute = 20
 	// A line meant as a reaction is pointless once the moment has passed.
@@ -34,6 +41,9 @@ type talkJob struct {
 	Seat    int    `json:"seat"`
 	Trigger string `json:"trigger"`
 	About   string `json:"about"`
+	// Mention: a person addressed this agent by name. Such replies skip the
+	// per-agent cooldown and the unprompted cap (not the table gap).
+	Mention bool `json:"mention,omitempty"`
 	// key overrides the job's state_version in the idempotency key: replies
 	// to a person use -chat_id, so each message gets at most one reply per
 	// agent, independent of the table version.
@@ -66,9 +76,18 @@ func talkDelay() time.Duration {
 	return time.Duration((0.8 + rand.Float64()*1.7) * float64(time.Second))
 }
 
+// triggerSmallPot is internal: a pot under smallPotBlinds big blinds. It is
+// said out loud as a win (or loss), but only ever at the lowest rate.
+const (
+	triggerSmallPot = "small_pot"
+	smallPotBlinds  = 10
+	bigPotBlinds    = 15
+)
+
 // classify names the table-talk trigger an event is, if any. Only public
-// events are considered: talk must never be prompted by a hidden one.
-func classify(e games.Event, bigPot float64) string {
+// events are considered: talk must never be prompted by a hidden one. bb is
+// the big blind of the hand (0 for games without blinds).
+func classify(e games.Event, bb float64) string {
 	if len(e.Only) > 0 {
 		return ""
 	}
@@ -79,8 +98,13 @@ func classify(e games.Event, bigPot float64) string {
 	case strings.Contains(t, "allin"), strings.Contains(t, "all_in"):
 		return agents.TriggerAllIn
 	case strings.Contains(t, "win"), strings.Contains(t, "won"), strings.Contains(t, "showdown"):
-		if amt, ok := number(e.Data["amount"]); ok && bigPot > 0 && amt >= bigPot {
-			return agents.TriggerBigPot
+		if amt, ok := number(e.Data["amount"]); ok && bb > 0 {
+			switch {
+			case amt >= bigPotBlinds*bb:
+				return agents.TriggerBigPot
+			case amt < smallPotBlinds*bb:
+				return triggerSmallPot
+			}
 		}
 		return agents.TriggerWin
 	}
@@ -109,12 +133,61 @@ var triggerWeight = map[string]float64{
 	agents.TriggerBust:     0.8,
 	agents.TriggerAllIn:    0.6,
 	agents.TriggerBigPot:   0.55,
-	agents.TriggerWin:      0.35,
+	agents.TriggerWin:      0.3,
 	agents.TriggerJoin:     0.7,
+	triggerSmallPot:        0.04,
 }
 
 var triggerRank = map[string]int{
-	agents.TriggerGameOver: 5, agents.TriggerBust: 4, agents.TriggerAllIn: 3, agents.TriggerBigPot: 2, agents.TriggerWin: 1,
+	agents.TriggerGameOver: 6, agents.TriggerBust: 5, agents.TriggerAllIn: 4, agents.TriggerBigPot: 3, agents.TriggerWin: 2,
+	triggerSmallPot: 1,
+}
+
+// talkiness turns a persona's Talk (0..1) into a rate multiplier. Squared,
+// so the quiet agents are rare rather than merely less frequent: Ren (0.2)
+// speaks ~20x less often than Mika (0.9), not 4.5x.
+func talkiness(talk float64) float64 { return talk * talk }
+
+// agentCooldown is how long an agent stays quiet after its own line:
+// 45s for the chattiest, about 2.5 minutes for the quietest.
+func agentCooldown(talk float64) time.Duration {
+	talk = min(max(talk, 0), 1)
+	return time.Duration(float64(agentCooldownBase) * (1 + 3*(1-talk)))
+}
+
+// pickSpeaker chooses a bystander to react, weighted by talkiness.
+func pickSpeaker(ags []seatRow) seatRow {
+	total := 0.0
+	for _, a := range ags {
+		total += talkiness(agents.Persona(a.AgentID, "").Talk)
+	}
+	x := rand.Float64() * total
+	for _, a := range ags {
+		x -= talkiness(agents.Persona(a.AgentID, "").Talk)
+		if x < 0 {
+			return a
+		}
+	}
+	return ags[len(ags)-1]
+}
+
+// bigBlind is the big blind of the hand a transition ended, from the old
+// state's public view, else the table options. 0 when the game has none.
+func (s *Service) bigBlind(g games.Game, st games.State, options map[string]any) float64 {
+	if st != nil {
+		if v, err := g.View(st, games.Spectator); err == nil {
+			if raw, err := json.Marshal(v.Data); err == nil {
+				var d struct {
+					BigBlind float64 `json:"big_blind"`
+				}
+				if json.Unmarshal(raw, &d) == nil && d.BigBlind > 0 {
+					return d.BigBlind
+				}
+			}
+		}
+	}
+	bb, _ := number(options["big_blind"])
+	return bb
 }
 
 // talkAfter decides whether an agent says something about a transition: at
@@ -123,16 +196,13 @@ var triggerRank = map[string]int{
 func (s *Service) talkAfter(t *tableRow, evs []games.Event, st games.State, g games.Game) []talkJob {
 	factor := talkFactor(t.Settings.TableTalk)
 	ags := agentSeats(t)
-	if factor == 0 || len(ags) == 0 {
+	if factor == 0 || len(ags) == 0 || t.PausedAt != nil || allAway(t) {
 		return nil
 	}
-	bigPot := 0.0
-	if bb, ok := number(t.Options["big_blind"]); ok {
-		bigPot = 15 * bb
-	}
+	bb := s.bigBlind(g, t.State, t.Options)
 	trigger, about, seat := "", "", -1
 	for _, e := range evs {
-		tr := classify(e, bigPot)
+		tr := classify(e, bb)
 		if tr != "" && triggerRank[tr] > triggerRank[trigger] {
 			trigger, about, seat = tr, e.Text, e.Seat
 		}
@@ -145,10 +215,19 @@ func (s *Service) talkAfter(t *tableRow, evs []games.Event, st games.State, g ga
 	}
 	// The agent the event is about speaks for itself; otherwise a random
 	// agent reacts, and first-person lines are reframed for a bystander.
-	speaker := ags[rand.IntN(len(ags))]
+	// The weight is fixed by what happened, before it is reframed below.
+	p := triggerWeight[trigger]
+	if p == 0 {
+		p = 0.3
+	}
+	if trigger == triggerSmallPot {
+		trigger = agents.TriggerWin
+	}
+	var speaker seatRow
 	if sr := t.seat(seat); sr != nil && sr.Kind == "agent" {
 		speaker = *sr
 	} else {
+		speaker = pickSpeaker(ags)
 		switch trigger {
 		case agents.TriggerWin, agents.TriggerBigPot:
 			trigger = agents.TriggerLoss
@@ -156,11 +235,7 @@ func (s *Service) talkAfter(t *tableRow, evs []games.Event, st games.State, g ga
 			trigger = agents.TriggerBanter
 		}
 	}
-	p := triggerWeight[trigger]
-	if p == 0 {
-		p = 0.35
-	}
-	if rand.Float64() >= p*agents.Persona(speaker.AgentID, "").Talk*factor*1.6 {
+	if rand.Float64() >= p*talkiness(agents.Persona(speaker.AgentID, "").Talk)*factor*1.5 {
 		return nil
 	}
 	return []talkJob{{Seat: speaker.Seat, Trigger: trigger, About: Subst(about, t.names()), delay: talkDelay()}}
@@ -173,8 +248,8 @@ func (s *Service) talkJoin(t *tableRow, name string) []talkJob {
 	if factor == 0 || len(ags) == 0 {
 		return nil
 	}
-	sp := ags[rand.IntN(len(ags))]
-	if rand.Float64() >= triggerWeight[agents.TriggerJoin]*factor*(0.5+agents.Persona(sp.AgentID, "").Talk) {
+	sp := pickSpeaker(ags)
+	if rand.Float64() >= triggerWeight[agents.TriggerJoin]*factor*(0.3+agents.Persona(sp.AgentID, "").Talk) {
 		return nil
 	}
 	return []talkJob{{Seat: sp.Seat, Trigger: agents.TriggerJoin, About: name + " joined the table", delay: talkDelay()}}
@@ -284,18 +359,20 @@ func (s *Service) talkReply(t *tableRow, text string, chatID int64) *talkJob {
 		return nil
 	}
 	sp := mentioned(t, text)
+	mention := sp != nil
 	if sp == nil {
 		ags := agentSeats(t)
 		if len(ags) == 0 {
 			return nil
 		}
 		pick := ags[rand.IntN(len(ags))]
-		if rand.Float64() >= 0.35*agents.Persona(pick.AgentID, "").Talk*factor {
+		if rand.Float64() >= 0.35*talkiness(agents.Persona(pick.AgentID, "").Talk)*factor {
 			return nil
 		}
 		sp = &pick
 	}
-	return &talkJob{Seat: sp.Seat, Trigger: agents.TriggerReply, About: clip(text, maxChatRunes), key: -chatID, delay: talkDelay()}
+	return &talkJob{Seat: sp.Seat, Trigger: agents.TriggerReply, About: clip(text, maxChatRunes), Mention: mention,
+		key: -chatID, delay: talkDelay()}
 }
 
 func notifyChat(ctx context.Context, tx pgx.Tx, tableID string, line ChatLine) error {
@@ -328,16 +405,29 @@ func (s *Service) chatJob(ctx context.Context, j *job) error {
 	if t.Status == "abandoned" || seat == nil || seat.Kind != "agent" || talkFactor(t.Settings.TableTalk) == 0 {
 		return s.finish(ctx, j, "done", "stale")
 	}
-	if limited, err := s.agentRateLimited(ctx, t.ID); err != nil || limited {
+	// Nobody is there to hear it: no model call for a paused table, and only
+	// a direct question gets an answer while every person is away.
+	if t.Status == "playing" && (t.PausedAt != nil || (allAway(t) && !tj.Mention)) {
+		return s.finish(ctx, j, "done", "nobody listening")
+	}
+	if limited, err := s.agentRateLimited(ctx, t.ID, tj.Mention); err != nil || limited {
 		if err != nil {
 			return err
 		}
 		return s.finish(ctx, j, "done", "rate limited")
 	}
+	own, last, err := s.agentHistory(ctx, t.ID, seat.Seat)
+	if err != nil {
+		return err
+	}
+	if !tj.Mention && !last.IsZero() && time.Since(last) < agentCooldown(agents.Persona(seat.AgentID, "").Talk) {
+		return s.finish(ctx, j, "done", "cooling down")
+	}
 	req, public, err := s.chatRequest(ctx, t, *seat, tj)
 	if err != nil {
 		return err
 	}
+	req.Own = own
 	text := ""
 	if s.Chatter != nil {
 		cctx, cancel := context.WithTimeout(ctx, 8*time.Second)
@@ -348,8 +438,15 @@ func (s *Service) chatJob(ctx context.Context, j *job) error {
 		}
 	}
 	text = sanitizeLine(text, seat.Name, t.names(), public)
+	if text != "" && repeatsOwn(text, own) {
+		// Saying nothing beats a catchphrase on loop (or a canned line).
+		return s.finish(ctx, j, "done", "repetitive")
+	}
 	if text == "" {
 		text = agents.Fallback(seat.AgentID, tj.Trigger, t.Settings.Language, fmt.Sprintf("%s:%d", t.ID, j.ID))
+		if repeatsOwn(text, own) {
+			return s.finish(ctx, j, "done", "repetitive")
+		}
 	}
 	err = pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
 		// One agent line at a time per table: the limit check and the insert
@@ -357,7 +454,7 @@ func (s *Service) chatJob(ctx context.Context, j *job) error {
 		if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext('agentchat:' || $1))`, t.ID); err != nil {
 			return err
 		}
-		if limited, err := agentRateLimitedTx(ctx, tx, t.ID); err != nil || limited {
+		if limited, err := agentRateLimitedTx(ctx, tx, t.ID, tj.Mention); err != nil || limited {
 			if err == nil {
 				err = ErrRateLimit
 			}
@@ -387,22 +484,53 @@ func (s *Service) chatJob(ctx context.Context, j *job) error {
 	return err
 }
 
-func (s *Service) agentRateLimited(ctx context.Context, tableID string) (bool, error) {
-	return agentRateLimitedQ(ctx, s.Pool, tableID)
+func (s *Service) agentRateLimited(ctx context.Context, tableID string, mention bool) (bool, error) {
+	return agentRateLimitedQ(ctx, s.Pool, tableID, mention)
 }
 
-func agentRateLimitedTx(ctx context.Context, tx pgx.Tx, tableID string) (bool, error) {
-	return agentRateLimitedQ(ctx, tx, tableID)
+func agentRateLimitedTx(ctx context.Context, tx pgx.Tx, tableID string, mention bool) (bool, error) {
+	return agentRateLimitedQ(ctx, tx, tableID, mention)
 }
 
-// agentRateLimitedQ: at most one agent line per agentGap and agentPer10Min
-// per ten minutes, per table, so agents never drown the people out.
-func agentRateLimitedQ(ctx context.Context, q querier, tableID string) (bool, error) {
+// agentRateLimitedQ: at most one agent line per agentGap per table, and per
+// ten minutes agentPer10Min lines in all or agentUnpromptedPer10Min for a
+// line nobody asked for, so agents never drown the people out.
+func agentRateLimitedQ(ctx context.Context, q querier, tableID string, mention bool) (bool, error) {
 	var recent, window int
 	err := q.QueryRow(ctx, `SELECT count(*) FILTER (WHERE at > now() - make_interval(secs => $2::float8)), count(*)
 		FROM table_chat WHERE table_id=$1 AND agent_id IS NOT NULL AND at > now() - interval '10 minutes'`,
 		tableID, agentGap.Seconds()).Scan(&recent, &window)
-	return recent > 0 || window >= agentPer10Min, err
+	limit := agentUnpromptedPer10Min
+	if mention {
+		limit = agentPer10Min
+	}
+	return recent > 0 || window >= limit, err
+}
+
+// agentHistory is the agent seat's last ownLines lines at the table, oldest
+// first, and when it last spoke (zero if never).
+func (s *Service) agentHistory(ctx context.Context, tableID string, seat int) ([]string, time.Time, error) {
+	rows, err := s.Pool.Query(ctx, `SELECT text, at FROM table_chat WHERE table_id=$1 AND seat=$2 AND agent_id IS NOT NULL
+		ORDER BY id DESC LIMIT $3`, tableID, seat, ownLines)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	defer rows.Close()
+	var lines []string
+	var last time.Time
+	for rows.Next() {
+		var text string
+		var at time.Time
+		if err := rows.Scan(&text, &at); err != nil {
+			return nil, time.Time{}, err
+		}
+		if last.IsZero() {
+			last = at
+		}
+		lines = append(lines, text)
+	}
+	reverse(lines)
+	return lines, last, rows.Err()
 }
 
 // chatRequest assembles what the Chatter sees: the SPECTATOR view only, so

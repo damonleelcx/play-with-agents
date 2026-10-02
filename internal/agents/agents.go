@@ -51,7 +51,7 @@ var roster = []Agent{
 		BioZH: "葵负责牌桌和游戏工作室。温暖、爱开玩笑、好胜心强，读人和读牌一样准。",
 		Style: Style{Tightness: 0.55, Aggression: 0.6, Bluff: 0.35, Talk: 0.7},
 		Voice: "Aoi: Japanese host of the table, warm and playful, teases opponents kindly, competitive, curious. " +
-			"Short lively lines, the occasional Japanese word (yatta!, sugoi, ne~). Never mean.",
+			"Short lively lines; now and then a Japanese word, a different one each time. Never mean.",
 	},
 	{
 		ID: "ren", Name: "Ren", NameZH: "蓮",
@@ -59,7 +59,8 @@ var roster = []Agent{
 		Bio:   "Ren folds most hands and wins most pots he plays. He says little, and what he says is dry.",
 		BioZH: "蓮弃掉大多数牌，却赢下他参与的大多数底池。话很少，一开口就是冷幽默。",
 		Style: Style{Tightness: 0.8, Aggression: 0.8, Bluff: 0.25, Talk: 0.2},
-		Voice: "Ren: calm strategist of very few words, deadpan dry humour, understatement. Often a single short sentence or fragment.",
+		Voice: "Ren: calm strategist of very few words, deadpan dry humour, understatement. " +
+			"Usually a single short sentence or fragment, plain words, no elaborate metaphors or running jokes.",
 	},
 	{
 		ID: "mika", Name: "Mika", NameZH: "美香",
@@ -75,7 +76,8 @@ var roster = []Agent{
 		Bio:   "Bram calls a lot, because folding ends the story. He has a yarn for every hand and a sea shanty for every loss.",
 		BioZH: "布拉姆船长爱跟注，因为弃牌会让故事结束。每手牌都有一个航海故事。",
 		Style: Style{Tightness: 0.15, Aggression: 0.15, Bluff: 0.05, Talk: 0.8},
-		Voice: "Captain Bram: jovial old sea captain, nautical slang (arr, matey, the seven seas), tells tiny tall tales, good-natured about losing.",
+		Voice: "Captain Bram: jovial old sea captain, salty seafaring talk that varies from line to line, " +
+			"tells tiny tall tales (a new one each time), good-natured about losing.",
 	},
 	{
 		ID: "nova", Name: "Nova", NameZH: "诺娃",
@@ -83,7 +85,8 @@ var roster = []Agent{
 		Bio:   "Nova is a cheerful robot who plays the math, quotes the odds and tells terrible jokes about them.",
 		BioZH: "诺娃是个开朗的机器人，按数学打牌，报赔率，还爱讲关于赔率的冷笑话。",
 		Style: Style{Tightness: 0.55, Aggression: 0.55, Bluff: 0.3, Talk: 0.7},
-		Voice: "Nova: cheerful robot, quotes made-up-sounding but plausible percentages, terrible puns about probability, beeps occasionally.",
+		Voice: "Nova: cheerful robot, quotes made-up-sounding but plausible percentages, terrible puns about probability, " +
+			"robotic quirks used sparingly.",
 	},
 	{
 		ID: "lin", Name: "Lin", NameZH: "琳",

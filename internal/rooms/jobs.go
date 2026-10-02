@@ -199,7 +199,7 @@ func (s *Service) playJob(ctx context.Context, j *job) error {
 	}
 	seat := t.seat(j.Seat)
 	want := map[string]string{"agent_move": "agent", "turn_timeout": "human"}[j.Kind]
-	if t.Status != "playing" || t.Version != j.StateVersion || seat == nil || seat.Kind != want || !contains(t.ToMove, j.Seat) {
+	if t.Status != "playing" || t.PausedAt != nil || t.Version != j.StateVersion || seat == nil || seat.Kind != want || !contains(t.ToMove, j.Seat) {
 		return s.finish(ctx, j, "done", "stale")
 	}
 	g, err := s.Game(ctx, t.GameID, t.GameVersion)
@@ -314,7 +314,8 @@ func isListed(legal []games.MoveSpec, m games.Move) bool {
 // ── Sweep ───────────────────────────────────────────────────────────────────
 
 // Sweep reclaims expired leases (the worker died or hung), abandons tables
-// with no human activity for IdleAfter, and prunes old finished jobs. Every
+// with no human activity for IdleAfter, pauses tables nobody is attending
+// (away.go), and prunes old finished jobs. Every
 // statement is idempotent, so all worker processes may run it.
 func (s *Service) Sweep(ctx context.Context) (reclaimed, abandoned int, err error) {
 	tag, err := s.Pool.Exec(ctx, `UPDATE table_jobs SET
@@ -352,6 +353,11 @@ func (s *Service) Sweep(ctx context.Context) (reclaimed, abandoned int, err erro
 		_, _ = s.Pool.Exec(ctx, `UPDATE table_jobs SET status='done', result='table abandoned', finished_at=now()
 			WHERE table_id=$1 AND status='ready'`, id)
 		_, _ = s.Pool.Exec(ctx, `SELECT pg_notify($1, $2)`, NotifyChannel, id)
+	}
+	if n, err := s.pauseIdle(ctx); err != nil {
+		return reclaimed, len(ids), err
+	} else if n > 0 {
+		slog.Info("rooms: paused idle tables", "n", n)
 	}
 	_, _ = s.Pool.Exec(ctx, `DELETE FROM table_jobs WHERE status IN ('done','failed') AND finished_at < now() - interval '1 day'`)
 	return reclaimed, len(ids), nil

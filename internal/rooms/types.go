@@ -73,6 +73,9 @@ type SeatView struct {
 	Avatar  string `json:"avatar"`
 	AgentID string `json:"agent_id,omitempty"`
 	IsMe    bool   `json:"is_me"`
+	// Away: the person missed their clock repeatedly; their turns now
+	// resolve quickly with the default move until they act or come back.
+	Away bool `json:"away,omitempty"`
 }
 
 type LogEntry struct {
@@ -115,6 +118,10 @@ type TableView struct {
 	// RematchID is set once the host started a rematch, so everyone at the
 	// old table can follow. An additive field to the contract.
 	RematchID string `json:"rematch_id,omitempty"`
+	// Paused: nobody is attending the table (everyone away, or no activity
+	// for a while). Status stays "playing"; nothing happens until a person
+	// moves or posts /back.
+	Paused bool `json:"paused"`
 }
 
 type TableSummary struct {
@@ -157,6 +164,9 @@ type ChatRequest struct {
 	About     string // the triggering event or message, names substituted
 	Table     string // public summary of the table
 	Recent    []ChatLine
+	// Own is this agent's own last few lines at the table, oldest first, so
+	// the Chatter can avoid repeating itself.
+	Own []string
 }
 
 // Chatter writes one line of table talk in an agent's voice.

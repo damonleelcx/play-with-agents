@@ -39,6 +39,7 @@ func (s *Server) tableRoutes(m *http.ServeMux) {
 	m.HandleFunc("POST /api/tables/{id}/moves", s.limit("table-move", 240, s.verified(s.postMove)))
 	m.HandleFunc("POST /api/tables/{id}/chat", s.limit("table-chat", 40, s.verified(s.postTableChat)))
 	m.HandleFunc("POST /api/tables/{id}/leave", s.authed(s.leaveTable))
+	m.HandleFunc("POST /api/tables/{id}/back", s.limit("table-back", 60, s.authed(s.backTable)))
 	m.HandleFunc("POST /api/tables/{id}/rematch", s.limit("table-create", 20, s.verified(s.rematch)))
 	m.HandleFunc("GET /api/tables/{id}/stream", s.authed(s.tableStream))
 }
@@ -223,6 +224,17 @@ func (s *Server) postTableChat(w http.ResponseWriter, r *http.Request, u *auth.U
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// backTable is "I'm back": clears the caller's away mark and resumes a
+// paused table.
+func (s *Server) backTable(w http.ResponseWriter, r *http.Request, u *auth.User) {
+	v, err := s.Rooms.Back(r.Context(), u.ID, r.PathValue("id"))
+	if err != nil {
+		roomsErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, v)
 }
 
 func (s *Server) leaveTable(w http.ResponseWriter, r *http.Request, u *auth.User) {

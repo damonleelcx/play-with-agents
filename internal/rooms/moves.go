@@ -30,6 +30,7 @@ type change struct {
 	spectate string    // user to add as spectator
 	unwatch  string    // user to remove from spectators
 	talk     []talkJob // agent table talk to enqueue
+	back     *int      // a person at this seat said "I'm back": clear away
 	extra    func(ctx context.Context, tx pgx.Tx, version int64) error
 }
 
@@ -67,16 +68,28 @@ func (s *Service) commit(ctx context.Context, t *tableRow, c change) (int64, err
 	if c.seats != nil {
 		seats = c.seats
 	}
+	// Away bookkeeping happens before scheduling, so the next turn of a
+	// person who just went away already runs on the short grace.
+	seats, touched := s.updateAway(seats, c)
 	kindOf := map[int]string{}
+	awayOf := map[int]bool{}
 	for _, st := range seats {
 		kindOf[st.Seat] = st.Kind
+		awayOf[st.Seat] = st.away()
 	}
 	// The clock only runs for people: agents are paced by their think delay.
-	clock := 0
+	// An away person's turn only waits the grace before the default move.
+	clock := 0.0
+	grace := s.awayGrace()
 	if status == "playing" && t.Settings.TurnSeconds > 0 {
 		for _, seat := range toMove {
-			if kindOf[seat] == "human" {
-				clock = t.Settings.TurnSeconds
+			if kindOf[seat] != "human" {
+				continue
+			}
+			if awayOf[seat] {
+				clock = max(clock, grace.Seconds())
+			} else {
+				clock = max(clock, float64(t.Settings.TurnSeconds))
 			}
 		}
 	}
@@ -105,7 +118,8 @@ func (s *Service) commit(ctx context.Context, t *tableRow, c change) (int64, err
 		var moveSeq, eventSeq int
 		var deadline *time.Time
 		err := tx.QueryRow(ctx, `UPDATE tables SET state=$2, version=version+1, status=$3, to_move=$4,
-				deadline = CASE WHEN $5::int > 0 THEN now() + make_interval(secs => $5::int) ELSE NULL END,
+				deadline = CASE WHEN $5::float8 > 0 THEN now() + make_interval(secs => $5::float8) ELSE NULL END,
+				paused_at = NULL,
 				outcome=$6, move_seq=move_seq+$7, event_seq=event_seq+$8,
 				last_human_at = CASE WHEN $9 THEN now() ELSE last_human_at END,
 				started_at = CASE WHEN $3 = 'playing' THEN coalesce(started_at, now()) ELSE started_at END,
@@ -126,8 +140,17 @@ func (s *Service) commit(ctx context.Context, t *tableRow, c change) (int64, err
 				return err
 			}
 			for _, st := range c.seats {
-				if _, err := tx.Exec(ctx, `INSERT INTO table_seats (table_id, seat, kind, user_id, agent_id, name)
-					VALUES ($1, $2, $3, nullif($4,'')::uuid, nullif($5,''), $6)`, t.ID, st.Seat, st.Kind, st.UserID, st.AgentID, st.Name); err != nil {
+				if _, err := tx.Exec(ctx, `INSERT INTO table_seats (table_id, seat, kind, user_id, agent_id, name, timeouts, away_since)
+					VALUES ($1, $2, $3, nullif($4,'')::uuid, nullif($5,''), $6, $7, $8)`,
+					t.ID, st.Seat, st.Kind, st.UserID, st.AgentID, st.Name, st.Timeouts, st.AwaySince); err != nil {
+					return err
+				}
+			}
+		} else {
+			for _, st := range touched {
+				if _, err := tx.Exec(ctx, `UPDATE table_seats SET timeouts=$3,
+						away_since = CASE WHEN $4 THEN coalesce(away_since, now()) ELSE NULL END
+					WHERE table_id=$1 AND seat=$2`, t.ID, st.Seat, st.Timeouts, st.AwaySince != nil); err != nil {
 					return err
 				}
 			}
@@ -193,10 +216,16 @@ func (s *Service) commit(ctx context.Context, t *tableRow, c change) (int64, err
 						return err
 					}
 				case "human":
-					if deadline != nil {
-						if err := enqueueAt(ctx, tx, t.ID, "turn_timeout", seat, newVersion, *deadline, nil); err != nil {
-							return err
-						}
+					if deadline == nil {
+						break
+					}
+					if awayOf[seat] {
+						err = enqueue(ctx, tx, t.ID, "turn_timeout", seat, newVersion, grace, nil)
+					} else {
+						err = enqueueAt(ctx, tx, t.ID, "turn_timeout", seat, newVersion, *deadline, nil)
+					}
+					if err != nil {
+						return err
 					}
 				}
 			}

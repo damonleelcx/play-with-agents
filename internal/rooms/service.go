@@ -54,6 +54,12 @@ type Service struct {
 	// IdleAfter is how long without human activity before a table is
 	// abandoned (default 2h).
 	IdleAfter time.Duration
+	// PauseAfter is how long every person at a playing table may be away, or
+	// nobody may do anything, before it is paused (default 15m).
+	PauseAfter time.Duration
+	// AwayGrace is how long an away person's turn waits before the default
+	// move (default 1.5s).
+	AwayGrace time.Duration
 
 	hub   *Hub
 	wake  chan struct{}
@@ -119,7 +125,13 @@ type seatRow struct {
 	UserID  string
 	AgentID string
 	Name    string
+	// Timeouts counts the person's consecutive clock run-outs; AwaySince is
+	// set once they reach awayAfter (see away.go).
+	Timeouts  int
+	AwaySince *time.Time
 }
+
+func (st seatRow) away() bool { return st.Kind == "human" && st.AwaySince != nil }
 
 type tableRow struct {
 	ID, Code, Name, HostID string
@@ -136,6 +148,7 @@ type tableRow struct {
 	Deadline               *time.Time
 	Outcome                *games.Outcome
 	RematchID              string
+	PausedAt               *time.Time // set while the table is paused (see away.go)
 	Seats                  []seatRow
 }
 
@@ -169,7 +182,7 @@ func (t *tableRow) names() []string {
 }
 
 const tableCols = `t.id, t.code, t.name, t.host_id, t.game_id, t.game_version, g.name, g.kind, t.status, t.options, t.settings,
-	t.seed, t.state, t.version, t.to_move, t.deadline, t.outcome, coalesce(t.rematch_id::text,'')`
+	t.seed, t.state, t.version, t.to_move, t.deadline, t.outcome, coalesce(t.rematch_id::text,''), t.paused_at`
 
 type querier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
@@ -184,7 +197,7 @@ func loadTable(ctx context.Context, q querier, id string, forUpdate bool) (*tabl
 	var t tableRow
 	var opts, sets, state, outcome []byte
 	err := q.QueryRow(ctx, sql, id).Scan(&t.ID, &t.Code, &t.Name, &t.HostID, &t.GameID, &t.GameVersion, &t.GameName, &t.GameKind,
-		&t.Status, &opts, &sets, &t.Seed, &state, &t.Version, &t.ToMove, &t.Deadline, &outcome, &t.RematchID)
+		&t.Status, &opts, &sets, &t.Seed, &state, &t.Version, &t.ToMove, &t.Deadline, &outcome, &t.RematchID, &t.PausedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}
@@ -203,7 +216,7 @@ func loadTable(ctx context.Context, q querier, id string, forUpdate bool) (*tabl
 		t.Outcome = new(games.Outcome)
 		_ = json.Unmarshal(outcome, t.Outcome)
 	}
-	rows, err := q.Query(ctx, `SELECT seat, kind, coalesce(user_id::text,''), coalesce(agent_id,''), name
+	rows, err := q.Query(ctx, `SELECT seat, kind, coalesce(user_id::text,''), coalesce(agent_id,''), name, timeouts, away_since
 		FROM table_seats WHERE table_id=$1 ORDER BY seat`, id)
 	if err != nil {
 		return nil, err
@@ -211,7 +224,7 @@ func loadTable(ctx context.Context, q querier, id string, forUpdate bool) (*tabl
 	defer rows.Close()
 	for rows.Next() {
 		var st seatRow
-		if err := rows.Scan(&st.Seat, &st.Kind, &st.UserID, &st.AgentID, &st.Name); err != nil {
+		if err := rows.Scan(&st.Seat, &st.Kind, &st.UserID, &st.AgentID, &st.Name, &st.Timeouts, &st.AwaySince); err != nil {
 			return nil, err
 		}
 		t.Seats = append(t.Seats, st)

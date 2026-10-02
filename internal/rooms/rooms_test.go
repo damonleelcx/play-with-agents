@@ -558,7 +558,7 @@ func TestChatLimitsAndAgentReplies(t *testing.T) {
 		t.Fatalf("second agent line: %q (chatter calls %d)", result, len(fc.reqs))
 	}
 	// Once the gap has passed, the agent may talk again, with names substituted.
-	_, _ = r.pool.Exec(ctx, `UPDATE table_chat SET at = at - interval '1 minute' WHERE table_id=$1`, v.ID)
+	_, _ = r.pool.Exec(ctx, `UPDATE table_chat SET at = at - interval '5 minutes' WHERE table_id=$1`, v.ID)
 	_, _ = r.pool.Exec(ctx, `INSERT INTO table_jobs (table_id, kind, seat, state_version, payload) VALUES ($1,'agent_chat',1,-1000,'{"trigger":"banter"}')`, v.ID)
 	r.svc.run(ctx, r.claim(t, "w"))
 	var last string

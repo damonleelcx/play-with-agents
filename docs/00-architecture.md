@@ -209,6 +209,7 @@ owner_name?, version, plays, cover? }` (built-in Hold'em has id `holdem`).
   `409 { error, table }` when `version` is stale; `422 { error }` when illegal
 - `POST /api/tables/{id}/chat` `{ text, client_msg_id }` → `{ ok }`
 - `POST /api/tables/{id}/leave` → `{ ok }` (an agent takes over a seat left mid-game)
+- `POST /api/tables/{id}/back` → `TableView` ("I'm back": clears my seat's `away` and resumes a paused table)
 - `POST /api/tables/{id}/rematch` (host) → `TableView` of the new table
 - `GET /api/tables/{id}/stream` → SSE: `event: table` `{ version }` (refetch), `event: chat` `ChatLine`
 
@@ -219,7 +220,8 @@ TableView = {
   "status": "lobby|playing|finished|abandoned",
   "host_id", "is_host": true, "my_seat": 0,     // -1 = spectator
   "version": 42,
-  "seats": [ { "seat": 0, "kind": "human|agent|open", "name", "avatar", "agent_id"?, "is_me": true } ],
+  "seats": [ { "seat": 0, "kind": "human|agent|open", "name", "avatar", "agent_id"?, "is_me": true, "away"?: true } ],
+  "paused": false,                              // nobody attending: status stays playing, nothing runs
   "to_move": [1], "deadline": "2026-10-02T12:00:30Z" | null, "turn_seconds": 30,
   "legal": [ MoveSpec ],                        // only for my seat when it is my turn
   "view": { "kind": "holdem|board", "data": {...}, "status": "..." },
@@ -229,6 +231,22 @@ TableView = {
 }
 ChatLine = { "id", "seat", "name", "avatar", "text", "at", "agent": true }
 ```
+
+**Away and paused.** After 2 consecutive clock run-outs a person's seat is
+`away`: their turns resolve with the default move after a ~1.5s grace (the
+`deadline` shows it) instead of the full clock; agents keep their pace. Their
+own move or `POST …/back` clears it. When every person at a playing table has
+been away for 15 minutes, or no person has done anything (move, chat, back)
+for 15 minutes, the sweep pauses the table: `paused: true`, `deadline: null`,
+no agent moves, clocks or table talk run. A person's move or `/back` resumes
+it. Unattended tables are still abandoned after 2 hours.
+
+**Table talk cadence.** Unprompted agent lines scale with the square of the
+persona's `talk`, so Ren and Lin are rare; pots under 10 big blinds almost
+never prompt a line. Each agent has a cooldown after its own line (45s for the
+chattiest, ~2.5 min for the quietest), a table gets at most 8 unprompted agent
+lines per 10 minutes (replies to @mentions: 20), and a line too close to one
+of the agent's own last 5 lines is dropped (silence, not a canned line).
 
 ### Studio (building games)
 Building a game is a mission (goal kind `build_game`). It can be started from
@@ -262,6 +280,9 @@ Aoi's message `meta.cards`: `[{ kind: "table", table_id } | { kind: "mission", g
 | | `favorite_agents` | list of agent ids |
 | Studio | `studio_visibility` | `private` `unlisted` `public` |
 | | `playtest_games` | `50` `200` `500` |
+| Appearance | `theme` | `dark` `light` `system` |
+| | `font_size` | `small` `medium` `large` |
+| Limits | `goal_max_cost_usd`, `goal_max_days` | per studio build ceilings (1–200 USD, 1–180 days) |
 | Notifications | `email_table_invites`, `email_your_turn`, `email_build_done` | bool |
 
 Plus the inherited Security (password, sessions), Privacy & memory (export,

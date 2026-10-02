@@ -132,13 +132,14 @@ func (s *Service) assemble(ctx context.Context, t *tableRow, userID string) (*Ta
 		Status: t.Status, HostID: t.HostID, IsHost: t.HostID == userID, MySeat: me,
 		Version: t.Version, ToMove: t.ToMove, Deadline: t.Deadline, TurnSeconds: t.Settings.TurnSeconds,
 		Legal: []games.MoveSpec{}, Log: []LogEntry{}, Chat: []ChatLine{}, RematchID: t.RematchID,
+		Paused: t.PausedAt != nil && t.Status == "playing",
 	}
 	if v.ToMove == nil {
 		v.ToMove = []int{}
 	}
 	for _, st := range t.Seats {
 		v.Seats = append(v.Seats, SeatView{Seat: st.Seat, Kind: st.Kind, Name: names[st.Seat], Avatar: avatarFor(st),
-			AgentID: st.AgentID, IsMe: st.Kind == "human" && st.UserID == userID})
+			AgentID: st.AgentID, IsMe: st.Kind == "human" && st.UserID == userID, Away: st.away()})
 	}
 	if t.Outcome != nil {
 		o := *t.Outcome

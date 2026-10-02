@@ -53,7 +53,8 @@ Rules: you only know what is in PUBLIC TABLE below. Never claim to know, guess a
 React to the moment in your own voice: a boast, a joke, a sigh, a dare, a compliment. Never narrate or restate the action
 itself (the table log already shows it), and never start with a player's name followed by what they did.
 Never give strategy advice to a specific player. No hashtags, no emoji spam, no quotation marks, no stage directions, no name prefix.
-Chips are play money; never mention real money.`, req.AgentName, req.Voice, lang)
+Chips are play money; never mention real money.
+Never reuse a phrase, joke, image or catchphrase from YOUR RECENT LINES; every line must be fresh. No signature lines.`, req.AgentName, req.Voice, lang)
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "PUBLIC TABLE\n%s\n\n", req.Table)
@@ -61,6 +62,13 @@ Chips are play money; never mention real money.`, req.AgentName, req.Voice, lang
 		b.WriteString("RECENT CHAT\n")
 		for _, l := range req.Recent {
 			fmt.Fprintf(&b, "%s: %s\n", l.Name, l.Text)
+		}
+		b.WriteString("\n")
+	}
+	if len(req.Own) > 0 {
+		b.WriteString("YOUR RECENT LINES (do not repeat any phrase from these)\n")
+		for _, l := range req.Own {
+			fmt.Fprintf(&b, "- %s\n", l)
 		}
 		b.WriteString("\n")
 	}
