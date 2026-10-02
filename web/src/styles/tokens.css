@@ -1,0 +1,97 @@
+/* Design tokens. The brand is warm cream + ink with an ember orange accent
+   (after the ORDI reference); Vera's own navy and teal are the second voice. */
+:root {
+  --cream-50: #fbf6ee;
+  --cream-100: #f6eee2;
+  --cream-200: #efe4d2;
+  --cream-300: #e6d6bd;
+  --cream-400: #d9c4a3;
+  --ink-900: #1c1a17;
+  --ink-800: #2a2723;
+  --ink-700: #3d3934;
+  --ink-500: #6f675d;
+  --ink-400: #8d8478;
+  --ember-500: #e8662a;
+  --ember-600: #d4541a;
+  --ember-400: #f08a4f;
+  --amber-400: #f4b13e;
+  --teal-500: #1d9e9a;
+  --teal-300: #7fd3cf;
+  --navy-800: #232846;
+  --navy-900: #171a30;
+  --rose-500: #d8483b;
+
+  --bg: var(--cream-200);
+  --bg-soft: var(--cream-100);
+  --surface: #fffaf3;
+  --surface-2: #fbf4e8;
+  --glass: rgba(255, 250, 243, 0.58);
+  --glass-strong: rgba(255, 250, 243, 0.82);
+  --line: rgba(28, 26, 23, 0.09);
+  --line-strong: rgba(28, 26, 23, 0.16);
+  --text: var(--ink-900);
+  --text-2: var(--ink-700);
+  --text-3: var(--ink-500);
+  --accent: var(--ember-500);
+  --accent-ink: #fff8f0;
+  --focus: 0 0 0 3px rgba(232, 102, 42, 0.32);
+
+  --font-display: 'Inter Tight', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-body: 'Inter', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-serif: 'Instrument Serif', 'Songti SC', 'STSong', Georgia, serif;
+
+  --r-sm: 10px;
+  --r-md: 16px;
+  --r-lg: 24px;
+  --r-xl: 32px;
+  --shadow-sm: 0 1px 2px rgba(60, 40, 20, 0.06), 0 2px 8px rgba(60, 40, 20, 0.05);
+  --shadow-md: 0 8px 24px rgba(60, 40, 20, 0.09), 0 2px 6px rgba(60, 40, 20, 0.05);
+  --shadow-lg: 0 24px 60px rgba(60, 40, 20, 0.14), 0 6px 16px rgba(60, 40, 20, 0.06);
+  --ease: cubic-bezier(0.2, 0.7, 0.1, 1);
+  --fs: 15px;
+  color-scheme: light;
+}
+
+/* The app honours a dark theme; the landing page is always the cream brand. */
+:root[data-theme='dark'] .themed,
+:root[data-theme='dark'] body.themed-body {
+  --bg: #15130f;
+  --bg-soft: #1b1814;
+  --surface: #211e19;
+  --surface-2: #28241e;
+  --glass: rgba(40, 36, 30, 0.6);
+  --glass-strong: rgba(40, 36, 30, 0.86);
+  --line: rgba(255, 244, 228, 0.08);
+  --line-strong: rgba(255, 244, 228, 0.16);
+  --text: #f3ebdf;
+  --text-2: #cfc4b4;
+  --text-3: #9a8f80;
+  --accent-ink: #1c1a17;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.45);
+  color-scheme: dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme='light']) .themed,
+  :root:not([data-theme='light']) body.themed-body {
+    --bg: #15130f;
+    --bg-soft: #1b1814;
+    --surface: #211e19;
+    --surface-2: #28241e;
+    --glass: rgba(40, 36, 30, 0.6);
+    --glass-strong: rgba(40, 36, 30, 0.86);
+    --line: rgba(255, 244, 228, 0.08);
+    --line-strong: rgba(255, 244, 228, 0.16);
+    --text: #f3ebdf;
+    --text-2: #cfc4b4;
+    --text-3: #9a8f80;
+    --accent-ink: #1c1a17;
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 8px 24px rgba(0, 0, 0, 0.35);
+    --shadow-lg: 0 24px 60px rgba(0, 0, 0, 0.45);
+    color-scheme: dark;
+  }
+}
+:root[data-fs='small'] { --fs: 14px; }
+:root[data-fs='large'] { --fs: 17px; }

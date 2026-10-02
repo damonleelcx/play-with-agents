@@ -1,0 +1,27 @@
+# Every knob the process reads. Nothing here is a secret.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: act-config
+  namespace: act
+data:
+  ACT_ADDR: ":8080"
+  ACT_PUBLIC_ORIGIN: "https://act.heros-agent.space"
+  ACT_COOKIE_SECURE: "true"
+  # Same prepaid token-plan host as forge/jobs; the key is issued against it.
+  ACT_LLM_BASE_URL: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+  ACT_LLM_MODEL: "qwen3.8-max"
+  ACT_LLM_FAST_MODEL: "qwen3.8-flash"
+  # The relay presents a certificate for this name; the pod resolves it to the
+  # relay's pinned ClusterIP via hostAliases (see 30-deploy.yaml).
+  ACT_SMTP_HOST: "mail.heros-agent.space"
+  ACT_SMTP_PORT: "587"
+  ACT_SMTP_REPLY_TO: "support@heros-agent.space"
+  ACT_ADMIN_EMAILS: "damonlee1020@gmail.com"
+  ACT_WORKERS: "3"
+  ACT_LEASE: "90s"
+  # Spending ceilings (tokens/day). A public sign-up form sits in front of a
+  # paid key: the per-account cap bounds one person, the deployment cap bounds
+  # everyone.
+  ACT_ACCOUNT_DAILY_TOKENS: "1500000"
+  ACT_DEPLOYMENT_DAILY_TOKENS: "40000000"

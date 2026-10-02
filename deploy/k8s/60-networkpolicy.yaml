@@ -1,0 +1,41 @@
+# Egress allowlist for both ACT pods: DNS, the shared postgres, the mail relay,
+# and HTTPS to public addresses (model endpoint, CourtListener, openFDA, NLM,
+# PubMed, Cornell LII). Private ranges are excepted from the 443 rule so it
+# cannot become a path to other in-cluster services.
+#
+# The matching INGRESS allowances live on the heros side (postgres :5432 and
+# mail :587 policies) and are added by deploy/deploy.sh — additively, by
+# namespace+label, the same way forge and opportunity-bridge are admitted.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: act-egress
+  namespace: act
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/part-of: act
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: kube-system } }
+          podSelector: { matchLabels: { k8s-app: kube-dns } }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: heros } }
+          podSelector: { matchLabels: { app.kubernetes.io/name: postgres } }
+      ports:
+        - { protocol: TCP, port: 5432 }
+    - to:
+        - namespaceSelector: { matchLabels: { kubernetes.io/metadata.name: heros } }
+          podSelector: { matchLabels: { app.kubernetes.io/name: mail } }
+      ports:
+        - { protocol: TCP, port: 587 }
+    - to:
+        - ipBlock:
+            cidr: 0.0.0.0/0
+            except: [10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16]
+      ports:
+        - { protocol: TCP, port: 443 }
