@@ -274,3 +274,24 @@ background), `aoi-portrait.webp`, `aoi-card.webp` (holo card art),
 `aoi-face-{neutral,smile,wink,surprised,angry,sad}.webp`,
 `aoi-outfit-{default,casual,combat,summer}.webp`, `aoi-action.webp`,
 `aoi-sheet.webp`. `web/public/play/agents/{aoi,ren,mika,bram,nova,lin}.webp` (square avatars).
+
+## Aoi's voice
+
+Aoi speaks in the same Fish Audio voice as jobs.heros-agent.space (阿桥) and
+forge.heros-agent.space: published model `df5c6c19dca944918dcbd6f1368fd02f`,
+backbone `s2.1-pro-free` (Fish's free backbone; its terms allow the vendor to
+train on requests, the same deliberate choice FORGE made. Privacy policy says
+so; switch PLAY_TTS_MODEL to `s2.1-pro` if that must change).
+
+- Config: `PLAY_TTS_API_KEY` (secret; production reads `opportunity-bridge/model`
+  property `OBA_TTS_API_KEY`, the estate's shared Fish key), `PLAY_TTS_VOICE_ID`,
+  `PLAY_TTS_MODEL`. No key → no voice endpoint; the client hides voice controls.
+- `GET /api/speech` → `{ enabled: bool }`.
+- `POST /api/speech { text }` → `audio/mpeg` (signed in + verified; ≤ 600 chars
+  after stripping markdown/emoji; rate limit 20/min per user; identical text is
+  cached in memory (LRU, ~200 entries) so replays cost nothing). 503 when not configured.
+- Only Aoi has this voice. Other agents' table talk is text.
+- Settings (Aoi group): `aoi_voice` bool (default true: a speaker button on her
+  messages), `voice_autoplay` bool (default false: read her new chat replies
+  aloud), `table_voice` bool (default false: read Aoi's table-talk lines aloud
+  at tables), `voice_volume` 0..100 (default 80).
