@@ -100,6 +100,8 @@ export type TableView = {
   outcome: Outcome | null
   // nobody attending (everyone away or idle): status stays playing, nothing runs until /back or a move
   paused?: boolean
+  // why it is paused: 'fault' = a move kept failing; only the host may resume (a second fault closes the table)
+  paused_reason?: 'idle' | 'fault'
 }
 
 // ── Hold'em view data ─────────────────────────────────────────────────────

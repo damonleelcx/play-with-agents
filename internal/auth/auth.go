@@ -44,6 +44,11 @@ type Service struct {
 	// counts only once it is verified, so signing up with an admin's address
 	// grants nothing.
 	AdminEmails []string
+	// BeforeDelete runs after DeleteAccount has checked the password and
+	// before the account row goes: the rooms service hands the person's
+	// seats, host rights and games over so other people's tables survive.
+	// An error stops the deletion (nothing is lost; it can be retried).
+	BeforeDelete func(ctx context.Context, userID string) error
 }
 
 var (
@@ -52,7 +57,23 @@ var (
 	ErrWeakPassword       = errors.New("password must be at least 10 characters")
 	ErrBadEmail           = errors.New("that email address does not look valid")
 	ErrTokenInvalid       = errors.New("this link is invalid or has expired")
+	ErrPasswordTooLong    = errors.New("password is too long")
+	ErrPasswordIsEmail    = errors.New("password must not be your email address")
+	ErrBadSessionID       = errors.New("bad session id")
 )
+
+// UserFacing reports whether err is one of this package's own messages,
+// written for people. Anything else (a database error, say) must be logged
+// and replaced by a generic message, never shown.
+func UserFacing(err error) bool {
+	for _, e := range []error{ErrInvalidCredentials, ErrEmailTaken, ErrWeakPassword, ErrBadEmail, ErrTokenInvalid,
+		ErrPasswordTooLong, ErrPasswordIsEmail, ErrBadSessionID} {
+		if errors.Is(err, e) {
+			return true
+		}
+	}
+	return false
+}
 
 // ── Passwords ──────────────────────────────────────────────────────────────
 
@@ -100,10 +121,10 @@ func ValidatePassword(pw, email string) error {
 		return ErrWeakPassword
 	}
 	if n > 200 {
-		return errors.New("password is too long")
+		return ErrPasswordTooLong
 	}
 	if strings.EqualFold(pw, email) {
-		return errors.New("password must not be your email address")
+		return ErrPasswordIsEmail
 	}
 	return nil
 }
@@ -272,7 +293,7 @@ func (s *Service) Sessions(ctx context.Context, userID, current string) ([]Sessi
 
 func (s *Service) RevokeSessionPrefix(ctx context.Context, userID, prefix string) error {
 	if len(prefix) != 16 {
-		return errors.New("bad session id")
+		return ErrBadSessionID
 	}
 	_, err := s.Pool.Exec(ctx, `UPDATE sessions SET revoked_at=now() WHERE user_id=$1 AND left(id,16)=$2`, userID, prefix)
 	return err
@@ -386,6 +407,8 @@ func (s *Service) ChangePassword(ctx context.Context, userID, current, next, kee
 }
 
 // DeleteAccount removes the user and, by cascade, everything they own.
+// What other people still use (tables they play at, published games) is
+// handed over first by BeforeDelete and outlives the account (0013).
 func (s *Service) DeleteAccount(ctx context.Context, userID, password string) error {
 	var hash string
 	if err := s.Pool.QueryRow(ctx, `SELECT password_hash FROM users WHERE id=$1`, userID).Scan(&hash); err != nil {
@@ -393,6 +416,16 @@ func (s *Service) DeleteAccount(ctx context.Context, userID, password string) er
 	}
 	if !CheckPassword(hash, password) {
 		return ErrInvalidCredentials
+	}
+	// Sign every session out first, so nothing can sit down again while the
+	// account is being taken apart.
+	if _, err := s.Pool.Exec(ctx, `UPDATE sessions SET revoked_at=now() WHERE user_id=$1 AND revoked_at IS NULL`, userID); err != nil {
+		return err
+	}
+	if s.BeforeDelete != nil {
+		if err := s.BeforeDelete(ctx, userID); err != nil {
+			return fmt.Errorf("hand over before deletion: %w", err)
+		}
 	}
 	_, err := s.Pool.Exec(ctx, `DELETE FROM users WHERE id=$1`, userID)
 	return err

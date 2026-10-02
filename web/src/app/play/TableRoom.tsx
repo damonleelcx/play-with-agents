@@ -105,6 +105,7 @@ export default function TableRoom({ tableId, mock }: { tableId?: string; mock?: 
   const mine = table.seats.find((st) => st.is_me)
   const meAway = table.status === 'playing' && !!mine?.away
   const paused = table.status === 'playing' && !!table.paused
+  const faulted = paused && table.paused_reason === 'fault'
 
   const leave = async () => {
     setConfirmLeave(false)
@@ -155,7 +156,16 @@ export default function TableRoom({ tableId, mock }: { tableId?: string; mock?: 
 
       <div className="pw-room-body">
         <main className="pw-room-main">
-          {(meAway || paused) && (
+          {faulted ? (
+            <div className="pw-away-banner is-paused" role="status">
+              <span>{table.is_host ? s.room.faultNoteHost : s.room.faultNote}</span>
+              {table.is_host && (
+                <button type="button" className="pw-btn pw-btn-primary" onClick={client.back}>
+                  {s.room.resume}
+                </button>
+              )}
+            </div>
+          ) : (meAway || paused) && (
             <div className={`pw-away-banner ${meAway ? 'is-away' : 'is-paused'}`} role="status">
               <span>{meAway ? s.room.awayNote : s.room.pausedNote}</span>
               <button type="button" className="pw-btn pw-btn-primary" onClick={client.back} autoFocus={meAway}>

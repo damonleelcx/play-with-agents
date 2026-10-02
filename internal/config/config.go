@@ -51,6 +51,9 @@ type Config struct {
 	TTSAPIKey  string
 	TTSVoiceID string // a published fish.audio model id; never defaulted
 	TTSModel   string // the synthesis backbone (tts.DefaultModel when empty)
+	// TTSDailyChars is each account's daily allowance of characters Aoi
+	// reads aloud (only lines that reach the vendor count).
+	TTSDailyChars int
 }
 
 func Load() (Config, error) {
@@ -79,6 +82,7 @@ func Load() (Config, error) {
 		TTSAPIKey:             os.Getenv("PLAY_TTS_API_KEY"),
 		TTSVoiceID:            os.Getenv("PLAY_TTS_VOICE_ID"),
 		TTSModel:              env("PLAY_TTS_MODEL", "s2.1-pro-free"),
+		TTSDailyChars:         envInt("PLAY_TTS_DAILY_CHARS", 20000),
 	}
 	for _, e := range strings.Split(os.Getenv("PLAY_ADMIN_EMAILS"), ",") {
 		if e = strings.ToLower(strings.TrimSpace(e)); e != "" {

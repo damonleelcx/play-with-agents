@@ -149,6 +149,14 @@ max = all-in), `allin`. Default move on timeout: check if legal, else fold.
 A completed hand deals the next in the same `Apply`; the finished hand is in
 `last_hand` so the client can show the result.
 
+Showdown order (a house rule; there is no auto-muck setting): all-in players'
+hands are always shown (tabled before the run-out). Then the river's last
+aggressor shows first, or, if nobody bet the river, the first player left of
+the button, and the rest follow clockwise. Each of them shows only if the hand
+beats or ties the best hand shown so far; otherwise it is mucked: a `muck`
+event (`"{s:N} mucks"`), no cards, not in `last_hand.shown`. A hand that wins
+any pot is always shown. Reveal events come before the `win` events.
+
 Cards: `"As" "Td" "9c" "2h"` (rank `23456789TJQKA`, suit `shdc`).
 
 View `data`:
@@ -182,7 +190,16 @@ View `data`:
 
 JSON, cookie session (`play_session`), all under `/api`. Auth, settings,
 sessions, memories, conversations, goals, approvals and usage keep the shapes
-inherited from the engine (see `internal/httpapi`). New:
+inherited from the engine (see `internal/httpapi`), except:
+
+- `POST /api/auth/verify { token }` → `{ verified: true, signed_in: bool, user? }`. It
+  never creates a session (the link proves the mailbox, not who registered the
+  account). `user` is returned only to a browser already signed in to that account;
+  anyone else is told "Email confirmed — sign in to continue".
+- Errors from sign-up, password change/reset and session revoke are user-facing
+  messages only; anything else is logged and answered with a generic message.
+
+New:
 
 ### Games
 - `GET /api/games` → `{ builtin: GameCard[], mine: GameCard[], community: GameCard[] }`
@@ -206,12 +223,23 @@ owner_name?, version, plays, cover? }` (built-in Hold'em has id `holdem`).
 - `PUT /api/tables/{id}/seats/{seat}` `{ kind: "agent", agent_id } | { kind: "open" }` (host, lobby only)
 - `POST /api/tables/{id}/start` (host) → `TableView`
 - `POST /api/tables/{id}/moves` `{ client_move_id, version, move: {type, args} }` → `TableView`;
-  `409 { error, table }` when `version` is stale; `422 { error }` when illegal
+  `409 { error, table }` when `version` is stale; `422 { error }` when illegal.
+  A retry with the same `client_move_id` and the same move returns the current view;
+  the same id with a different move is `409 { error }`. Only people who may watch the
+  table get either answer (403 otherwise).
 - `POST /api/tables/{id}/chat` `{ text, client_msg_id }` → `{ ok }`
 - `POST /api/tables/{id}/leave` → `{ ok }` (an agent takes over a seat left mid-game)
 - `POST /api/tables/{id}/back` → `TableView` ("I'm back": clears my seat's `away` and resumes a paused table)
 - `POST /api/tables/{id}/rematch` (host) → `TableView` of the new table
-- `GET /api/tables/{id}/stream` → SSE: `event: table` `{ version }` (refetch), `event: chat` `ChatLine`
+- `GET /api/tables/{id}/stream` → SSE: `event: table` `{ version }` (refetch), `event: chat` `ChatLine`.
+  Access is re-checked while the stream runs (before an event once the last check is 5s old,
+  and on every 20s keepalive); someone who can no longer watch (left as a spectator, signed
+  out, account deleted) gets `event: closed` `{ reason: "access" }` and the stream ends.
+
+"Host" actions (start, seats, rematch, resuming after a fault) belong to `host_id`.
+`host_id` is `""` when the table has no host (the host deleted their account and
+nobody else was seated to take over); then any person seated has the host's rights,
+and `is_host` says so.
 
 ```jsonc
 TableView = {
@@ -222,6 +250,7 @@ TableView = {
   "version": 42,
   "seats": [ { "seat": 0, "kind": "human|agent|open", "name", "avatar", "agent_id"?, "is_me": true, "away"?: true } ],
   "paused": false,                              // nobody attending: status stays playing, nothing runs
+  "paused_reason": "idle|fault",                // only while paused (omitted otherwise)
   "to_move": [1], "deadline": "2026-10-02T12:00:30Z" | null, "turn_seconds": 30,
   "legal": [ MoveSpec ],                        // only for my seat when it is my turn
   "view": { "kind": "holdem|board", "data": {...}, "status": "..." },
@@ -240,6 +269,24 @@ been away for 15 minutes, or no person has done anything (move, chat, back)
 for 15 minutes, the sweep pauses the table: `paused: true`, `deadline: null`,
 no agent moves, clocks or table talk run. A person's move or `/back` resumes
 it. Unattended tables are still abandoned after 2 hours.
+
+**Faults.** A move or clock job that fails all its attempts (errors, or workers
+dying with the lease) is followed by the seat's default move. If even that cannot
+be played, the table pauses with `paused_reason: "fault"` and a `fault` log event
+("This game hit a problem and was paused"). Moves are refused while it is paused
+this way; the host (see above) resumes it with `POST …/back`, which retries. A
+second fault abandons the table (`fault_closed` event).
+
+**Deleting an account** (`POST /api/account/delete`) first hands everything over
+(`rooms.ReleaseUser`, migration 0013): each seat the person holds mid-game is taken
+over by an agent as with leave (`takeover` event; the seat keeps its chips), a
+lobby seat opens; host rights pass to the next person seated (`host` event) or to
+no one; a lobby or game nobody else is in or watching is abandoned (`closed`
+event). Their published non-private games stay, credited to "a former player"
+(`owner_name`), and so do all tables of them. Drafts and private games are deleted
+with their versions, unless someone else has a table of them: then the live ones
+are abandoned (`closed` event) and the game is kept hidden and ownerless so those
+records still render. Finished tables keep their seating as a record.
 
 **Table talk cadence.** Unprompted agent lines scale with the square of the
 persona's `talk`, so Ren and Lin are rare; pots under 10 big blinds almost
@@ -271,7 +318,7 @@ Aoi's message `meta.cards`: `[{ kind: "table", table_id } | { kind: "mission", g
 | Table | `turn_seconds` | `15` `30` `60` `0` (no clock vs agents) |
 | | `agent_speed` | `fast` `natural` `slow` |
 | | `table_talk` | `all` `quiet` `off` |
-| | `four_color_deck`, `auto_muck`, `show_hand_strength`, `sound` | bool |
+| | `four_color_deck`, `show_hand_strength`, `sound` | bool (no muck setting: showdowns follow the house order, see Hold'em) |
 | | `motion` | `full` `reduced` |
 | | `card_back` | `aoi` `classic` `midnight` |
 | | `felt` | `navy` `emerald` `crimson` |
@@ -308,9 +355,21 @@ so; switch PLAY_TTS_MODEL to `s2.1-pro` if that must change).
   property `OBA_TTS_API_KEY`, the estate's shared Fish key), `PLAY_TTS_VOICE_ID`,
   `PLAY_TTS_MODEL`. No key → no voice endpoint; the client hides voice controls.
 - `GET /api/speech` → `{ enabled: bool }`.
-- `POST /api/speech { text }` → `audio/mpeg` (signed in + verified; ≤ 600 chars
-  after stripping markdown/emoji; rate limit 20/min per user; identical text is
-  cached in memory (LRU, ~200 entries) so replays cost nothing). 503 when not configured.
+- `POST /api/speech` → `audio/mpeg`. It speaks only lines the server already holds
+  as Aoi's, never free text. The body is exactly one of:
+  - `{ message_id }`: one of Aoi's replies (`role: assistant`) in a conversation the caller owns;
+  - `{ table_id, chat_id }`: one of Aoi's (`agent_id: aoi`) table-talk lines at a table the caller may watch;
+  - `{ sample: "en" | "zh" }`: the fixed "Hear Aoi" line of the settings page (the strings live on the server).
+
+  Signed in + verified. 400 for anything else (including `{ text }`), 404 for a line
+  that is not the caller's or not Aoi's, 403 for a table they cannot watch. Text is
+  cleaned of markdown/emoji and capped at 600 chars; rate limit 20/min per user; a
+  daily allowance per account of `PLAY_TTS_DAILY_CHARS` characters (default 20000,
+  UTC days, counted in Postgres `tts_usage`, 429 when used up). Identical lines are
+  cached in memory (LRU, ~200 entries): replays cost nothing and are not counted.
+  503 when not configured.
+- Web client (`web/src/lib/voice.ts`): `speakMessage(id)`, `speakTableLine(tableId, chatId)`,
+  `speakSample(lang)`.
 - Only Aoi has this voice. Other agents' table talk is text.
 - Settings (Aoi group): `aoi_voice` bool (default true: a speaker button on her
   messages), `voice_autoplay` bool (default false: read her new chat replies

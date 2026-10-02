@@ -39,6 +39,9 @@ type Server struct {
 	Hub          *Hub
 	Rooms        *rooms.Service // tables, games, agents (tables_api.go)
 	Speech       *tts.Service   // Aoi's voice; nil when no TTS key is configured
+	// SpeechDailyChars is each account's daily allowance of synthesised
+	// characters (0: DefaultSpeechDailyChars).
+	SpeechDailyChars int
 
 	limiter *limiter
 }
@@ -164,6 +167,10 @@ type statusWriter struct {
 }
 
 func (w *statusWriter) WriteHeader(c int) { w.status = c; w.ResponseWriter.WriteHeader(c) }
+
+// Unwrap lets http.ResponseController reach the connection (deadlines).
+func (w *statusWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
+
 func (w *statusWriter) Flush() {
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
@@ -183,6 +190,13 @@ func (s *Server) currentUser(r *http.Request) (*auth.User, string) {
 }
 
 type handler func(w http.ResponseWriter, r *http.Request, u *auth.User)
+
+// sessionAlive re-reads the request's session: a long-lived stream must stop
+// once its session is revoked or the account is gone.
+func (s *Server) sessionAlive(r *http.Request) bool {
+	u, _ := s.currentUser(r)
+	return u != nil
+}
 
 func (s *Server) authed(h handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -347,17 +361,12 @@ func (s *Server) signUp(w http.ResponseWriter, r *http.Request) {
 	lang := persona.Normalize(in.Language)
 	u, err := s.Auth.SignUp(r.Context(), in.Email, in.Password, in.Name, lang)
 	if err != nil {
-		switch {
-		case errors.Is(err, auth.ErrEmailTaken), errors.Is(err, auth.ErrBadEmail), errors.Is(err, auth.ErrWeakPassword):
+		if auth.UserFacing(err) {
 			writeErr(w, 400, err.Error())
-		default:
-			if strings.Contains(err.Error(), "password") {
-				writeErr(w, 400, err.Error())
-				return
-			}
-			slog.Error("signup", "err", err)
-			writeErr(w, 500, "could not create the account")
+			return
 		}
+		slog.Error("signup", "err", err)
+		writeErr(w, 500, "could not create the account")
 		return
 	}
 	if err := s.setSession(w, r, u.ID); err != nil {
@@ -413,11 +422,16 @@ func (s *Server) verify(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, 400, err.Error())
 		return
 	}
-	// Opening the link on another device signs that device in too.
-	if cur, _ := s.currentUser(r); cur == nil || cur.ID != u.ID {
-		_ = s.setSession(w, r, u.ID)
+	// Verifying never creates a session. The link proves control of the
+	// mailbox, not who registered the account: someone could sign up with a
+	// victim's address, and signing the clicker in would land the victim in
+	// the attacker's account. A browser already signed in to this very
+	// account gets its refreshed user; anyone else is asked to sign in.
+	if cur, _ := s.currentUser(r); cur != nil && cur.ID == u.ID {
+		writeJSON(w, 200, map[string]any{"verified": true, "signed_in": true, "user": s.view(r, u)})
+		return
 	}
-	writeJSON(w, 200, s.view(r, u))
+	writeJSON(w, 200, map[string]any{"verified": true, "signed_in": false})
 }
 
 func (s *Server) resend(w http.ResponseWriter, r *http.Request, u *auth.User) {
@@ -454,10 +468,11 @@ func (s *Server) reset(w http.ResponseWriter, r *http.Request) {
 	}
 	u, err := s.Auth.ResetPassword(r.Context(), in.Token, in.Password)
 	if err != nil {
-		if errors.Is(err, auth.ErrTokenInvalid) || strings.Contains(err.Error(), "password") {
+		if auth.UserFacing(err) {
 			writeErr(w, 400, err.Error())
 			return
 		}
+		slog.Error("reset password", "err", err)
 		writeErr(w, 500, "could not reset the password")
 		return
 	}

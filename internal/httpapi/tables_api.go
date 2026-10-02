@@ -262,6 +262,15 @@ func (s *Server) rematch(w http.ResponseWriter, r *http.Request, u *auth.User) {
 // plus a comment every 20s so proxies keep the connection open. Table
 // signals are coalesced briefly (one move writes several rows but is one
 // change); chat goes out immediately.
+//
+// Access is checked when the stream opens and again while it runs: before
+// sending anything once the last check is streamRecheck old, and on every
+// keepalive. A person who may no longer watch (left as a spectator, account
+// deleted) gets `event: closed` and the stream ends.
+// streamRecheck is how stale a table stream's access check may get before
+// the next event re-checks it.
+var streamRecheck = 5 * time.Second
+
 func (s *Server) tableStream(w http.ResponseWriter, r *http.Request, u *auth.User) {
 	id := r.PathValue("id")
 	ok, err := s.Rooms.CanWatch(r.Context(), id, u.ID)
@@ -295,6 +304,29 @@ func (s *Server) tableStream(w http.ResponseWriter, r *http.Request, u *auth.Use
 		fl.Flush()
 	}
 	send("table", map[string]int64{"version": version})
+	checked := time.Now()
+	// allowed re-checks access when the last check is older than maxAge
+	// (0: always). A failed check closes the stream rather than keep
+	// sending to someone who may have lost access.
+	allowed := func(maxAge time.Duration) bool {
+		if time.Since(checked) < maxAge {
+			return true
+		}
+		ok, err := s.Rooms.CanWatch(r.Context(), id, u.ID)
+		if err == nil && ok {
+			if !s.sessionAlive(r) {
+				ok = false
+			}
+		}
+		if err != nil || !ok {
+			if r.Context().Err() == nil {
+				send("closed", map[string]string{"reason": "access"})
+			}
+			return false
+		}
+		checked = time.Now()
+		return true
+	}
 	ping := time.NewTicker(20 * time.Second)
 	defer ping.Stop()
 	var pending int64 // a table version waiting out the coalescing window
@@ -308,6 +340,9 @@ func (s *Server) tableStream(w http.ResponseWriter, r *http.Request, u *auth.Use
 			switch sig.Kind {
 			case "chat":
 				if sig.Chat != nil {
+					if !allowed(streamRecheck) {
+						return
+					}
 					send("chat", sig.Chat)
 				}
 			case "table":
@@ -318,11 +353,17 @@ func (s *Server) tableStream(w http.ResponseWriter, r *http.Request, u *auth.Use
 			}
 		case <-flush.C:
 			if pending > version {
+				if !allowed(streamRecheck) {
+					return
+				}
 				version = pending
 				send("table", map[string]int64{"version": version})
 			}
 			pending = 0
 		case <-ping.C:
+			if !allowed(0) {
+				return
+			}
 			fmt.Fprint(w, ": keepalive\n\n")
 			fl.Flush()
 		}

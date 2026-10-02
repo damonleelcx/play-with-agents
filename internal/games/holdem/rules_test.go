@@ -280,11 +280,16 @@ func TestMultiwayAllinSidePots(t *testing.T) {
 	if !reflect.DeepEqual(gotWins, wantWins) {
 		t.Fatalf("wins:\n%s\nwant:\n%s", strings.Join(gotWins, "\n"), strings.Join(wantWins, "\n"))
 	}
-	if n := len(eventsOfType(ev, "showdown")); n != 5 {
-		t.Fatalf("%d showdown reveals, want 5", n)
+	// Seat 4's excess came back, so it is not all-in at showdown; it lost
+	// every pot it was in and mucks.
+	if n := len(eventsOfType(ev, "showdown")); n != 4 {
+		t.Fatalf("%d showdown reveals, want 4", n)
+	}
+	if m := eventsOfType(ev, "muck"); len(m) != 1 || m[0].Seat != 4 {
+		t.Fatalf("mucks %+v", m)
 	}
 	lh := s.LastHand
-	if len(lh.Winners) != 4 || len(lh.Shown) != 5 || lh.Winners[0].Cards[0] != "Kh" ||
+	if len(lh.Winners) != 4 || len(lh.Shown) != 4 || lh.Winners[0].Cards[0] != "Kh" ||
 		lh.Winners[0].HandName != "Full House, Kings full of Twos" {
 		t.Fatalf("last hand %+v", lh)
 	}

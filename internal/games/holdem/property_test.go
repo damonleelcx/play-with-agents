@@ -341,8 +341,19 @@ func TestViewHidesHiddenInformation(t *testing.T) {
 	}
 	st = encodeT(t, s)
 	d := viewOf(t, st, games.Spectator)
-	if d.LastHand == nil || len(d.LastHand.Shown) != 4 || len(d.LastHand.Board) != 5 {
+	// A checked-down hand: the first player left of the button shows, the
+	// others show only to beat or tie it (or because they won).
+	if d.LastHand == nil || len(d.LastHand.Shown) < 1 || len(d.LastHand.Board) != 5 {
 		t.Fatalf("last hand %+v", d.LastHand)
+	}
+	for _, w := range d.LastHand.Winners {
+		found := false
+		for _, sh := range d.LastHand.Shown {
+			found = found || sh.Seat == w.Seat
+		}
+		if !found {
+			t.Fatalf("winner %d was not shown: %+v", w.Seat, d.LastHand)
+		}
 	}
 	for _, p := range d.Players {
 		if p.Cards != nil {

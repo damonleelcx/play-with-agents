@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"unicode"
+	"unicode/utf8"
 )
 
 // Synthesizer turns text into MP3. *Fish is the production one.
@@ -61,6 +62,15 @@ func NewService(v Synthesizer, capacity int) *Service {
 // Speak cleans text and returns its audio. ErrEmpty when nothing speakable
 // remains.
 func (s *Service) Speak(ctx context.Context, text string) ([]byte, string, error) {
+	return s.SpeakCharged(ctx, text, nil)
+}
+
+// SpeakCharged is Speak with an allowance: before a line is sent to the
+// vendor, charge is called with the number of characters to synthesise, and
+// an error from it (a daily cap reached) is returned instead of calling the
+// vendor. A line served from the cache, or joined to a synthesis already in
+// flight, costs nothing and is not charged.
+func (s *Service) SpeakCharged(ctx context.Context, text string, charge func(chars int) error) ([]byte, string, error) {
 	clean := Clean(text, MaxSpokenChars)
 	if clean == "" {
 		return nil, "", ErrEmpty
@@ -86,6 +96,19 @@ func (s *Service) Speak(ctx context.Context, text string) ([]byte, string, error
 	c := &call{done: make(chan struct{})}
 	s.inflight[key] = c
 	s.mu.Unlock()
+
+	if charge != nil {
+		if err := charge(utf8.RuneCountInString(clean)); err != nil {
+			// Anyone who joined this call meanwhile gets the same answer
+			// and pays nothing; the next request tries again.
+			c.err = err
+			s.mu.Lock()
+			delete(s.inflight, key)
+			s.mu.Unlock()
+			close(c.done)
+			return nil, "", err
+		}
+	}
 
 	// The vendor call is not tied to this request: a second caller may be
 	// waiting on the same line, and a finished synthesis is worth caching

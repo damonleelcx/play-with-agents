@@ -4,12 +4,18 @@ import { useEffect, useState } from 'react'
 // no speechSynthesis fallback: if her voice isn't available, she is silent
 // and every voice control hides itself.
 //
-//   voiceEnabled()       → Promise<boolean> (GET /api/speech, asked once)
-//   speak(text, key?)    → plays it on one shared <audio>, stopping whatever
-//                          was playing; resolves 'played' | 'blocked' | 'off' | 'error'
-//   stop()               → stops the current utterance
+// The server only speaks lines it already holds as Aoi's, so callers name a
+// line rather than send text:
+//
+//   voiceEnabled()                    → Promise<boolean> (GET /api/speech, asked once)
+//   speakMessage(id, key?)            → one of her chat replies (a saved message id)
+//   speakTableLine(tableId, chatId, key?) → one of her table-talk lines
+//   speakSample(lang, key?)           → the fixed "Hear Aoi" sample ('en' | 'zh')
+//   Each plays on one shared <audio>, stopping whatever was playing, and
+//   resolves 'played' | 'blocked' | 'off' | 'error'.
+//   stop()                            → stops the current utterance
 //   setVoiceVolume(0..100)
-//   useVoice()           → { enabled, speaking, key, loading, blocked, unlock }
+//   useVoice()                        → { enabled, speaking, key, loading, blocked, unlock }
 
 type State = { enabled: boolean | null; speaking: boolean; loading: boolean; key: string | null; blocked: boolean }
 let state: State = { enabled: null, speaking: false, loading: false, key: null, blocked: false }
@@ -34,27 +40,11 @@ export function voiceEnabled(): Promise<boolean> {
   return probe
 }
 
-// What she says, not how it's formatted: markdown, links, code and emoji go.
-export function speechText(md: string) {
-  return md
-    .replace(/```[\s\S]*?```/g, ' ')
-    .replace(/`([^`]*)`/g, '$1')
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' ')
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
-    .replace(/^\s{0,3}(#{1,6}|>|[-*+]|\d+[.)])\s+/gm, '')
-    .replace(/(\*\*|__|\*|_|~~)(.+?)\1/g, '$2')
-    .replace(/\|/g, ' ')
-    .replace(/[\p{Extended_Pictographic}\u{FE0F}\u{200D}]/gu, '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 600)
-}
-
 let audio: HTMLAudioElement | null = null
 let volume = 0.8
 let token = 0
 let pending: { url: string; key: string | null } | null = null
-const cache = new Map<string, string>() // text → object URL, oldest first
+const cache = new Map<string, string>() // line id → object URL, oldest first
 
 function el() {
   if (!audio) {
@@ -83,28 +73,38 @@ export function stop() {
   set({ speaking: false, loading: false, key: null })
 }
 
-async function urlFor(text: string): Promise<string | null> {
-  const hit = cache.get(text)
+type SpeechRequest = { message_id: number } | { table_id: string; chat_id: number } | { sample: 'en' | 'zh' }
+
+// lineId names a line for the local cache: the same line always sounds the same.
+function lineId(req: SpeechRequest) {
+  if ('message_id' in req) return `m:${req.message_id}`
+  if ('table_id' in req) return `t:${req.table_id}:${req.chat_id}`
+  return `s:${req.sample}`
+}
+
+async function urlFor(req: SpeechRequest): Promise<string | null> {
+  const id = lineId(req)
+  const hit = cache.get(id)
   if (hit) {
-    cache.delete(text) // refresh its place in the LRU
-    cache.set(text, hit)
+    cache.delete(id) // refresh its place in the LRU
+    cache.set(id, hit)
     return hit
   }
   const res = await fetch('/api/speech', {
     method: 'POST',
     credentials: 'same-origin',
     headers: { 'Content-Type': 'application/json', 'X-Play': '1' },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify(req),
   })
   if (!res.ok) {
     if (res.status === 503) set({ enabled: false })
     return null
   }
   const url = URL.createObjectURL(await res.blob())
-  cache.set(text, url)
+  cache.set(id, url)
   if (cache.size > 40) {
-    const [oldText, oldUrl] = cache.entries().next().value as [string, string]
-    cache.delete(oldText)
+    const [oldId, oldUrl] = cache.entries().next().value as [string, string]
+    cache.delete(oldId)
     URL.revokeObjectURL(oldUrl)
   }
   return url
@@ -129,25 +129,44 @@ async function play(url: string, key: string | null): Promise<'played' | 'blocke
   }
 }
 
-export async function speak(text: string, key?: string): Promise<'played' | 'blocked' | 'off' | 'error'> {
-  const clean = speechText(text)
-  if (!clean) return 'off'
+export type SpeakResult = 'played' | 'blocked' | 'off' | 'error'
+
+async function say(req: SpeechRequest, key?: string): Promise<SpeakResult> {
   if (!(await voiceEnabled())) return 'off'
   stop()
   const mine = ++token
-  set({ loading: true, key: key ?? clean })
+  const k = key ?? lineId(req)
+  set({ loading: true, key: k })
   try {
-    const url = await urlFor(clean)
+    const url = await urlFor(req)
     if (mine !== token) return 'off' // superseded while fetching
     if (!url) {
       set({ loading: false, key: null })
       return 'error'
     }
-    return await play(url, key ?? clean)
+    return await play(url, k)
   } catch {
     if (mine === token) set({ loading: false, key: null })
     return 'error'
   }
+}
+
+// One of Aoi's saved chat replies. A reply still streaming has no server id
+// yet (a negative placeholder) and cannot be spoken.
+export function speakMessage(id: number, key?: string): Promise<SpeakResult> {
+  if (!Number.isInteger(id) || id <= 0) return Promise.resolve('off')
+  return say({ message_id: id }, key)
+}
+
+// One of Aoi's table-talk lines at a table the viewer may watch.
+export function speakTableLine(tableId: string, chatId: number, key?: string): Promise<SpeakResult> {
+  if (!tableId || !Number.isInteger(chatId) || chatId <= 0) return Promise.resolve('off')
+  return say({ table_id: tableId, chat_id: chatId }, key)
+}
+
+// The fixed "Hear Aoi" sample of the settings page.
+export function speakSample(lang: 'en' | 'zh', key?: string): Promise<SpeakResult> {
+  return say({ sample: lang === 'zh' ? 'zh' : 'en' }, key)
 }
 
 // Called from a user gesture (the "tap to enable" chip): plays what was held back.
@@ -168,5 +187,5 @@ export function useVoice() {
       listeners.delete(setS)
     }
   }, [])
-  return { ...s, enabled: s.enabled === true, speak, stop, unlock }
+  return { ...s, enabled: s.enabled === true, speakMessage, speakTableLine, speakSample, stop, unlock }
 }

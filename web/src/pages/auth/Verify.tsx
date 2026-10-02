@@ -15,7 +15,10 @@ export default function Verify() {
   const nice = useAuthError()
   const [q] = useSearchParams()
   const token = q.get('token')
-  const [state, setState] = useState<'idle' | 'verifying' | 'done' | 'error'>(token ? 'verifying' : 'idle')
+  // 'confirmed': the address is verified, but this browser is not signed in
+  // to that account. Verifying never signs anyone in: the link only proves
+  // the mailbox, not who registered it.
+  const [state, setState] = useState<'idle' | 'verifying' | 'done' | 'confirmed' | 'error'>(token ? 'verifying' : 'idle')
   const [error, setError] = useState('')
   const [cooldown, setCooldown] = useState(0)
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
@@ -25,10 +28,14 @@ export default function Verify() {
     if (!token || ran.current) return
     ran.current = true // StrictMode runs effects twice; a token is single-use
     api
-      .post<User>('/api/auth/verify', { token })
-      .then((u) => {
-        setUser(u)
-        setState('done')
+      .post<{ verified: boolean; signed_in: boolean; user?: User }>('/api/auth/verify', { token })
+      .then((r) => {
+        if (r.signed_in && r.user) {
+          setUser(r.user)
+          setState('done')
+        } else {
+          setState('confirmed')
+        }
       })
       .catch((e) => {
         setError(e.message)
@@ -75,6 +82,12 @@ export default function Verify() {
     return (
       <AuthLayout page="verify" title={t.auth.verified} sub={t.auth.verifiedSub} mood="smile">
         <button className="btn btn-ember btn-lg auth-submit" onClick={() => nav(takeNext(), { replace: true })}>{t.auth.continue}</button>
+      </AuthLayout>
+    )
+  if (state === 'confirmed')
+    return (
+      <AuthLayout page="verify" title={t.auth.confirmed} sub={t.auth.confirmedSub} mood="smile">
+        <Link to="/signin" className="btn btn-ember btn-lg auth-submit">{t.auth.signin}</Link>
       </AuthLayout>
     )
   if (state === 'error')

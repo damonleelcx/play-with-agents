@@ -134,6 +134,8 @@ type seatRow struct {
 func (st seatRow) away() bool { return st.Kind == "human" && st.AwaySince != nil }
 
 type tableRow struct {
+	// HostID is "" once the host deleted their account and nobody else at
+	// the table could take over (see hostRights).
 	ID, Code, Name, HostID string
 	GameID                 string
 	GameVersion            int
@@ -149,7 +151,22 @@ type tableRow struct {
 	Outcome                *games.Outcome
 	RematchID              string
 	PausedAt               *time.Time // set while the table is paused (see away.go)
+	Faults                 int        // jobs that failed for good (see faults.go)
+	FaultAt                *time.Time // set while paused by a fault
 	Seats                  []seatRow
+}
+
+// hostRights reports whether userID may do what the host does (start,
+// seats, rematch, resume after a fault). A table without a host (the host
+// deleted their account) lets any person seated at it.
+func (t *tableRow) hostRights(userID string) bool {
+	if userID == "" {
+		return false
+	}
+	if t.HostID != "" {
+		return t.HostID == userID
+	}
+	return t.seatOf(userID) != games.Spectator
 }
 
 func (t *tableRow) seatOf(userID string) int {
@@ -181,8 +198,8 @@ func (t *tableRow) names() []string {
 	return out
 }
 
-const tableCols = `t.id, t.code, t.name, t.host_id, t.game_id, t.game_version, g.name, g.kind, t.status, t.options, t.settings,
-	t.seed, t.state, t.version, t.to_move, t.deadline, t.outcome, coalesce(t.rematch_id::text,''), t.paused_at`
+const tableCols = `t.id, t.code, t.name, coalesce(t.host_id::text,''), t.game_id, t.game_version, g.name, g.kind, t.status, t.options, t.settings,
+	t.seed, t.state, t.version, t.to_move, t.deadline, t.outcome, coalesce(t.rematch_id::text,''), t.paused_at, t.faults, t.fault_at`
 
 type querier interface {
 	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
@@ -197,7 +214,7 @@ func loadTable(ctx context.Context, q querier, id string, forUpdate bool) (*tabl
 	var t tableRow
 	var opts, sets, state, outcome []byte
 	err := q.QueryRow(ctx, sql, id).Scan(&t.ID, &t.Code, &t.Name, &t.HostID, &t.GameID, &t.GameVersion, &t.GameName, &t.GameKind,
-		&t.Status, &opts, &sets, &t.Seed, &state, &t.Version, &t.ToMove, &t.Deadline, &outcome, &t.RematchID, &t.PausedAt)
+		&t.Status, &opts, &sets, &t.Seed, &state, &t.Version, &t.ToMove, &t.Deadline, &outcome, &t.RematchID, &t.PausedAt, &t.Faults, &t.FaultAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return nil, ErrNotFound
 	}

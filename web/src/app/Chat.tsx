@@ -6,7 +6,7 @@ import { api, streamMessage, uid, type Card, type Message } from '../lib/api'
 import { useI18n } from '../lib/i18n'
 import { md } from '../lib/md'
 import { useSession } from '../lib/session'
-import { speak, stop as stopVoice, useVoice } from '../lib/voice'
+import { speakMessage, stop as stopVoice, useVoice } from '../lib/voice'
 import { CardBoundary, GameCard, MissionCard } from './cards'
 import { useLive } from './live'
 import { TableCard } from './play'
@@ -171,7 +171,7 @@ export default function Chat({ onChanged }: { onChanged: () => void }) {
       abort.current = null
       onChanged()
       // Read the new reply aloud once it is complete (never history).
-      if (!failed && full.trim() && autoplay.current) speak(full, `m${finalId}`)
+      if (!failed && full.trim() && autoplay.current && finalId > 0) speakMessage(finalId, `m${finalId}`)
       if (created && id && !failed) nav(`/app/c/${id}`, { replace: true })
       else if (!failed) window.setTimeout(load, 400) // the server now holds the authoritative copy (and its cards)
     }
@@ -312,7 +312,7 @@ const Row = memo(function Row({ m, streaming, groupStart, onRetry, voiceOn, voic
         {!m.pending && m.content && !err && (
           <div className="msg-tools">
           {voiceOn && (
-            <button className={`speak ${mine ? 'on' : ''} ${mine && voiceLoading ? 'loading' : ''}`} onClick={() => (mine ? stopVoice() : speak(m.content, key))}
+            <button className={`speak ${mine ? 'on' : ''} ${mine && voiceLoading ? 'loading' : ''}`} onClick={() => (mine ? stopVoice() : speakMessage(m.id, key))}
               aria-label={mine ? t.chat.stopSpeaking : t.chat.speak} title={mine ? t.chat.stopSpeaking : t.chat.speak}>
               {mine && !voiceLoading ? <IconStop size={13} /> : <IconSpeaker size={15} />}
             </button>

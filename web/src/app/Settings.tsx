@@ -4,7 +4,7 @@ import { AgentAvatar, AoiFace } from '../components/Aoi'
 import { IconAlert, IconBell, IconCards, IconChart, IconCheck, IconLock, IconPalette, IconRefresh, IconRobot, IconShield, IconSpeaker, IconStar, IconStop, IconUser, IconWand } from '../components/Icons'
 import { PasswordInput } from '../pages/auth/AuthLayout'
 import { api, type Agent } from '../lib/api'
-import { setVoiceVolume, speak, stop as stopVoice, useVoice } from '../lib/voice'
+import { setVoiceVolume, speakSample, stop as stopVoice, useVoice } from '../lib/voice'
 import { useI18n, type Lang } from '../lib/i18n'
 import { fmtTime } from './missionModel'
 import { usePrefs, useToast } from './prefs'
@@ -163,7 +163,7 @@ function AoiPrefs() {
 
 // Aoi's voice. Hidden entirely when the server has no voice configured.
 function VoicePrefs() {
-  const { t } = useI18n()
+  const { t, lang } = useI18n()
   const { prefs, save } = usePrefs()
   const voice = useVoice()
   const saved = Number(prefs.voice_volume ?? 80)
@@ -198,7 +198,7 @@ function VoicePrefs() {
               <AoiFace mood="smile" size={40} speaking={sampling && voice.speaking} />
               <small>{t.settings.sample}</small>
             </div>
-            <button className="btn btn-soft btn-sm" onClick={() => (sampling ? stopVoice() : speak(t.settings.sample, 'sample'))}>
+            <button className="btn btn-soft btn-sm" onClick={() => (sampling ? stopVoice() : speakSample(lang === 'zh' ? 'zh' : 'en', 'sample'))}>
               {sampling ? <IconStop size={14} /> : <IconSpeaker size={15} />} {t.settings.hear}
             </button>
           </div>
@@ -236,7 +236,6 @@ function TablePrefs() {
       </Card>
       <Card>
         <Toggle k="four_color_deck" label={t.settings.fourColor} hint={t.settings.fourColorHint} def={false} />
-        <Toggle k="auto_muck" label={t.settings.autoMuck} />
         <Toggle k="show_hand_strength" label={t.settings.handStrength} />
         <Toggle k="sound" label={t.settings.sound} />
         <Choice k="motion" label={t.settings.motion} def="full" options={ent(t.settings.motions)} />

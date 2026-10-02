@@ -2,6 +2,8 @@ package rooms
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -119,7 +121,7 @@ func (s *Service) commit(ctx context.Context, t *tableRow, c change) (int64, err
 		var deadline *time.Time
 		err := tx.QueryRow(ctx, `UPDATE tables SET state=$2, version=version+1, status=$3, to_move=$4,
 				deadline = CASE WHEN $5::float8 > 0 THEN now() + make_interval(secs => $5::float8) ELSE NULL END,
-				paused_at = NULL,
+				paused_at = NULL, fault_at = NULL,
 				outcome=$6, move_seq=move_seq+$7, event_seq=event_seq+$8,
 				last_human_at = CASE WHEN $9 THEN now() ELSE last_human_at END,
 				started_at = CASE WHEN $3 = 'playing' THEN coalesce(started_at, now()) ELSE started_at END,
@@ -167,9 +169,13 @@ func (s *Service) commit(ctx context.Context, t *tableRow, c change) (int64, err
 		}
 		if m := c.move; m != nil {
 			raw, _ := json.Marshal(m.move)
-			_, err := tx.Exec(ctx, `INSERT INTO table_moves (table_id, seq, seat, actor, user_id, client_move_id, move, version)
-				VALUES ($1, $2, $3, $4, nullif($5,'')::uuid, nullif($6,''), $7, $8)`,
-				t.ID, moveSeq, m.seat, m.actor, m.userID, m.clientMoveID, raw, c.expected)
+			hash := ""
+			if m.clientMoveID != "" {
+				hash = moveHash(m.move)
+			}
+			_, err := tx.Exec(ctx, `INSERT INTO table_moves (table_id, seq, seat, actor, user_id, client_move_id, move, version, move_hash)
+				VALUES ($1, $2, $3, $4, nullif($5,'')::uuid, nullif($6,''), $7, $8, nullif($9,''))`,
+				t.ID, moveSeq, m.seat, m.actor, m.userID, m.clientMoveID, raw, c.expected, hash)
 			if isUniqueViolation(err) {
 				return errDuplicateMove
 			}
@@ -325,9 +331,12 @@ func isResultEvent(typ string) bool {
 
 // ── Human moves ─────────────────────────────────────────────────────────────
 
-// Move plays a person's move. A retry with the same client_move_id returns
-// the current view without applying anything twice; a stale version returns
-// *StaleError; an illegal move returns an error wrapping games.ErrIllegal.
+// Move plays a person's move. A retry with the same client_move_id and the
+// same move returns the current view without applying anything twice; the
+// same id with a different move is a conflict (409). A stale version
+// returns *StaleError; an illegal move returns an error wrapping
+// games.ErrIllegal. Access is checked before anything else, retries
+// included.
 func (s *Service) Move(ctx context.Context, userID, tableID string, req MoveRequest) (*TableView, error) {
 	if req.ClientMoveID == "" || len(req.ClientMoveID) > 64 {
 		return nil, badInput("client_move_id is required (at most 64 characters)")
@@ -339,7 +348,13 @@ func (s *Service) Move(ctx context.Context, userID, tableID string, req MoveRequ
 	if err != nil {
 		return nil, err
 	}
-	if done, err := s.alreadyPlayed(ctx, t, userID, req.ClientMoveID); err != nil || done {
+	if ok, err := s.canWatch(ctx, t, userID); err != nil || !ok {
+		if err != nil {
+			return nil, err
+		}
+		return nil, ErrForbidden
+	}
+	if done, err := s.alreadyPlayed(ctx, t, userID, req); err != nil || done {
 		if err != nil {
 			return nil, err
 		}
@@ -351,6 +366,9 @@ func (s *Service) Move(ctx context.Context, userID, tableID string, req MoveRequ
 	}
 	if t.Status != "playing" {
 		return nil, fmt.Errorf("%w: the game is not in progress", ErrConflict)
+	}
+	if t.FaultAt != nil && t.PausedAt != nil {
+		return nil, fmt.Errorf("%w: the game hit a problem and is paused; the host can resume it", ErrConflict)
 	}
 	if req.Version != t.Version {
 		return s.stale(ctx, t, userID)
@@ -374,7 +392,7 @@ func (s *Service) Move(ctx context.Context, userID, tableID string, req MoveRequ
 		// A concurrent retry of this very move won the race.
 	case errors.Is(err, errStale):
 		// Either a retry of this move landed first, or someone else moved.
-		if done, err2 := s.alreadyPlayed(ctx, t, userID, req.ClientMoveID); err2 != nil || !done {
+		if done, err2 := s.alreadyPlayed(ctx, t, userID, req); err2 != nil || !done {
 			if err2 != nil {
 				return nil, err2
 			}
@@ -386,10 +404,24 @@ func (s *Service) Move(ctx context.Context, userID, tableID string, req MoveRequ
 	return s.View(ctx, tableID, userID)
 }
 
-func (s *Service) alreadyPlayed(ctx context.Context, t *tableRow, userID, clientMoveID string) (bool, error) {
-	var by string
-	err := s.Pool.QueryRow(ctx, `SELECT coalesce(user_id::text,'') FROM table_moves WHERE table_id=$1 AND client_move_id=$2`,
-		t.ID, clientMoveID).Scan(&by)
+// moveHash fingerprints a move for retry matching. json.Marshal writes map
+// keys in sorted order, so equal moves hash equally.
+func moveHash(m games.Move) string {
+	raw, _ := json.Marshal(struct {
+		Type string         `json:"type"`
+		Args map[string]any `json:"args"`
+	}{m.Type, m.Args})
+	h := sha256.Sum256(raw)
+	return hex.EncodeToString(h[:])
+}
+
+// alreadyPlayed reports whether req is a retry of a move this user already
+// made at the table. The same client_move_id with a different move is a
+// client bug and a conflict, never a silent no-op.
+func (s *Service) alreadyPlayed(ctx context.Context, t *tableRow, userID string, req MoveRequest) (bool, error) {
+	var by, hash string
+	err := s.Pool.QueryRow(ctx, `SELECT coalesce(user_id::text,''), coalesce(move_hash,'') FROM table_moves WHERE table_id=$1 AND client_move_id=$2`,
+		t.ID, req.ClientMoveID).Scan(&by, &hash)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return false, nil
 	}
@@ -400,6 +432,10 @@ func (s *Service) alreadyPlayed(ctx context.Context, t *tableRow, userID, client
 		// Client ids are random; a collision across users is a client bug,
 		// not something to silently treat as "already done".
 		return false, fmt.Errorf("%w: client_move_id already used", ErrConflict)
+	}
+	// Rows from before move hashes were stored carry none: trust them.
+	if hash != "" && hash != moveHash(req.Move) {
+		return false, fmt.Errorf("%w: client_move_id was already used for a different move", ErrConflict)
 	}
 	return true, nil
 }

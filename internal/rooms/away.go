@@ -122,6 +122,9 @@ func (s *Service) Back(ctx context.Context, userID, tableID string) (*TableView,
 		if !ok {
 			return nil, ErrForbidden
 		}
+		if t.Status == "playing" && t.PausedAt != nil && !t.mayResume(userID) {
+			return nil, fmt.Errorf("%w: the game hit a problem and is paused; the host can resume it", ErrConflict)
+		}
 		seat := t.seatOf(userID)
 		marked := false
 		if st := t.seat(seat); st != nil && (st.AwaySince != nil || st.Timeouts > 0) {

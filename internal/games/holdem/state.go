@@ -89,6 +89,10 @@ type state struct {
 	ToAct      int       `json:"to_act"`
 	Players    []player  `json:"players"`
 	LastHand   *LastHand `json:"last_hand"`
+	// Aggr is 1 + the seat that made the last bet or raise on the current
+	// street (0: nobody has bet this street). At showdown the river's last
+	// aggressor shows first.
+	Aggr int `json:"aggr,omitempty"`
 
 	ev []games.Event // events of the Apply in progress; never serialised
 }
@@ -214,6 +218,7 @@ func (s *state) startHand() {
 	s.Board = []card{}
 	s.DeckPos = 0
 	s.Street = streetPreflop
+	s.Aggr = 0
 
 	if s.HandNo == 1 {
 		s.Button = s.nextLive(s.n() - 1) // the first live seat from 0
@@ -455,6 +460,7 @@ func (s *state) raiseTo(seat, to int) {
 		}
 	}
 	s.CurrentBet = to
+	s.Aggr = seat + 1
 
 	ref := seatRef(seat)
 	var typ, text string
@@ -542,6 +548,7 @@ func (s *state) advance(from int) {
 			s.settle()
 			return
 		}
+		s.Aggr = 0
 		s.dealStreet()
 		from = s.Button
 	}
@@ -676,55 +683,11 @@ func (s *state) settle() {
 				scores[i] = evalHoleBoard(s.Players[i].Cards, s.Board)
 			}
 		}
-		s.orderFromButton(live)
-		for _, i := range live {
-			p := &s.Players[i]
-			p.Shown = true
-			name := scores[i].name()
-			lh.Shown = append(lh.Shown, ShownHand{Seat: i, Cards: cardStrings(p.Cards), HandName: name})
-			s.emit("showdown", i, fmt.Sprintf("%s shows %s (%s)", seatRef(i), joinCards(p.Cards), name),
-				map[string]any{"cards": cardStrings(p.Cards), "hand_name": name})
-		}
-		won := map[int]int{}
-		var order []int // winners in the order they first collect
-		for k, pt := range pots {
-			var best handScore
-			var winners []int
-			for _, i := range pt.Eligible {
-				switch sc := scores[i]; {
-				case len(winners) == 0 || sc > best:
-					best, winners = sc, []int{i}
-				case sc == best:
-					winners = append(winners, i)
-				}
-			}
-			if len(winners) == 0 { // unreachable: buildPots keeps a live seat in every pot
-				continue
-			}
-			s.orderFromButton(winners)
-			share, odd := pt.Amount/len(winners), pt.Amount%len(winners)
-			for j, w := range winners {
-				amt := share
-				if j < odd {
-					amt++ // odd chips go to the first winners left of the button
-				}
-				s.Players[w].Stack += amt
-				if _, seen := won[w]; !seen {
-					order = append(order, w)
-				}
-				won[w] += amt
-				potName := ""
-				if len(pots) > 1 {
-					if k == 0 {
-						potName = " from the main pot"
-					} else {
-						potName = fmt.Sprintf(" from side pot %d", k)
-					}
-				}
-				s.emit("win", w, fmt.Sprintf("%s wins %d%s with %s", seatRef(w), amt, potName, scores[w].name()),
-					map[string]any{"amount": amt, "pot": k, "hand_name": scores[w].name()})
-			}
-		}
+		// Work out the payouts first (a winning hand is never mucked), then
+		// reveal in showdown order, then announce the wins.
+		won, order, wins := s.payPots(pots, scores)
+		s.reveal(live, scores, won, lh)
+		s.ev = append(s.ev, wins...)
 		for _, w := range order {
 			lh.Winners = append(lh.Winners, Winner{Seat: w, Amount: won[w],
 				HandName: scores[w].name(), Cards: cardStrings(s.Players[w].Cards)})
@@ -740,6 +703,109 @@ func (s *state) settle() {
 	}
 	s.LastHand = lh
 	s.endHand()
+}
+
+// payPots pays every pot to its best eligible hands. It returns each
+// winner's total, the order they first collect and the "win" events, which
+// the caller emits after the showdown reveals.
+func (s *state) payPots(pots []pot, scores []handScore) (map[int]int, []int, []games.Event) {
+	won := map[int]int{}
+	var wins []games.Event
+	var order []int // winners in the order they first collect
+	for k, pt := range pots {
+		var best handScore
+		var winners []int
+		for _, i := range pt.Eligible {
+			switch sc := scores[i]; {
+			case len(winners) == 0 || sc > best:
+				best, winners = sc, []int{i}
+			case sc == best:
+				winners = append(winners, i)
+			}
+		}
+		if len(winners) == 0 { // unreachable: buildPots keeps a live seat in every pot
+			continue
+		}
+		s.orderFromButton(winners)
+		share, odd := pt.Amount/len(winners), pt.Amount%len(winners)
+		for j, w := range winners {
+			amt := share
+			if j < odd {
+				amt++ // odd chips go to the first winners left of the button
+			}
+			s.Players[w].Stack += amt
+			if _, seen := won[w]; !seen {
+				order = append(order, w)
+			}
+			won[w] += amt
+			potName := ""
+			if len(pots) > 1 {
+				if k == 0 {
+					potName = " from the main pot"
+				} else {
+					potName = fmt.Sprintf(" from side pot %d", k)
+				}
+			}
+			wins = append(wins, games.Event{Type: "win", Seat: w,
+				Text: fmt.Sprintf("%s wins %d%s with %s", seatRef(w), amt, potName, scores[w].name()),
+				Data: map[string]any{"amount": amt, "pot": k, "hand_name": scores[w].name()}})
+		}
+	}
+	return won, order, wins
+}
+
+// reveal plays the showdown in the standard order (a house rule, so the
+// auto-muck choice is made for everyone):
+//
+//   - All-in players' hands are tabled before the run-out, so they are
+//     always shown, first, in order from the button.
+//   - Then the river's last aggressor shows, or, when nobody bet the river,
+//     the first player left of the button; the rest follow clockwise.
+//   - Each of them shows only if their hand beats or ties the best hand
+//     shown so far; otherwise they muck, and the cards stay hidden.
+//   - Winners always show: a hand that takes any pot is never mucked.
+func (s *state) reveal(live []int, scores []handScore, won map[int]int, lh *LastHand) {
+	s.orderFromButton(live)
+	var allins, rest []int
+	for _, i := range live {
+		if s.Players[i].Status == statusAllin {
+			allins = append(allins, i)
+		} else {
+			rest = append(rest, i)
+		}
+	}
+	if a := s.Aggr - 1; a >= 0 {
+		for k, i := range rest {
+			if i == a {
+				rest = append(append([]int{}, rest[k:]...), rest[:k]...)
+				break
+			}
+		}
+	}
+	var best handScore
+	anyShown := false
+	show := func(i int) {
+		p := &s.Players[i]
+		p.Shown = true
+		name := scores[i].name()
+		lh.Shown = append(lh.Shown, ShownHand{Seat: i, Cards: cardStrings(p.Cards), HandName: name})
+		s.emit("showdown", i, fmt.Sprintf("%s shows %s (%s)", seatRef(i), joinCards(p.Cards), name),
+			map[string]any{"cards": cardStrings(p.Cards), "hand_name": name})
+		if !anyShown || scores[i] > best {
+			best = scores[i]
+		}
+		anyShown = true
+	}
+	for _, i := range allins {
+		show(i)
+	}
+	for _, i := range rest {
+		if _, winner := won[i]; winner || !anyShown || scores[i] >= best {
+			show(i)
+			continue
+		}
+		s.emit("muck", i, seatRef(i)+" mucks", nil)
+	}
 }
 
 // endHand busts empty stacks, then either ends the game or deals the next

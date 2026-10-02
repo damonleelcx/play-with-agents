@@ -95,6 +95,28 @@ func (s *Service) CanWatch(ctx context.Context, tableID, userID string) (bool, e
 	return s.canWatch(ctx, t, userID)
 }
 
+// AoiLine returns the text of one of Aoi's table-talk lines at a table the
+// user may watch (the voice endpoint speaks only stored lines).
+func (s *Service) AoiLine(ctx context.Context, tableID string, chatID int64, userID string) (string, error) {
+	t, err := loadTable(ctx, s.Pool, tableID, false)
+	if err != nil {
+		return "", err
+	}
+	ok, err := s.canWatch(ctx, t, userID)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", ErrForbidden
+	}
+	var text string
+	err = s.Pool.QueryRow(ctx, `SELECT text FROM table_chat WHERE id=$1 AND table_id=$2 AND agent_id='aoi'`, chatID, t.ID).Scan(&text)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", ErrNotFound
+	}
+	return text, err
+}
+
 // Version is the table's current version (the stream's first frame).
 func (s *Service) Version(ctx context.Context, tableID string) (int64, error) {
 	var v int64
@@ -106,6 +128,9 @@ func (s *Service) Version(ctx context.Context, tableID string) (int64, error) {
 }
 
 func (s *Service) canWatch(ctx context.Context, t *tableRow, userID string) (bool, error) {
+	if userID == "" {
+		return false, nil
+	}
 	if t.HostID == userID || t.seatOf(userID) != games.Spectator {
 		return true, nil
 	}
@@ -129,10 +154,16 @@ func (s *Service) assemble(ctx context.Context, t *tableRow, userID string) (*Ta
 	v := &TableView{
 		ID: t.ID, Name: t.Name, Code: t.Code,
 		Game:   GameRef{ID: t.GameID, Name: t.GameName, Kind: t.GameKind},
-		Status: t.Status, HostID: t.HostID, IsHost: t.HostID == userID, MySeat: me,
+		Status: t.Status, HostID: t.HostID, IsHost: t.hostRights(userID), MySeat: me,
 		Version: t.Version, ToMove: t.ToMove, Deadline: t.Deadline, TurnSeconds: t.Settings.TurnSeconds,
 		Legal: []games.MoveSpec{}, Log: []LogEntry{}, Chat: []ChatLine{}, RematchID: t.RematchID,
 		Paused: t.PausedAt != nil && t.Status == "playing",
+	}
+	if v.Paused {
+		v.PausedReason = "idle"
+		if t.FaultAt != nil {
+			v.PausedReason = "fault"
+		}
 	}
 	if v.ToMove == nil {
 		v.ToMove = []int{}

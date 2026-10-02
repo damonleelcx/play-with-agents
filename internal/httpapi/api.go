@@ -16,7 +16,6 @@ import (
 	"github.com/damonleelcx/play-with-agents/internal/agent"
 	"github.com/damonleelcx/play-with-agents/internal/auth"
 	"github.com/damonleelcx/play-with-agents/internal/engine"
-	"github.com/damonleelcx/play-with-agents/internal/tts"
 )
 
 // ── settings ───────────────────────────────────────────────────────────────
@@ -165,11 +164,15 @@ func (s *Server) changePassword(w http.ResponseWriter, r *http.Request, u *auth.
 	}
 	sess, _ := r.Context().Value(sessKey).(string)
 	if err := s.Auth.ChangePassword(r.Context(), u.ID, in.Current, in.Next, sess); err != nil {
-		if errors.Is(err, auth.ErrInvalidCredentials) {
+		switch {
+		case errors.Is(err, auth.ErrInvalidCredentials):
 			writeErr(w, 400, "current password is incorrect")
-			return
+		case auth.UserFacing(err):
+			writeErr(w, 400, err.Error())
+		default:
+			slog.Error("change password", "user", u.ID, "err", err)
+			writeErr(w, 500, "could not change the password")
 		}
-		writeErr(w, 400, err.Error())
 		return
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
@@ -187,7 +190,12 @@ func (s *Server) sessions(w http.ResponseWriter, r *http.Request, u *auth.User) 
 
 func (s *Server) revokeSession(w http.ResponseWriter, r *http.Request, u *auth.User) {
 	if err := s.Auth.RevokeSessionPrefix(r.Context(), u.ID, r.PathValue("id")); err != nil {
-		writeErr(w, 400, err.Error())
+		if auth.UserFacing(err) {
+			writeErr(w, 400, err.Error())
+			return
+		}
+		slog.Error("revoke session", "user", u.ID, "err", err)
+		writeErr(w, 500, "could not sign that session out")
 		return
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
@@ -246,7 +254,12 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request, u *auth.U
 		return
 	}
 	if err := s.Auth.DeleteAccount(r.Context(), u.ID, in.Password); err != nil {
-		writeErr(w, 400, "password is incorrect")
+		if errors.Is(err, auth.ErrInvalidCredentials) {
+			writeErr(w, 400, "password is incorrect")
+			return
+		}
+		slog.Error("delete account", "user", u.ID, "err", err)
+		writeErr(w, 500, "could not delete the account right now; please try again")
 		return
 	}
 	clearCookie(w, s.CookieSecure)
@@ -671,66 +684,4 @@ func (s *Server) decide(w http.ResponseWriter, r *http.Request, u *auth.User) {
 		return
 	}
 	writeJSON(w, 200, map[string]bool{"ok": true})
-}
-
-// ── Aoi's voice ────────────────────────────────────────────────────────────
-//
-// GET  /api/speech → { enabled }
-// POST /api/speech { text } → audio/mpeg
-// Signed in and verified (every request costs a vendor call), 20 a minute
-// per user, text cleaned of Markdown and emoji and capped at
-// tts.MaxSpokenChars, identical lines served from the in-memory cache. 503
-// when the deployment has no voice configured.
-
-const speechPerMinute = 20
-
-// maxSpeechInput bounds what the cleaner is asked to process at all; the
-// spoken part is capped far lower after cleaning.
-const maxSpeechInput = 20000
-
-func (s *Server) speechStatus(w http.ResponseWriter, r *http.Request, u *auth.User) {
-	writeJSON(w, 200, map[string]bool{"enabled": s.Speech != nil})
-}
-
-func (s *Server) speak(w http.ResponseWriter, r *http.Request, u *auth.User) {
-	if s.Speech == nil {
-		writeErr(w, 503, "voice is not available")
-		return
-	}
-	// Per user, not per IP: a whole household behind one address should not
-	// share one bucket, and one account should not get more by changing IPs.
-	if !s.limiter.allow("speech|"+u.ID, speechPerMinute) {
-		w.Header().Set("Retry-After", "60")
-		writeErr(w, 429, "too many requests, try again in a minute")
-		return
-	}
-	var in struct {
-		Text string `json:"text"`
-	}
-	if err := readJSON(r, &in); err != nil {
-		writeErr(w, 400, "bad request")
-		return
-	}
-	if utf8.RuneCountInString(in.Text) > maxSpeechInput {
-		writeErr(w, 400, "text is too long")
-		return
-	}
-	ctx, cancel := context.WithTimeout(r.Context(), 50*time.Second)
-	defer cancel()
-	audio, ct, err := s.Speech.Speak(ctx, in.Text)
-	if err != nil {
-		if errors.Is(err, tts.ErrEmpty) {
-			writeErr(w, 400, "nothing to speak")
-			return
-		}
-		slog.Error("speech", "user", u.ID, "err", err)
-		writeErr(w, 502, "the voice is unavailable right now")
-		return
-	}
-	w.Header().Set("Content-Type", ct)
-	w.Header().Set("Content-Length", fmt.Sprint(len(audio)))
-	// The same text always renders the same audio, so the browser may keep it.
-	w.Header().Set("Cache-Control", "private, max-age=86400")
-	w.WriteHeader(200)
-	_, _ = w.Write(audio)
 }

@@ -7,7 +7,6 @@ export type PlayPrefs = {
   felt: 'navy' | 'emerald' | 'crimson'
   card_back: 'aoi' | 'classic' | 'midnight'
   four_color_deck: boolean
-  auto_muck: boolean
   show_hand_strength: boolean
   sound: boolean
   motion: 'full' | 'reduced'
@@ -21,7 +20,6 @@ export const DEFAULT_PREFS: PlayPrefs = {
   felt: 'navy',
   card_back: 'aoi',
   four_color_deck: false,
-  auto_muck: true,
   show_hand_strength: true,
   sound: true,
   motion: 'full',
@@ -51,7 +49,6 @@ function normalise(p: Record<string, any>): PlayPrefs {
     felt: oneOf(p.felt, ['navy', 'emerald', 'crimson'] as const, d.felt),
     card_back: oneOf(p.card_back, ['aoi', 'classic', 'midnight'] as const, d.card_back),
     four_color_deck: bool(p.four_color_deck, d.four_color_deck),
-    auto_muck: bool(p.auto_muck, d.auto_muck),
     show_hand_strength: bool(p.show_hand_strength, d.show_hand_strength),
     sound: bool(p.sound, d.sound),
     motion: oneOf(p.motion, ['full', 'reduced'] as const, d.motion),

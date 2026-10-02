@@ -162,7 +162,8 @@ func run(mode string) error {
 	var srv *http.Server
 	var serveErr error
 	if mode == "serve" || mode == "web" {
-		authSvc := &auth.Service{Pool: pool, Mailer: mailer, PublicOrigin: originOr(cfg.PublicOrigin, cfg.Addr), SessionTTL: cfg.SessionTTL, AdminEmails: cfg.AdminEmails}
+		authSvc := &auth.Service{Pool: pool, Mailer: mailer, PublicOrigin: originOr(cfg.PublicOrigin, cfg.Addr), SessionTTL: cfg.SessionTTL, AdminEmails: cfg.AdminEmails,
+			BeforeDelete: tables.ReleaseUser}
 		// Aoi's capabilities. Each is optional and nil-safe: until a service
 		// is wired here she tells the player it is not open yet. The rooms
 		// service (tables, catalog) and the studio plug in as
@@ -170,8 +171,16 @@ func run(mode string) error {
 		ag := &agent.Agent{Store: store, Model: model, LLM: cfg.LLMModel, FastLLM: cfg.LLMFastModel, Mailer: mailer,
 			Tables: aoiTables{tables}, Studio: studioSvc, Catalog: aoiCatalog{tables}}
 		api := &httpapi.Server{Pool: pool, Auth: authSvc, Store: store, Agent: ag, Static: web.FS(), CookieSecure: cfg.CookieSecure,
-			MailEnabled: mailer.Enabled(), Hub: hub, Rooms: tables, Speech: speech}
-		srv = &http.Server{Addr: cfg.Addr, Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second}
+			MailEnabled: mailer.Enabled(), Hub: hub, Rooms: tables, Speech: speech,
+			SpeechDailyChars: cfg.TTSDailyChars}
+		// ReadTimeout bounds a slow client's request (headers and body);
+		// net/http lifts it once the body is read, so it never cuts a long
+		// response (httpapi TestStreamOutlivesReadTimeout guards that).
+		// IdleTimeout closes idle keep-alive connections. There is no
+		// WriteTimeout: the SSE streams and Aoi's streamed replies are long
+		// responses by design.
+		srv = &http.Server{Addr: cfg.Addr, Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second,
+			ReadTimeout: 30 * time.Second, IdleTimeout: 120 * time.Second}
 		start(func() {
 			slog.Info("listening", "addr", cfg.Addr, "mode", mode)
 			if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {

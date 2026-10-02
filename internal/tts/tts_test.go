@@ -205,3 +205,35 @@ func TestLiveFish(t *testing.T) {
 		t.Fatalf("%d bytes of %s does not look like speech", len(audio), ct)
 	}
 }
+
+func TestSpeakChargedChargesOnlyVendorCalls(t *testing.T) {
+	ff := newFakeFish(t)
+	f, _ := NewFish(ff.srv.URL, "k", "v", "")
+	s := NewService(f, 10)
+	ctx := context.Background()
+	charged := 0
+	charge := func(n int) error { charged += n; return nil }
+
+	if _, _, err := s.SpeakCharged(ctx, "**Deal** me in!", charge); err != nil {
+		t.Fatal(err)
+	}
+	if charged != len("Deal me in!") {
+		t.Fatalf("charged %d chars, want the cleaned length %d", charged, len("Deal me in!"))
+	}
+	if _, _, err := s.SpeakCharged(ctx, "Deal me in!", charge); err != nil || charged != len("Deal me in!") {
+		t.Fatalf("a cached replay was charged (total %d, err %v)", charged, err)
+	}
+
+	capped := errors.New("daily voice allowance used up")
+	before := ff.calls.Load()
+	if _, _, err := s.SpeakCharged(ctx, "a new line", func(int) error { return capped }); !errors.Is(err, capped) {
+		t.Fatalf("over the cap: %v", err)
+	}
+	if ff.calls.Load() != before {
+		t.Fatal("the vendor was called although the allowance refused the line")
+	}
+	// The refusal is not cached: with allowance it is spoken.
+	if _, _, err := s.SpeakCharged(ctx, "a new line", charge); err != nil {
+		t.Fatal(err)
+	}
+}

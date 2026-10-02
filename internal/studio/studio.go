@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"math/big"
 	"regexp"
+	"strconv"
 	"strings"
 	"unicode"
 
@@ -76,7 +77,7 @@ func (s *Service) StartBuild(ctx context.Context, userID, convID, prompt, baseGa
 	}
 
 	g := &engine.Goal{UserID: userID, ConversationID: convID, Domain: Domain, Skill: Skill, Language: lang,
-		Limits: Limits, Criteria: criteria(lang), Milestones: milestones(lang)}
+		Limits: buildLimits(prefs), Criteria: criteria(lang), Milestones: milestones(lang)}
 	var gameID string
 	err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
 		if baseGameID != "" {
@@ -120,6 +121,33 @@ func (s *Service) StartBuild(ctx context.Context, userID, convID, prompt, baseGa
 		return "", "", err
 	}
 	return g.ID, gameID, nil
+}
+
+// buildLimits is Limits tightened by the owner's own ceilings
+// (goal_max_cost_usd, goal_max_days). A preference can only lower the
+// studio's maxima, never raise them; a missing or malformed one is ignored.
+func buildLimits(prefs map[string]any) engine.Limits {
+	l := Limits
+	if v, ok := prefNumber(prefs, "goal_max_cost_usd"); ok && v >= 1 {
+		l.MaxCostUSD = min(l.MaxCostUSD, v)
+	}
+	if v, ok := prefNumber(prefs, "goal_max_days"); ok && v >= 1 {
+		l.MaxDays = min(l.MaxDays, int(v))
+	}
+	return l
+}
+
+// prefNumber reads a numeric preference stored as a JSON number or a
+// numeric string.
+func prefNumber(prefs map[string]any, key string) (float64, bool) {
+	switch v := prefs[key].(type) {
+	case float64:
+		return v, true
+	case string:
+		f, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
+		return f, err == nil
+	}
+	return 0, false
 }
 
 func (s *Service) prefs(ctx context.Context, userID string) map[string]any {

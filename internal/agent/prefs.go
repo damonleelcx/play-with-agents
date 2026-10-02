@@ -63,7 +63,6 @@ var PrefSpecs = []PrefSpec{
 	{Key: "agent_speed", Group: "table", Kind: PrefEnum, Values: []string{"fast", "natural", "slow"}, Default: "natural", Chat: true},
 	{Key: "table_talk", Group: "table", Kind: PrefEnum, Values: []string{"all", "quiet", "off"}, Default: "all", Chat: true},
 	{Key: "four_color_deck", Group: "table", Kind: PrefBool, Default: false, Chat: true},
-	{Key: "auto_muck", Group: "table", Kind: PrefBool, Default: true, Chat: true},
 	{Key: "show_hand_strength", Group: "table", Kind: PrefBool, Default: true, Chat: true},
 	{Key: "sound", Group: "table", Kind: PrefBool, Default: true, Chat: true},
 	{Key: "motion", Group: "table", Kind: PrefEnum, Values: []string{"full", "reduced"}, Default: "full", Chat: true},

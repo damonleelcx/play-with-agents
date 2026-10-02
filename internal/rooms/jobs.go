@@ -76,14 +76,20 @@ func (s *Service) finish(ctx context.Context, j *job, status, result string) err
 	return nil
 }
 
+// retry puts a failed job back in the queue, or fails it for good once it
+// has used its attempts; a move or clock job failing for good gets the
+// fault handling (faults.go) so the table cannot freeze.
 func (s *Service) retry(ctx context.Context, j *job, cause error) {
 	status := "ready"
 	if j.Attempts >= j.MaxAttempts {
 		status = "failed"
 	}
-	_, _ = s.Pool.Exec(ctx, `UPDATE table_jobs SET status=$3, result=$4, run_after=now() + interval '1 second',
+	tag, err := s.Pool.Exec(ctx, `UPDATE table_jobs SET status=$3, result=$4, run_after=now() + interval '1 second',
 		lease_owner=NULL, lease_expires_at=NULL, finished_at = CASE WHEN $3='failed' THEN now() END
 		WHERE id=$1 AND lease_epoch=$2 AND status='leased'`, j.ID, j.Epoch, status, clip(cause.Error(), 300))
+	if err == nil && tag.RowsAffected() == 1 && status == "failed" {
+		s.jobFailed(ctx, j)
+	}
 }
 
 // ── Workers ─────────────────────────────────────────────────────────────────
@@ -318,23 +324,43 @@ func isListed(legal []games.MoveSpec, m games.Move) bool {
 // (away.go), and prunes old finished jobs. Every
 // statement is idempotent, so all worker processes may run it.
 func (s *Service) Sweep(ctx context.Context) (reclaimed, abandoned int, err error) {
-	tag, err := s.Pool.Exec(ctx, `UPDATE table_jobs SET
+	rows, err := s.Pool.Query(ctx, `UPDATE table_jobs SET
 			status = CASE WHEN attempts >= max_attempts THEN 'failed' ELSE 'ready' END,
 			result = 'lease expired', run_after = now(), lease_owner = NULL, lease_expires_at = NULL,
 			finished_at = CASE WHEN attempts >= max_attempts THEN now() END
-		WHERE status='leased' AND lease_expires_at < now()`)
+		WHERE status='leased' AND lease_expires_at < now()
+		RETURNING id, table_id, kind, seat, state_version, status`)
 	if err != nil {
 		return 0, 0, err
 	}
-	reclaimed = int(tag.RowsAffected())
+	var failed []*job
+	for rows.Next() {
+		var j job
+		var status string
+		if rows.Scan(&j.ID, &j.TableID, &j.Kind, &j.Seat, &j.StateVersion, &status) == nil {
+			reclaimed++
+			if status == "failed" {
+				failed = append(failed, &j)
+			}
+		}
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return reclaimed, 0, err
+	}
 	if reclaimed > 0 {
 		s.poke()
+	}
+	// A job whose worker kept dying has failed for good: same handling as
+	// one that kept erroring.
+	for _, j := range failed {
+		s.jobFailed(ctx, j)
 	}
 	idle := s.IdleAfter
 	if idle <= 0 {
 		idle = 2 * time.Hour
 	}
-	rows, err := s.Pool.Query(ctx, `UPDATE tables SET status='abandoned', version=version+1, deadline=NULL, to_move='{}',
+	rows, err = s.Pool.Query(ctx, `UPDATE tables SET status='abandoned', version=version+1, deadline=NULL, to_move='{}',
 			finished_at=now(), updated_at=now()
 		WHERE status IN ('lobby','playing') AND last_human_at < now() - make_interval(secs => $1::float8)
 		RETURNING id`, idle.Seconds())

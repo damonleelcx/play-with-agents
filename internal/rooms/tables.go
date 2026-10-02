@@ -127,7 +127,7 @@ func insertTable(ctx context.Context, tx pgx.Tx, nt newTable) (string, error) {
 			return "", err
 		}
 		err = sp.QueryRow(ctx, `INSERT INTO tables (code, name, host_id, game_id, game_version, options, settings, seed, rematch_of)
-			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, nullif($9,'')::uuid) RETURNING id`,
+			VALUES ($1, $2, nullif($3,'')::uuid, $4, $5, $6, $7, $8, nullif($9,'')::uuid) RETURNING id`,
 			newCode(), nt.name, nt.hostID, nt.gameID, nt.gameVersion, opts, sets, newSeed(), nt.rematchOf).Scan(&id)
 		if err == nil {
 			if err := sp.Commit(ctx); err != nil {
@@ -307,7 +307,7 @@ func (s *Service) SetSeat(ctx context.Context, userID, tableID string, seat int,
 	if err != nil {
 		return nil, err
 	}
-	if t.HostID != userID {
+	if !t.hostRights(userID) {
 		return nil, ErrForbidden
 	}
 	if t.Status != "lobby" {
@@ -353,7 +353,7 @@ func (s *Service) Start(ctx context.Context, userID, tableID string) (*TableView
 	if err != nil {
 		return nil, err
 	}
-	if t.HostID != userID {
+	if !t.hostRights(userID) {
 		return nil, ErrForbidden
 	}
 	if err := s.start(ctx, t); err != nil {
@@ -451,14 +451,19 @@ func (s *Service) Leave(ctx context.Context, userID, tableID string) error {
 
 // Rematch opens a new table with the same game, options and people (agents
 // and everyone still seated), and starts it straight away when no seat is
-// open. Calling it twice returns the same rematch.
+// open. Calling it twice returns the same rematch. At a table without a
+// host, any person seated there may call it and hosts the new table.
 func (s *Service) Rematch(ctx context.Context, userID, tableID string) (*TableView, error) {
 	t, err := loadTable(ctx, s.Pool, tableID, false)
 	if err != nil {
 		return nil, err
 	}
-	if t.HostID != userID {
+	if !t.hostRights(userID) {
 		return nil, ErrForbidden
+	}
+	newHost := t.HostID
+	if newHost == "" {
+		newHost = userID
 	}
 	if t.RematchID != "" {
 		return s.View(ctx, t.RematchID, userID)
@@ -471,7 +476,7 @@ func (s *Service) Rematch(ctx context.Context, userID, tableID string) (*TableVi
 		extra: func(ctx context.Context, tx pgx.Tx, _ int64) error {
 			seats := cloneSeats(t.Seats)
 			var err error
-			newID, err = insertTable(ctx, tx, newTable{name: t.Name, hostID: t.HostID, gameID: t.GameID, gameVersion: t.GameVersion,
+			newID, err = insertTable(ctx, tx, newTable{name: t.Name, hostID: newHost, gameID: t.GameID, gameVersion: t.GameVersion,
 				options: t.Options, settings: t.Settings, seats: seats, rematchOf: t.ID})
 			if err != nil {
 				return err

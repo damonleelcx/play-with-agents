@@ -55,7 +55,7 @@ func builtinCard(m games.Meta, plays int) GameCard {
 }
 
 const cardCols = `g.id, g.kind, g.name, g.summary, g.status, g.visibility, coalesce(u.name,''), coalesce(v.version, g.current_version), g.plays,
-	coalesce(v.meta, '{}'), g.rules_md, coalesce(g.goal_id::text,''), coalesce(g.owner_id::text,'')`
+	coalesce(v.meta, '{}'), g.rules_md, coalesce(g.goal_id::text,''), coalesce(g.owner_id::text,''), g.owner_gone`
 
 // The card shows the published version, or — for a game not published yet —
 // its newest version, so a draft already lists its seats.
@@ -70,13 +70,14 @@ const communityOwner = "Aoi's studio"
 type cardRow struct {
 	GameCard
 	rules, goal, owner string
+	ownerGone          bool
 }
 
 func scanCard(row pgx.Row) (*cardRow, error) {
 	var c cardRow
 	var meta []byte
 	if err := row.Scan(&c.ID, &c.Kind, &c.Name, &c.Summary, &c.Status, &c.Visibility, &c.OwnerName, &c.Version, &c.Plays,
-		&meta, &c.rules, &c.goal, &c.owner); err != nil {
+		&meta, &c.rules, &c.goal, &c.owner, &c.ownerGone); err != nil {
 		return nil, err
 	}
 	var m games.Meta
@@ -84,6 +85,10 @@ func scanCard(row pgx.Row) (*cardRow, error) {
 	c.MinSeats, c.MaxSeats, c.HiddenInfo = m.MinSeats, m.MaxSeats, m.HiddenInfo
 	if c.owner == "" && c.Kind == "script" {
 		c.OwnerName = communityOwner
+		if c.ownerGone {
+			// The owner deleted their account; the game stays (0013).
+			c.OwnerName = formerOwner
+		}
 	}
 	return &c, nil
 }

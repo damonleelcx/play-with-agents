@@ -122,6 +122,10 @@ type TableView struct {
 	// for a while). Status stays "playing"; nothing happens until a person
 	// moves or posts /back.
 	Paused bool `json:"paused"`
+	// PausedReason says why: "idle" (nobody attending) or "fault" (a job
+	// failed for good; only the host may resume, and a second fault closes
+	// the table). Empty when not paused. An additive field to the contract.
+	PausedReason string `json:"paused_reason,omitempty"`
 }
 
 type TableSummary struct {

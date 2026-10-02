@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { ChatLine, TableView } from '../../lib/playApi'
-import { speak, stop, unlock, useVoice } from '../../lib/voice'
+import { speakTableLine, stop, unlock, useVoice } from '../../lib/voice'
 
 // Aoi's table talk read aloud (Settings → Aoi → table_voice). Only lines that
 // arrive live (SSE) are spoken, never history; other agents stay text.
@@ -37,7 +37,8 @@ export function useAoiVoice(
       const key = KEY_PREFIX + line.id
       seats.current.set(key, line.seat)
       if (seats.current.size > 50) seats.current.delete(seats.current.keys().next().value as string)
-      speak(line.text, key).then((r) => {
+      const id = tableRef.current?.id ?? ''
+      speakTableLine(id, Number(line.id), key).then((r) => {
         setHeld(r === 'blocked')
         if (r === 'played' || r === 'blocked' || !simulate) return
         setSimSeat(line.seat)
