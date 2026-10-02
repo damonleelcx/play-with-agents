@@ -22,6 +22,7 @@ export type TableClient = {
   start: () => Promise<void>
   leave: () => Promise<boolean>
   rematch: () => Promise<string | null>
+  back: () => Promise<void> // "I'm back": clear my away mark, resume a paused table
   // live chat lines (SSE, or new mock lines), never history
   onLiveChat: (fn: (line: ChatLine) => void) => () => void
 }
@@ -331,5 +332,19 @@ export function useTable(id: string, mockKind: string | null, staleText = 'The t
     }
   }, [table, isMock, mockKind, syncMock, notify])
 
-  return { table, loading, notFound, conn, busy, mock: isMock, toasts, dismiss, notify, move, chat, setSeat, start, leave, rematch, onLiveChat }
+  const back = useCallback(async () => {
+    if (!table) return
+    if (isMock) {
+      mockRef.current?.back?.()
+      syncMock()
+      return
+    }
+    try {
+      adopt(await playApi.back(table.id))
+    } catch (e: any) {
+      notify('error', e?.message || 'Could not reach the table')
+    }
+  }, [table, isMock, syncMock, adopt, notify])
+
+  return { table, loading, notFound, conn, busy, mock: isMock, toasts, dismiss, notify, move, chat, setSeat, start, leave, rematch, back, onLiveChat }
 }

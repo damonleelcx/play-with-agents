@@ -168,18 +168,8 @@ export default function HoldemTable({
   return (
     <div className={`pw-holdem felt-${prefs.felt} ${compact ? 'is-compact' : ''} ${reduced ? 'is-reduced' : ''}`}>
       <div className="pw-holdem-stage">
-        <div className="pw-table-wrap" ref={wrapRef} style={{ '--k': k } as CSSProperties}>
-          <div className="pw-rail">
-            <div className="pw-felt">
-              <div className="pw-felt-light" />
-              <div className="pw-felt-line" />
-              <div className="pw-felt-logo" aria-hidden>
-                <span>PLAY WITH AGENTS</span>
-              </div>
-            </div>
-          </div>
-
-          {/* hand info */}
+        {/* hand info and status live in the band above the felt, never over a seat */}
+        <div className="pw-felt-meta">
           <div className="pw-hand-info">
             <span>{f(s.holdem.hand, { n: d.hand_no })}</span>
             <i />
@@ -192,6 +182,18 @@ export default function HoldemTable({
                 <span>{f(s.holdem.handsLeft, { n: d.hands_left })}</span>
               </>
             )}
+          </div>
+          {table.view?.status && <div className="pw-table-status">{table.view.status}</div>}
+        </div>
+        <div className="pw-table-wrap" ref={wrapRef} style={{ '--k': k } as CSSProperties}>
+          <div className="pw-rail">
+            <div className="pw-felt">
+              <div className="pw-felt-light" />
+              <div className="pw-felt-line" />
+              <div className="pw-felt-logo" aria-hidden>
+                <span>PLAY WITH AGENTS</span>
+              </div>
+            </div>
           </div>
 
           {/* pot */}
@@ -319,9 +321,6 @@ export default function HoldemTable({
             </div>
           )}
 
-          {/* status line */}
-          {table.view?.status && <div className="pw-table-status">{table.view.status}</div>}
-
           {/* result toast */}
           {resultOn && res && res.winners.length > 0 && (
             <ResultToast res={res} seats={table.seats} me={me} key={res.hand_no} />
@@ -426,9 +425,20 @@ function Seat({
   const showBacks = !isMe && p && status !== 'folded' && status !== 'out' && !reveal?.cards && handNo > 0
   const faceCards = !isMe && reveal?.cards
   const act = p?.last_action
+  // The amount is what makes a call or a raise readable at a glance; the
+  // street's bet is still on the table while the bubble shows.
+  const actAmount = act && ['call', 'bet', 'raise', 'allin'].includes(act) && p && p.bet > 0 ? ` ${fmtChips(p.bet)}` : ''
+  const showAct = !!act && status !== 'out' && status !== 'allin' && !winner
+  const actBubble = showAct ? (
+    <span className={`pw-act act-${act} ${isMe ? 'pw-act-me' : ''}`} key={`${handNo}-${act}-${p?.bet ?? 0}`}>
+      {s.holdem.actions[act!] || act}
+      {actAmount}
+    </span>
+  ) : null
   const cls = [
     'pw-seat',
     isMe ? 'is-me' : '',
+    info.away ? 'is-away' : '',
     `st-${status}`,
     active ? 'is-active' : '',
     winner ? 'is-winner' : '',
@@ -451,13 +461,10 @@ function Seat({
       <div className="pw-seat-av" style={{ width: avSize, height: avSize }}>
         <Avatar name={info.name} src={info.avatar} seat={info.seat} size={avSize} agent={info.kind === 'agent'} />
         {active && <TimerRing deadline={deadline} total={turnSeconds || 30} size={avSize + 12} />}
-        {act && status !== 'out' && status !== 'allin' && !winner && (
-          <span className={`pw-act act-${act}`} key={`${handNo}-${act}`}>
-            {s.holdem.actions[act] || act}
-          </span>
-        )}
+        {!isMe && actBubble}
         {(sb || bb) && status !== 'out' && <span className={`pw-blind ${bb ? 'bb' : 'sb'}`}>{bb ? 'BB' : 'SB'}</span>}
         {speaking && <VoiceWave />}
+        {info.away && <span className="pw-away-chip">{s.room.away}</span>}
       </div>
       <div className="pw-seat-plate">
         <b>
@@ -465,6 +472,8 @@ function Seat({
           {info.kind === 'agent' && <em className="pw-ai">AI</em>}
         </b>
         <span>{status === 'out' ? s.holdem.out : fmtChips(p?.stack ?? 0)}</span>
+        {/* My own cards cover my avatar, so my last action sits by my plate. */}
+        {isMe && actBubble}
       </div>
       {status === 'allin' && !winner && <span className="pw-badge-allin">{s.holdem.allin}</span>}
       {reveal?.hand && !isMe && <span className={`pw-handname ${winner ? 'is-win' : ''}`}>{reveal.hand}</span>}

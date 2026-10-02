@@ -130,14 +130,17 @@ export default function BoardView({
             const active = table.to_move.includes(p.seat)
             const col = resolveColor(p.color || `p${p.seat % 8}`)
             return (
-              <div key={p.seat} className={`pw-bg-player ${active ? 'is-active' : ''} ${p.seat === table.my_seat ? 'is-me' : ''}`} style={{ '--pc': col } as CSSProperties}>
+              <div key={p.seat} className={`pw-bg-player ${active ? 'is-active' : ''} ${p.seat === table.my_seat ? 'is-me' : ''} ${info?.away ? 'is-away' : ''}`} style={{ '--pc': col } as CSSProperties}>
                 <span className="pw-bg-av">
                   <Avatar name={info?.name || ''} src={info?.avatar} seat={p.seat} size={36} agent={info?.kind === 'agent'} />
                   {active && <TimerRing deadline={table.deadline} total={table.turn_seconds || 30} size={46} />}
                   {speakingSeat === p.seat && <VoiceWave />}
                 </span>
                 <span className="pw-bg-pname">
-                  <b>{info?.name || `Seat ${p.seat + 1}`}</b>
+                  <b>
+                    {info?.name || `Seat ${p.seat + 1}`}
+                    {info?.away && <em className="pw-away-tag">{s.room.away}</em>}
+                  </b>
                   <small>
                     <i className="pw-swatch" />
                     {p.info || ''}

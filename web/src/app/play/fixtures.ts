@@ -53,6 +53,7 @@ export interface MockGame {
   setSeat?(seat: number, kind: 'agent' | 'open', agentId?: string): void
   start?(): void
   rematch?(): void
+  back?(): void
 }
 
 const iso = (ms = 0) => new Date(Date.now() + ms).toISOString()
@@ -67,6 +68,7 @@ abstract class MockBase implements MockGame {
   deadline: string | null = null
   turnSeconds = 30
   me = 0
+  paused = false
   code = 'AOI7K2'
   abstract seats: SeatInfo[]
   abstract name: string
@@ -101,12 +103,24 @@ abstract class MockBase implements MockGame {
   touch() {
     this.version++
     const tm = this.toMove()
-    this.deadline = this.status === 'playing' && tm.length && this.turnSeconds ? iso(this.turnSeconds * 1000) : null
+    const awayTurn = tm.length > 0 && tm.every((s) => this.seats[s]?.away)
+    this.deadline = this.status === 'playing' && tm.length && this.turnSeconds ? iso(awayTurn ? 1500 : this.turnSeconds * 1000) : null
+  }
+  meAway() {
+    return !!this.seats[this.me]?.away
+  }
+  back() {
+    const s = this.seats[this.me]
+    if (s) delete s.away
+    this.paused = false
+    this.touch()
   }
   apply(seat: number, move: Move) {
     if (this.status !== 'playing') throw new Error('The game is not running.')
     if (!this.toMove().includes(seat)) throw new Error('It is not your turn.')
     this.applyMove(seat, move)
+    if (seat === this.me && this.seats[seat]) delete this.seats[seat].away
+    this.paused = false
     this.touch()
   }
   chat(text: string) {
@@ -130,13 +144,14 @@ abstract class MockBase implements MockGame {
       version: this.version,
       seats: this.seats.map((s) => ({ ...s })),
       to_move: tm,
-      deadline: this.deadline,
+      deadline: this.paused ? null : this.deadline,
       turn_seconds: this.turnSeconds,
       legal: this.status === 'playing' && tm.includes(this.me) ? this.legalFor(this.me) : [],
       view: { kind: this.viewKind, data: this.data(), status: this.statusText() },
       log: this.log.slice(),
       chat: this.chatLines.slice(),
       outcome: this.outcome,
+      paused: this.paused,
     }
   }
 }
@@ -411,10 +426,11 @@ class HoldemMock extends MockBase {
     this.addLog(-1, `Hand #${d.hand_no}`, 'deal')
   }
   pending() {
-    if (this.status !== 'playing') return null
+    if (this.status !== 'playing' || this.paused) return null
     const d = this.d
     if (d.street === 'showdown' || d.street === 'over') return d.street === 'showdown' ? this.holdShowdownMs : 2600
     if (d.to_act >= 0 && d.to_act !== this.me) return 900 + Math.random() * 900
+    if (d.to_act === this.me && this.meAway()) return 1500 // away: the default move after a short grace
     return null
   }
   step() {
@@ -422,6 +438,12 @@ class HoldemMock extends MockBase {
     if (d.street === 'showdown' || d.street === 'over') {
       this.holdShowdownMs = 5200
       this.nextHand()
+      this.touch()
+      return
+    }
+    if (d.to_act === this.me && this.meAway()) {
+      const legal = this.legalFor(this.me)
+      this.applyMove(this.me, { type: legal.some((l) => l.type === 'check') ? 'check' : 'fold' })
       this.touch()
       return
     }
@@ -947,8 +969,45 @@ function finishedFixture(): HoldemMock {
   return m
 }
 
+// A table of n seats (2..9) at hand #63 with big blinds, for layout checks:
+// /app/table/demo?mock=holdem-9
+function seatCountFixture(n: number): HoldemMock {
+  const others: SeatInfo[] = [
+    seatOf('aoi', 1), seatOf('ren', 2), seatOf('mika', 3), seatOf('bram', 4), seatOf('nova', 5), seatOf('lin', 6),
+    seatOf('friend', 7), { seat: 8, kind: 'human', name: 'Alexandria Montgomery', avatar: '' },
+  ]
+  const seats = [seatOf('me', 0), ...others.slice(0, n - 1).map((s, i) => ({ ...s, seat: i + 1 }))]
+  const d: HoldemData = {
+    hand_no: 62, hands_left: null, street: 'over', board: [], pots: [], pot_total: 0,
+    button: n - 1, sb_seat: 0, bb_seat: 1, small_blind: 640, big_blind: 1280,
+    current_bet: 0, min_raise_to: 2560, to_act: -1,
+    players: seats.map((s) => ({ seat: s.seat, stack: 18000 + s.seat * 3170, bet: 0, total_bet: 0, status: 'active', cards: null, last_action: '' })),
+    last_hand: null,
+  }
+  const m = new HoldemMock(seats, d)
+  m.nextHand()
+  m.touch()
+  return m
+}
+
 export function createMock(kind: string | null): MockGame | null {
+  const many = /^holdem-([2-9])$/.exec(kind || '')
+  if (many) return seatCountFixture(Number(many[1]))
   switch (kind) {
+    case 'holdem-away': {
+      // my seat is away (two missed clocks): dimmed seat, "I'm back" banner
+      const m = midFlop()
+      m.seats[0].away = true
+      m.touch()
+      return m
+    }
+    case 'holdem-paused': {
+      const m = midFlop()
+      m.seats[0].away = true
+      m.paused = true
+      m.touch()
+      return m
+    }
     case 'holdem':
       return midFlop()
     case 'holdem-showdown':

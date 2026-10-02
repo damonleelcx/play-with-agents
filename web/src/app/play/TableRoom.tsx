@@ -3,7 +3,7 @@ import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { playApi, type Agent, type HoldemData, type TableView } from '../../lib/playApi'
 import BoardView from './BoardView'
 import { ROSTER } from './fixtures'
-import HoldemTable, { useMediaQuery } from './HoldemTable'
+import HoldemTable from './HoldemTable'
 import { Avatar, Spinner } from './parts'
 import { fmtChips } from './poker'
 import SidePanel from './SidePanel'
@@ -27,6 +27,24 @@ export function useAgents() {
   return agents
 }
 
+// The side panel (players + chat) needs ~1200px of room next to a felt; below
+// that it becomes a drawer. Measured on the room itself, not the viewport,
+// because the app sidebar may be expanded or collapsed.
+const PANEL_MIN_ROOM = 1200
+const NARROW_ROOM = 720
+
+function useWidth(el: HTMLElement | null) {
+  const [w, setW] = useState(() => (typeof window !== 'undefined' ? window.innerWidth : 1280))
+  useEffect(() => {
+    if (!el) return
+    const ro = new ResizeObserver(() => setW(el.clientWidth))
+    ro.observe(el)
+    setW(el.clientWidth)
+    return () => ro.disconnect()
+  }, [el])
+  return w
+}
+
 export default function TableRoom({ tableId, mock }: { tableId?: string; mock?: string | null } = {}) {
   const params = useParams()
   const [sp] = useSearchParams()
@@ -36,8 +54,14 @@ export default function TableRoom({ tableId, mock }: { tableId?: string; mock?: 
   const client = useTable(id, mockKind, s.room.stale)
   const prefs = usePlayPrefs()
   const nav = useNavigate()
-  const compact = useMediaQuery('(max-width: 1023px)')
+  const [roomEl, setRoomEl] = useState<HTMLDivElement | null>(null)
+  const roomW = useWidth(roomEl)
+  const compact = roomW < PANEL_MIN_ROOM
+  const narrow = roomW < NARROW_ROOM
   const [panelOpen, setPanelOpen] = useState(false)
+  useEffect(() => {
+    if (!compact) setPanelOpen(false)
+  }, [compact])
   const [confirmLeave, setConfirmLeave] = useState(false)
   const { table } = client
   const tableRef = useRef(table)
@@ -78,6 +102,10 @@ export default function TableRoom({ tableId, mock }: { tableId?: string; mock?: 
     return p?.score !== undefined ? String(p.score) : null
   })
 
+  const mine = table.seats.find((st) => st.is_me)
+  const meAway = table.status === 'playing' && !!mine?.away
+  const paused = table.status === 'playing' && !!table.paused
+
   const leave = async () => {
     setConfirmLeave(false)
     if (await client.leave()) nav('/app/games')
@@ -86,11 +114,11 @@ export default function TableRoom({ tableId, mock }: { tableId?: string; mock?: 
   const side = <SidePanel table={table} onChat={client.chat} stacks={stacks} speakingSeat={speakingSeat} onClose={compact ? () => setPanelOpen(false) : undefined} />
 
   return (
-    <div className={`pw-room felt-${prefs.felt} ${compact ? 'is-compact' : ''}`} data-motion={prefs.motion}>
+    <div ref={setRoomEl} className={`pw-room felt-${prefs.felt} ${compact ? 'is-compact' : ''} ${narrow ? 'is-narrow' : ''}`} data-motion={prefs.motion}>
       <header className="pw-room-bar">
         <Link to="/app/games" className="pw-back" aria-label={s.room.back}>
           <span aria-hidden>‹</span>
-          {!compact && s.room.back}
+          {!narrow && s.room.back}
         </Link>
         <div className="pw-room-title">
           <b>{table.name}</b>
@@ -103,10 +131,17 @@ export default function TableRoom({ tableId, mock }: { tableId?: string; mock?: 
         <ConnBadge conn={client.conn} mock={client.mock} />
         <div className="pw-room-actions">
           {compact && (
-            <button type="button" className="pw-icon-btn pw-chat-toggle" onClick={() => setPanelOpen(true)} aria-label={s.room.chat}>
+            <button
+              type="button"
+              className={`pw-icon-btn pw-chat-toggle ${narrow ? '' : 'is-wide'}`}
+              onClick={() => setPanelOpen(true)}
+              aria-label={s.room.playersChat}
+              aria-expanded={panelOpen}
+            >
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
               </svg>
+              {!narrow && <span>{s.room.playersChat}</span>}
               {table.chat.length > 0 && <span className="pw-dot" />}
             </button>
           )}
@@ -120,6 +155,14 @@ export default function TableRoom({ tableId, mock }: { tableId?: string; mock?: 
 
       <div className="pw-room-body">
         <main className="pw-room-main">
+          {(meAway || paused) && (
+            <div className={`pw-away-banner ${meAway ? 'is-away' : 'is-paused'}`} role="status">
+              <span>{meAway ? s.room.awayNote : s.room.pausedNote}</span>
+              <button type="button" className="pw-btn pw-btn-primary" onClick={client.back} autoFocus={meAway}>
+                {meAway ? s.room.imBack : s.room.resume}
+              </button>
+            </div>
+          )}
           {table.status === 'lobby' && <LobbyStage table={table} client={client} />}
           {table.status === 'playing' && table.view?.kind === 'holdem' && <HoldemTable table={table} busy={client.busy} onMove={client.move} prefs={prefs} speakingSeat={speakingSeat} />}
           {table.status === 'playing' && table.view && table.view.kind !== 'holdem' && <BoardView table={table} busy={client.busy} onMove={client.move} prefs={prefs} speakingSeat={speakingSeat} />}
@@ -137,7 +180,7 @@ export default function TableRoom({ tableId, mock }: { tableId?: string; mock?: 
       </div>
 
       {compact && panelOpen && (
-        <div className="pw-drawer" onClick={(e) => e.target === e.currentTarget && setPanelOpen(false)}>
+        <div className={`pw-drawer ${narrow ? '' : 'is-side'}`} onClick={(e) => e.target === e.currentTarget && setPanelOpen(false)}>
           <div className="pw-drawer-sheet">{side}</div>
         </div>
       )}

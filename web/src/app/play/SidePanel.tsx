@@ -49,7 +49,7 @@ export default function SidePanel({
           {table.seats.map((st) => {
             const active = table.to_move.includes(st.seat)
             return (
-              <li key={st.seat} className={`${active ? 'is-active' : ''} ${st.kind === 'open' ? 'is-open' : ''}`}>
+              <li key={st.seat} className={`${active ? 'is-active' : ''} ${st.kind === 'open' ? 'is-open' : ''} ${st.away ? 'is-away' : ''}`}>
                 {st.kind === 'open' ? (
                   <span className="pw-av pw-av-empty" style={{ width: 26, height: 26 }} />
                 ) : (
@@ -59,6 +59,7 @@ export default function SidePanel({
                   {st.kind === 'open' ? s.room.openSeat : st.name}
                   {st.is_me && <em className="pw-you">{s.room.you}</em>}
                   {st.kind === 'agent' && <em className="pw-ai">{s.room.agentBadge}</em>}
+                  {st.away && <em className="pw-away-tag">{s.room.away}</em>}
                 </span>
                 {speakingSeat === st.seat && <VoiceWave inline />}
                 {stacks?.[st.seat] != null && <span className="pw-side-seat-val">{stacks[st.seat]}</span>}
