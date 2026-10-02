@@ -47,13 +47,18 @@ save(sheet, AOI / 'aoi-sheet.webp', 80, 400)
 
 TILES_X = [860, 976, 1091]
 TILES_Y = [67, 230]
-faces = ['neutral', 'smile', 'wink', 'surprised', 'angry', 'sad']
-for i, name in enumerate(faces):
-    x, y = TILES_X[i % 3] + 3, TILES_Y[i // 3] + 15
-    save(up(sheet.crop((x, y, x + 100, y + 100)), 4), AOI / f'aoi-face-{name}.webp', 85, 60)
+# HD expressions (wan2.5-i2i). Same square crop for all six so the set lines up.
+FACE_PICK = {'neutral': 'face2-neutral', 'smile': 'face-smile-1', 'wink': 'face2-wink-1',
+             'surprised': 'face2-surprised', 'angry': 'face2-angry-1', 'sad': 'face2-sad'}
+FACE_BOX = (50, 40, 910, 900)
+for name, f in FACE_PICK.items():
+    im = Image.open(RAW / f'{f}.png').convert('RGB').crop(FACE_BOX).resize((768, 768), Image.LANCZOS)
+    save(im, AOI / f'aoi-face-{name}.webp', 85, 88)
 
-for name, cx in zip(['default', 'casual', 'combat', 'summer'], [414, 532, 648, 762]):
-    save(up(sheet.crop((cx - 56, 690, cx + 56, 995)), 3), AOI / f'aoi-outfit-{name}.webp', 85, 120)
+# HD outfits (wan2.5-i2i), 768x1536
+OUTFIT_PICK = {'default': 'outfit-default', 'casual': 'outfit-casual', 'combat': 'outfit-combat', 'summer': 'outfit-summer'}
+for name, f in OUTFIT_PICK.items():
+    save(Image.open(RAW / f'{f}.png').convert('RGB'), AOI / f'aoi-outfit-{name}.webp', 85, 150)
 
 save(up(sheet.crop((840, 738, 1017, 1012)), 3), AOI / 'aoi-action.webp', 85, 150)
 # bottom strip: captions cropped away; the third (weapon) scene is deliberately skipped
@@ -74,9 +79,9 @@ t = Image.open(RAW / 'table.png').convert('RGB')
 t = t.resize((1937, 1080), Image.LANCZOS).filter(ImageFilter.UnsharpMask(1.4, 40, 2))
 save(t.crop((8, 0, 1928, 1080)), PUB / 'play/scene-table.webp', 82, 400)
 
-# --- favicons from the Smile expression -------------------------------------
-x, y = TILES_X[1] + 13, TILES_Y[0] + 35
-fav = up(sheet.crop((x, y, x + 80, y + 80)), 4)
+# --- favicons from the HD Smile expression ----------------------------------
+FAV_BOX = (270, 250, 690, 670)  # tight on the face, inside the 1024 render
+fav = Image.open(RAW / 'face-smile-1.png').convert('RGB').crop(FAV_BOX)
 fav.resize((64, 64), Image.LANCZOS).save(PUB / 'favicon.png', optimize=True)
 fav.resize((180, 180), Image.LANCZOS).save(PUB / 'apple-touch-icon.png', optimize=True)
 for f in ['favicon.png', 'apple-touch-icon.png']:
