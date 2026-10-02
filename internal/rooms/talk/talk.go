@@ -50,6 +50,8 @@ func (c *ModelChatter) Line(ctx context.Context, req rooms.ChatRequest) (string,
 
 Write ONE line of table talk, at most 140 characters, in %s. Stay in character, be friendly (teasing is fine, never insulting).
 Rules: you only know what is in PUBLIC TABLE below. Never claim to know, guess aloud or name anyone's hidden cards, including your own.
+React to the moment in your own voice: a boast, a joke, a sigh, a dare, a compliment. Never narrate or restate the action
+itself (the table log already shows it), and never start with a player's name followed by what they did.
 Never give strategy advice to a specific player. No hashtags, no emoji spam, no quotation marks, no stage directions, no name prefix.
 Chips are play money; never mention real money.`, req.AgentName, req.Voice, lang)
 
@@ -81,5 +83,36 @@ Chips are play money; never mention real money.`, req.AgentName, req.Voice, lang
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(resp.Message.Content), nil
+	line := strings.TrimSpace(resp.Message.Content)
+	if echoes(line, req.About) {
+		// A narrated action reads like a second log, not a person at the
+		// table; the canned line bank is better than that.
+		return "", errEcho
+	}
+	return line, nil
+}
+
+var errEcho = errors.New("model restated the action instead of reacting")
+
+// echoes reports whether line mostly repeats about: most of its words
+// appear in the event it was asked to react to.
+func echoes(line, about string) bool {
+	if line == "" || about == "" {
+		return false
+	}
+	in := map[string]bool{}
+	for _, w := range strings.Fields(strings.ToLower(about)) {
+		in[strings.Trim(w, ".,!?:;")] = true
+	}
+	words := strings.Fields(strings.ToLower(line))
+	if len(words) == 0 {
+		return false
+	}
+	same := 0
+	for _, w := range words {
+		if in[strings.Trim(w, ".,!?:;")] {
+			same++
+		}
+	}
+	return float64(same)/float64(len(words)) >= 0.6
 }
