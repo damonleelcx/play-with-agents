@@ -1,0 +1,188 @@
+/* HoloCard (components/HoloCard.tsx). The card sizes itself to its
+   container's width; set `width` on .holo from the outside. */
+.holo {
+  position: relative;
+  margin: 0;
+  width: 320px;
+  display: grid;
+  justify-items: center;
+  gap: 18px;
+  isolation: isolate;
+  -webkit-tap-highlight-color: transparent;
+}
+.holo-embers {
+  position: absolute;
+  left: -45%;
+  right: -45%;
+  top: -18%;
+  bottom: -6%;
+  width: 190%;
+  height: 124%;
+  pointer-events: none;
+  z-index: 2;
+}
+.holo-ground {
+  position: absolute;
+  left: 8%;
+  right: 8%;
+  bottom: calc(1.6em + 4px);
+  height: 26px;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(0, 0, 0, 0.42), transparent);
+  filter: blur(6px);
+  z-index: 0;
+  animation: holo-shadow 6.5s ease-in-out infinite;
+}
+.holo-stage {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  aspect-ratio: 300 / 420;
+  touch-action: pan-y;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  border-radius: 5%;
+  outline: none;
+}
+.holo-stage:active { cursor: grabbing; }
+.holo-stage:focus-visible { box-shadow: 0 0 0 3px rgba(233, 196, 106, 0.85), 0 0 0 7px rgba(61, 123, 255, 0.35); }
+.holo-float {
+  width: 100%;
+  height: 100%;
+  animation: holo-float 6.5s ease-in-out infinite;
+}
+.holo.is-paused .holo-float,
+.holo.is-paused .holo-ground,
+.holo.is-paused .holo-strip { animation-play-state: paused; }
+@keyframes holo-float {
+  0%, 100% { transform: translate3d(0, 0, 0); }
+  50% { transform: translate3d(0, -12px, 0); }
+}
+@keyframes holo-shadow {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(0.88); opacity: 0.7; }
+}
+.holo-card {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transform-style: preserve-3d;
+  will-change: transform;
+  transform: perspective(1400px);
+  --mx: 50%;
+  --my: 50%;
+  --fx: 50%;
+  --fy: 50%;
+  --glare: 0;
+}
+.holo-face {
+  position: absolute;
+  inset: 0;
+  border-radius: 5% / 3.6%;
+  overflow: hidden;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  box-shadow: 0 28px 60px -18px rgba(0, 0, 0, 0.7), 0 10px 22px rgba(0, 0, 0, 0.32);
+  background: #0b0805;
+}
+.holo-back { transform: rotateY(180deg); }
+.holo-frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+.holo-title { font-family: 'Cinzel', 'Cormorant Garamond', 'Songti SC', serif; font-weight: 700; font-size: 19px; letter-spacing: 1.6px; }
+.holo-sub, .holo-kicker { font-family: 'Cinzel', 'Cormorant Garamond', serif; font-weight: 500; font-size: 6.4px; letter-spacing: 2.6px; }
+.holo-plate { font-family: 'Cinzel', 'Cormorant Garamond', 'Songti SC', 'STSong', serif; font-weight: 700; font-size: 18px; letter-spacing: 2px; }
+.holo-back-title { font-family: 'Cinzel', 'Cormorant Garamond', serif; font-weight: 700; font-size: 15px; letter-spacing: 2.4px; }
+.holo-suit { font-family: Georgia, serif; font-size: 24px; }
+.holo-strip { animation: holo-strip 3.2s ease-in-out infinite; }
+@keyframes holo-strip { 0%, 100% { opacity: 0.55; } 50% { opacity: 1; } }
+
+/* the arched portrait window (matches the cut-out in the SVG frame) */
+.holo-portrait {
+  position: absolute;
+  left: 14.6%;
+  width: 70.8%;
+  top: 16.8%;
+  height: 61.4%;
+  border-radius: 50% 50% 0 0 / 30% 30% 0 0;
+  overflow: hidden;
+  background:
+    radial-gradient(120% 70% at 50% 0%, rgba(214, 230, 255, 0.95), rgba(91, 147, 255, 0.55) 35%, rgba(13, 21, 40, 0.95) 75%),
+    #0d1528;
+}
+.holo-rays {
+  position: absolute;
+  inset: 0;
+  background: repeating-conic-gradient(from 180deg at 50% -10%, rgba(255, 255, 255, 0.12) 0deg 3deg, transparent 3deg 9deg);
+  mix-blend-mode: soft-light;
+}
+.holo-portrait img {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: 50% 12%;
+  display: block;
+  pointer-events: none;
+}
+.holo-glyph {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-family: var(--font-serif);
+  font-size: 7rem;
+  color: rgba(243, 247, 255, 0.92);
+  text-shadow: 0 0 30px rgba(91, 147, 255, 0.9), 0 0 80px rgba(61, 123, 255, 0.6);
+}
+
+/* foil: rainbow bands + fine sparkle, slid by the pointer / rotation */
+.holo-foil {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    repeating-linear-gradient(
+      118deg,
+      hsl(2 90% 62%) 0%, hsl(42 95% 62%) 5%, hsl(120 80% 60%) 10%,
+      hsl(190 95% 62%) 15%, hsl(250 90% 70%) 20%, hsl(320 90% 66%) 25%, hsl(2 90% 62%) 30%
+    ),
+    radial-gradient(rgba(255, 255, 255, 0.9) 0.5px, transparent 1.3px);
+  background-size: 260% 260%, 5px 5px;
+  background-position: var(--fx) var(--fy), 0 0;
+  mix-blend-mode: color-dodge;
+  opacity: calc(0.05 + var(--glare) * 0.2);
+  filter: saturate(1.05) contrast(1.1);
+  -webkit-mask-image: radial-gradient(farthest-corner circle at var(--mx) var(--my), #000 0%, rgba(0, 0, 0, 0.45) 55%, rgba(0, 0, 0, 0.2) 100%);
+  mask-image: radial-gradient(farthest-corner circle at var(--mx) var(--my), #000 0%, rgba(0, 0, 0, 0.45) 55%, rgba(0, 0, 0, 0.2) 100%);
+}
+.holo-glare {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(farthest-corner circle at var(--mx) var(--my), rgba(255, 255, 255, 0.7) 0%, rgba(255, 255, 255, 0.16) 22%, rgba(0, 0, 0, 0.32) 95%);
+  mix-blend-mode: overlay;
+  opacity: calc(var(--glare) * 0.85);
+}
+.holo-caption {
+  position: relative;
+  z-index: 3;
+  font-family: var(--font-serif);
+  font-size: 12px;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  text-align: center;
+  line-height: 1.6;
+  color: inherit;
+  opacity: 0.72;
+  white-space: nowrap;
+}
+@media (prefers-reduced-motion: reduce) {
+  .holo-float, .holo-ground, .holo-strip { animation: none; }
+  .holo-embers { display: none; }
+}
