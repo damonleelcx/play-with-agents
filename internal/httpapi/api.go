@@ -131,9 +131,14 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request, u *auth.Use
 			}
 		}
 		if len(set) > 0 || len(reset) > 0 {
-			// jsonb - text[] removes the reset keys; || merges the rest.
+			// jsonb - text[] removes the reset keys; || merges the rest. A nil
+			// slice arrives as SQL NULL, and jsonb - NULL is NULL: the whole
+			// row would be wiped (and refused by NOT NULL), so it is coalesced.
+			if reset == nil {
+				reset = []string{}
+			}
 			_, err := tx.Exec(r.Context(), `INSERT INTO user_preferences (user_id, data) VALUES ($1, $2)
-				ON CONFLICT (user_id) DO UPDATE SET data = (user_preferences.data - $3::text[]) || EXCLUDED.data, updated_at=now()`,
+				ON CONFLICT (user_id) DO UPDATE SET data = (user_preferences.data - COALESCE($3::text[], '{}')) || EXCLUDED.data, updated_at=now()`,
 				u.ID, patch, reset)
 			return err
 		}
