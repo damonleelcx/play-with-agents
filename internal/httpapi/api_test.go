@@ -37,7 +37,7 @@ func TestValidateSettings(t *testing.T) {
 		{"aoi_tone": "grumpy"},
 		{"turn_seconds": float64(45)},
 		{"playtest_games": "200"},
-		{"theme": "dark"},               // not a setting any more
+		{"theme": "sepia"},
 		{"nonsense": nil},               // cannot reset what does not exist
 		{"favorite_agents": []any{"x"}}, // not on the roster
 		{"display_name": strings.Repeat("n", maxNameLen+1)},
@@ -64,13 +64,14 @@ func TestSchemaCoversEverySettingOnce(t *testing.T) {
 		"aoi_voice", "voice_autoplay", "table_voice", "voice_volume",
 		"turn_seconds", "agent_speed", "table_talk", "four_color_deck", "auto_muck", "show_hand_strength", "sound", "motion",
 		"card_back", "felt", "agent_difficulty", "fill_empty_seats", "favorite_agents", "studio_visibility", "playtest_games",
-		"email_table_invites", "email_your_turn", "email_build_done"} {
+		"email_table_invites", "email_your_turn", "email_build_done",
+		"theme", "font_size", "goal_max_cost_usd", "goal_max_days"} {
 		if !seen[k] {
 			t.Errorf("setting %s missing from the schema", k)
 		}
 	}
-	if len(seen) != 29 {
-		t.Errorf("schema has %d settings, the contract has 29", len(seen))
+	if len(seen) != 33 {
+		t.Errorf("schema has %d settings, the contract has 33", len(seen))
 	}
 }
 

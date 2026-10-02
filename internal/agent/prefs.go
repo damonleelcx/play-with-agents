@@ -77,6 +77,16 @@ var PrefSpecs = []PrefSpec{
 	{Key: "studio_visibility", Group: "studio", Kind: PrefEnum, Values: []string{"private", "unlisted", "public"}, Default: "private", Chat: true},
 	{Key: "playtest_games", Group: "studio", Kind: PrefInt, Values: []string{"50", "200", "500"}, Default: 200, Chat: true},
 
+	// Appearance: applied by the browser, stored here so it follows the
+	// player to every device.
+	{Key: "theme", Group: "appearance", Kind: PrefEnum, Values: []string{"dark", "light", "system"}, Default: "dark", Chat: true},
+	{Key: "font_size", Group: "appearance", Kind: PrefEnum, Values: []string{"small", "medium", "large"}, Default: "medium", Chat: true},
+
+	// Usage & limits: ceilings for one studio build (a mission), on top of
+	// the account and deployment token caps.
+	{Key: "goal_max_cost_usd", Group: "limits", Kind: PrefRange, Min: 1, Max: 200, Default: 20},
+	{Key: "goal_max_days", Group: "limits", Kind: PrefRange, Min: 1, Max: 180, Default: 30},
+
 	{Key: "email_table_invites", Group: "notifications", Kind: PrefBool, Default: true, Chat: true},
 	{Key: "email_your_turn", Group: "notifications", Kind: PrefBool, Default: true, Chat: true},
 	{Key: "email_build_done", Group: "notifications", Kind: PrefBool, Default: true, Chat: true},

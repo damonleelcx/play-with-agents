@@ -397,14 +397,15 @@ func TestDetectLang(t *testing.T) {
 
 func TestPreferenceValidation(t *testing.T) {
 	good := map[string]any{"language": "zh", "aoi_tone": "calm", "turn_seconds": float64(0), "playtest_games": float64(500),
-		"call_me": "Cap", "favorite_agents": []any{"mika", "lin"}, "sound": false, "voice_volume": float64(0), "aoi_voice": false}
+		"call_me": "Cap", "favorite_agents": []any{"mika", "lin"}, "sound": false, "voice_volume": float64(0), "aoi_voice": false,
+		"theme": "light", "font_size": "large", "goal_max_cost_usd": float64(50), "goal_max_days": float64(14)}
 	for k, v := range good {
 		if err := ValidatePref(k, v); err != nil {
 			t.Errorf("%s=%v rejected: %v", k, v, err)
 		}
 	}
 	bad := map[string]any{"language": "fr", "aoi_tone": "grumpy", "turn_seconds": float64(45), "playtest_games": "200",
-		"call_me": strings.Repeat("x", 41), "favorite_agents": []any{"mika", "mika"}, "sound": "yes", "theme": "dark", "display_name": "x"}
+		"call_me": strings.Repeat("x", 41), "favorite_agents": []any{"mika", "mika"}, "sound": "yes", "theme": "sepia", "font_size": "huge", "goal_max_days": float64(365), "display_name": "x"}
 	for k, v := range bad {
 		if err := ValidatePref(k, v); err == nil {
 			t.Errorf("%s=%v accepted", k, v)
