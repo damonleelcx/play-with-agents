@@ -102,10 +102,10 @@ func (s *SMTP) Send(ctx context.Context, m Message) (string, error) {
 
 func build(from string, m Message, msgID string) []byte {
 	var b strings.Builder
-	boundary := "act-" + strings.Trim(msgID, "<>")
+	boundary := "play-" + strings.Trim(msgID, "<>")
 	boundary = strings.NewReplacer("@", "-", ".", "-").Replace(boundary)
 	h := func(k, v string) { b.WriteString(k + ": " + v + "\r\n") }
-	h("From", mime.QEncoding.Encode("utf-8", "Vera · Act")+" <"+from+">")
+	h("From", mime.QEncoding.Encode("utf-8", SenderName)+" <"+from+">")
 	h("To", m.To)
 	if m.ReplyTo != "" {
 		h("Reply-To", m.ReplyTo)
@@ -178,19 +178,34 @@ func (Log) Send(_ context.Context, m Message) (string, error) {
 	return "log-" + m.MessageID, nil
 }
 
-// Page is the branded HTML frame every ACT email uses: title, lead paragraph,
-// one call-to-action button, the link spelled out, and a footnote.
-func Page(title, lead, cta, link, foot string) string {
+// SenderName is the display name on every message: Aoi writes the emails.
+const SenderName = "Aoi · Play with Agents"
+
+// Signature is how Aoi signs off, per language.
+func Signature(lang string) string {
+	if lang == "zh" {
+		return "—— 葵 · Play with Agents"
+	}
+	return "— Aoi · Play with Agents"
+}
+
+// Page is the branded HTML frame every email uses: the wordmark, a title, a
+// lead paragraph, one call-to-action button, the link spelled out, a footnote
+// and Aoi's sign-off. Navy and blue to match the site. Table layout and
+// inline styles because that is what mail clients render reliably.
+func Page(lang, title, lead, cta, link, foot string) string {
 	e := html.EscapeString
-	return `<!doctype html><html><body style="margin:0;background:#f4ede1;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#1d1b18">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0"><tr><td align="center" style="padding:40px 16px">
-<table role="presentation" width="520" cellpadding="0" cellspacing="0" style="max-width:520px;background:#fffaf2;border-radius:20px;padding:36px">
-<tr><td style="font-size:13px;letter-spacing:.2em;font-weight:700;color:#e8662a">ACT</td></tr>
-<tr><td style="padding-top:18px;font-size:26px;font-weight:700;line-height:1.2">` + e(title) + `</td></tr>
-<tr><td style="padding-top:14px;font-size:15px;line-height:1.6;color:#4a453e">` + e(lead) + `</td></tr>
-<tr><td style="padding-top:26px"><a href="` + e(link) + `" style="display:inline-block;background:#1d1b18;color:#fffaf2;text-decoration:none;padding:14px 26px;border-radius:999px;font-weight:600">` + e(cta) + `</a></td></tr>
-<tr><td style="padding-top:22px;font-size:12px;line-height:1.6;color:#8a8278;word-break:break-all">` + e(link) + `</td></tr>
-<tr><td style="padding-top:18px;font-size:13px;line-height:1.6;color:#8a8278">` + e(foot) + `</td></tr>
-<tr><td style="padding-top:26px;font-size:13px;color:#4a453e">— Vera · ACT</td></tr>
-</table></td></tr></table></body></html>`
+	return `<!doctype html><html><body style="margin:0;background:#0b1430;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#e8eeff">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0b1430"><tr><td align="center" style="padding:40px 16px">
+<table role="presentation" width="520" cellpadding="0" cellspacing="0" style="max-width:520px;background:#121e45;border:1px solid #23346e;border-radius:20px;padding:36px">
+<tr><td style="font-size:12px;letter-spacing:.22em;font-weight:700;color:#4f8cff">PLAY WITH AGENTS</td></tr>
+<tr><td style="padding-top:18px;font-size:26px;font-weight:700;line-height:1.25;color:#ffffff">` + e(title) + `</td></tr>
+<tr><td style="padding-top:14px;font-size:15px;line-height:1.65;color:#c3cdee">` + e(lead) + `</td></tr>
+<tr><td style="padding-top:26px"><a href="` + e(link) + `" style="display:inline-block;background:#4f8cff;color:#ffffff;text-decoration:none;padding:14px 28px;border-radius:999px;font-weight:600">` + e(cta) + `</a></td></tr>
+<tr><td style="padding-top:22px;font-size:12px;line-height:1.6;color:#7f8bb5;word-break:break-all">` + e(link) + `</td></tr>
+<tr><td style="padding-top:18px;font-size:13px;line-height:1.6;color:#7f8bb5">` + e(foot) + `</td></tr>
+<tr><td style="padding-top:26px;font-size:14px;color:#3fd2ff">` + e(Signature(lang)) + `</td></tr>
+</table>
+<p style="margin:18px 0 0;font-size:11px;color:#56618a">Play money only — no purchases, no cash-out, no real-money wagering.</p>
+</td></tr></table></body></html>`
 }

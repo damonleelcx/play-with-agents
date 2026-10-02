@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log/slog"
 	"math/rand"
-	"net/http"
 	"os"
 	"strings"
 	"time"
@@ -22,17 +21,14 @@ import (
 )
 
 type Worker struct {
-	ID            string
-	Store         *Store
-	Model         *Model
-	Planner       *Planner
-	LLM           string
-	Mailer        mail.Mailer
-	HTTP          *http.Client
-	Lease         time.Duration
-	CourtListener string
-	OnCallEmail   string
-	// Wake is signalled when new work may exist (LISTEN act_work), so an idle
+	ID      string
+	Store   *Store
+	Model   *Model
+	Planner *Planner
+	LLM     string
+	Mailer  mail.Mailer
+	Lease   time.Duration
+	// Wake is signalled when new work may exist (LISTEN play_work), so an idle
 	// worker does not wait out its poll interval.
 	Wake <-chan struct{}
 	// Hook, if set, runs after each checkpoint. Tests use it to crash a worker
@@ -226,9 +222,8 @@ func (w *Worker) runLLM(ctx context.Context, g *Goal, t *Task) (map[string]any, 
 	if err != nil {
 		return nil, err
 	}
-	env := &tools.Env{Pool: w.Store.Pool, Mailer: w.Mailer, HTTP: w.HTTP, UserID: g.UserID, UserEmail: client.Email,
-		UserName: client.Name, GoalID: g.ID, TaskID: t.ID, ConversationID: g.ConversationID, Lang: g.Language,
-		CourtListener: w.CourtListener, OnCallEmail: w.OnCallEmail}
+	env := &tools.Env{Pool: w.Store.Pool, Mailer: w.Mailer, UserID: g.UserID, UserEmail: client.Email,
+		UserName: client.Name, GoalID: g.ID, TaskID: t.ID, ConversationID: g.ConversationID, Lang: g.Language}
 
 	maxSteps := t.Spec.MaxSteps
 	if maxSteps == 0 {
@@ -275,7 +270,7 @@ func (w *Worker) runLLM(ctx context.Context, g *Goal, t *Task) (map[string]any, 
 				return nil, err
 			}
 		case "rejected":
-			content = "DECLINED by the reviewer. Note: " + note + ". Do not retry the same action; adapt or explain what the client can do instead."
+			content = "DECLINED by the owner. Note: " + note + ". Do not retry the same action; adapt, or explain what the player can do instead."
 		default:
 			return nil, &errParked{pc.ApprovalID} // still pending (spurious wake)
 		}
@@ -298,7 +293,7 @@ func (w *Worker) runLLM(ctx context.Context, g *Goal, t *Task) (map[string]any, 
 		remaining := maxSteps + 2*cp.Verifier - cp.Step
 		stepDefs := defs
 		if remaining <= 3 && len(msgs) > 0 && msgs[len(msgs)-1].Role == "tool" {
-			note := fmt.Sprintf("[system] %d step(s) left for this task. Stop gathering; finish the deliverable with what you have now (save it if the task needs a document), then give your final summary.", remaining)
+			note := fmt.Sprintf("[system] %d step(s) left for this task. Stop gathering; finish the deliverable with what you have now (save it if the task produces something), then give your final summary.", remaining)
 			if remaining <= 1 {
 				note = "[system] This is the last step. Tools are no longer available: write your final summary now, stating anything still missing."
 				stepDefs = nil
@@ -318,9 +313,8 @@ func (w *Worker) runLLM(ctx context.Context, g *Goal, t *Task) (map[string]any, 
 			// The model says it is done. Verify before believing it.
 			problems := w.verifyStep(ctx, t)
 			if len(problems) == 0 {
-				docs := w.Store.TaskDocuments(ctx, t.ID)
 				w.Store.Event(ctx, g.UserID, g.ID, t.ID, "task.verified", map[string]any{"task": t.Title, "checks": t.Spec.Verify})
-				return map[string]any{"summary": truncate(msg.Content, 4000), "documents": docs}, nil
+				return map[string]any{"summary": truncate(msg.Content, 4000)}, nil
 			}
 			if cp.Verifier >= 2 {
 				return nil, fmt.Errorf("%w: verification still failing after corrections: %s", errPermanentTask, strings.Join(problems, "; "))
@@ -397,75 +391,21 @@ func (w *Worker) checkGoal(ctx context.Context, goalID string) error {
 }
 
 // verifyStep runs the deterministic checks the task declared. It trusts the
-// tool_calls ledger, not the model's account of what it did.
+// database (the tool_calls ledger and what tools wrote), not the model's
+// account of what it did. An unknown verifier is a problem, not a pass: the
+// planner validated the name, so it can only be unknown here if the process
+// running this task lacks a registration the planner had — fail closed.
 func (w *Worker) verifyStep(ctx context.Context, t *Task) []string {
 	var problems []string
-	for _, v := range t.Spec.Verify {
-		switch v {
-		case "document_saved":
-			var n int
-			_ = w.Store.Pool.QueryRow(ctx, `SELECT count(*) FROM documents WHERE task_id=$1`, t.ID).Scan(&n)
-			if n == 0 {
-				problems = append(problems, "no document was saved. Call save_document NOW with this task's deliverable. "+
-					"If facts are missing, still save it: write what is known, and list what is missing under a clear heading — "+
-					"memory_save and notify_user do not count as saving the document")
-			}
-		case "citations_verified":
-			if bad := w.unverifiedCitations(ctx, t.ID); len(bad) > 0 {
-				problems = append(problems, "these citations in saved documents are not verified on CourtListener — remove or replace them, save again, and re-verify: "+strings.Join(bad, ", "))
-			}
-		case "signed_off":
-			var n int
-			_ = w.Store.Pool.QueryRow(ctx, `SELECT count(*) FROM tool_calls WHERE task_id=$1 AND tool='request_professional_signoff' AND status='succeeded'`, t.ID).Scan(&n)
-			if n == 0 {
-				problems = append(problems, "no licensed professional has signed off — call request_professional_signoff")
-			}
-		}
-	}
-	return problems
-}
-
-// unverifiedCitations: every citation in the LATEST version of each document
-// this task saved must appear in the verified list of some successful
-// legal_verify_citations call made by this task.
-func (w *Worker) unverifiedCitations(ctx context.Context, taskID string) []string {
-	verified := map[string]bool{}
-	rows, err := w.Store.Pool.Query(ctx, `SELECT output FROM tool_calls WHERE task_id=$1 AND tool='legal_verify_citations' AND status='succeeded'`, taskID)
-	if err == nil {
-		for rows.Next() {
-			var raw []byte
-			if rows.Scan(&raw) == nil {
-				var o struct {
-					Verified []struct {
-						Citation string `json:"citation"`
-					} `json:"verified"`
-				}
-				_ = json.Unmarshal(raw, &o)
-				for _, v := range o.Verified {
-					verified[v.Citation] = true
-				}
-			}
-		}
-		rows.Close()
-	}
-	var bad []string
-	rows, err = w.Store.Pool.Query(ctx, `SELECT DISTINCT ON (title) content FROM documents WHERE task_id=$1 ORDER BY title, version DESC`, taskID)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var content string
-		if rows.Scan(&content) != nil {
+	for _, name := range t.Spec.Verify {
+		v, ok := lookupVerifier(name)
+		if !ok {
+			problems = append(problems, fmt.Sprintf("verifier %q is not available in this worker", name))
 			continue
 		}
-		for _, c := range tools.ExtractCitations(content) {
-			if !verified[c] {
-				bad = append(bad, c)
-			}
-		}
+		problems = append(problems, v.Check(ctx, w.Store, t)...)
 	}
-	return bad
+	return problems
 }
 
 func allowed(list []string, name string) bool {
@@ -484,7 +424,7 @@ func toolResultText(res *tools.Result, err error) string {
 		case errors.As(err, &inv):
 			return "ERROR (fix the arguments): " + err.Error()
 		case errors.Is(err, tools.ErrBlocked):
-			return "BLOCKED: " + err.Error() + " Explain to the client what a licensed professional must do in person."
+			return "BLOCKED: " + err.Error() + ". Do not try it another way; tell the player plainly what you could not do and what they can do instead."
 		default:
 			return "ERROR: " + truncate(err.Error(), 800)
 		}
@@ -529,13 +469,14 @@ func sleepCtx(ctx context.Context, d time.Duration) {
 // ── Approvals ──────────────────────────────────────────────────────────────
 
 // RequestApproval persists the checkpoint (with the pending call), the
-// approval row and the parked task state in ONE transaction.
+// approval row, the parked task state and the owner's notification in ONE
+// transaction.
 func (s *Store) RequestApproval(ctx context.Context, g *Goal, t *Task, cp *Checkpoint, pc *PendingCall, need *tools.NeedsApproval) (string, error) {
 	var id string
 	err := pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
-		if err := tx.QueryRow(ctx, `INSERT INTO approvals (goal_id, task_id, user_id, tool, args, call_id, preview, gate, required_role)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING id`, g.ID, t.ID, g.UserID, pc.Tool, []byte(pc.Args), pc.CallID,
-			need.Preview, string(need.Gate), need.Role).Scan(&id); err != nil {
+		if err := tx.QueryRow(ctx, `INSERT INTO approvals (goal_id, task_id, user_id, tool, args, call_id, preview, gate)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, g.ID, t.ID, g.UserID, pc.Tool, []byte(pc.Args), pc.CallID,
+			need.Preview, string(need.Gate)).Scan(&id); err != nil {
 			return err
 		}
 		pc.ApprovalID = id
@@ -550,11 +491,11 @@ func (s *Store) RequestApproval(ctx context.Context, g *Goal, t *Task, cp *Check
 			return err
 		}
 		// Same transaction: the email exists if and only if the approval does.
-		if _, err := notify.ApprovalRequested(ctx, tx, id); err != nil {
+		if _, err := notify.ApprovalRequested(ctx, tx, id, need.Notify); err != nil {
 			return err
 		}
 		return eventTx(ctx, tx, g.UserID, g.ID, t.ID, "approval.requested", map[string]any{"task": t.Title, "tool": pc.Tool,
-			"gate": need.Gate, "role": need.Role, "why": "this action needs " + map[bool]string{true: "a licensed " + need.Role + "'s", false: "the client's"}[need.Gate == tools.G2] + " approval"})
+			"gate": need.Gate, "why": "this action needs the owner's approval"})
 	})
 	return id, err
 }
@@ -565,8 +506,8 @@ func (s *Store) ApprovalDecision(ctx context.Context, id string) (string, string
 	return status, note, err
 }
 
-// Decide records a person's decision and wakes the parked task. The caller
-// has already checked the person may decide this gate.
+// Decide records the owner's decision and wakes the parked task. The caller
+// has already checked that this person may decide (only the goal's owner can).
 func (s *Store) Decide(ctx context.Context, approvalID, deciderID string, approve bool, note string) error {
 	return pgx.BeginFunc(ctx, s.Pool, func(tx pgx.Tx) error {
 		var goalID, taskID, userID, tool string
@@ -583,27 +524,7 @@ func (s *Store) Decide(ctx context.Context, approvalID, deciderID string, approv
 		if _, err := tx.Exec(ctx, `UPDATE tasks SET status='ready', run_after=now(), updated_at=now() WHERE id=$1 AND status='waiting_approval'`, taskID); err != nil {
 			return err
 		}
-		_, _ = tx.Exec(ctx, `SELECT pg_notify('act_work', $1)`, goalID)
-		if _, err := notify.ApprovalDecided(ctx, tx, approvalID); err != nil {
-			return err
-		}
+		_, _ = tx.Exec(ctx, `SELECT pg_notify('play_work', $1)`, goalID)
 		return eventTx(ctx, tx, userID, goalID, taskID, "approval.decided", map[string]any{"tool": tool, "decision": status, "note": note, "by": deciderID})
 	})
-}
-
-func (s *Store) TaskDocuments(ctx context.Context, taskID string) []any {
-	rows, err := s.Pool.Query(ctx, `SELECT id, title, version FROM documents WHERE task_id=$1 ORDER BY created_at`, taskID)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	out := []any{}
-	for rows.Next() {
-		var id, title string
-		var v int
-		if rows.Scan(&id, &title, &v) == nil {
-			out = append(out, map[string]any{"id": id, "title": title, "version": v})
-		}
-	}
-	return out
 }

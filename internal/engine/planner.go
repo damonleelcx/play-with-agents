@@ -125,7 +125,7 @@ func validate(proposed []PlannedTask, existing map[string]int, lim Limits) (map[
 			}
 		}
 		for _, v := range p.Verify {
-			if v != "document_saved" && v != "citations_verified" && v != "signed_off" {
+			if _, ok := lookupVerifier(v); !ok {
 				return nil, fmt.Errorf("task %q has unknown verifier %q", p.Key, v)
 			}
 		}
@@ -223,12 +223,15 @@ YOU ARE PLANNING, not executing. Reply with JSON only.`
 func (p *Planner) Initial(ctx context.Context, g *Goal, t *Task) error {
 	sk, ok := skills.Get(g.Skill)
 	if !ok {
-		sk, _ = skills.Get("general-task")
+		sk, _ = skills.Get(skills.Fallback)
 	}
 	template := fromSkill(sk)
 	tmplJSON, _ := json.MarshalIndent(template, "", " ")
-	c, _ := p.Store.Client(ctx, g.UserID)
-	prompt := fmt.Sprintf(`Tailor this playbook into a plan for THIS client's situation.
+	var memories []string
+	if c, _ := p.Store.Client(ctx, g.UserID); c != nil && c.Prefs["memory_enabled"] != false {
+		memories = p.Store.Memories(ctx, g.UserID, 10)
+	}
+	prompt := fmt.Sprintf(`Tailor this playbook into a plan for THIS player's request.
 
 PLAYBOOK %q — %s
 %s
@@ -236,10 +239,10 @@ PLAYBOOK %q — %s
 SITUATION
 %s
 
-Return JSON: {"title": short case title in the client's language, "criteria": [measurable completion criteria], "milestones": [3-5 short names], "tasks": [ {key,title,instructions,tools,deps,verify,wait_days} ]}.
-Rules: keep the playbook's safety steps (red-flag checks, citation verification, professional sign-off, approvals) — never remove them. You may drop steps that clearly do not apply, add at most 4 steps, and make instructions specific to the facts. Keys are lowercase-with-dashes. Tools must come from the playbook. At most %d tasks, depth at most %d. Task titles in the client's language (%s).`,
-		sk.Name, sk.Description, tmplJSON, p.Store.RecentConversation(ctx, g.ConversationID, 10)+"\nObjective: "+g.Objective+memoLine(p.Store.Memories(ctx, c.ID, 10)),
-		g.Limits.MaxTasksPerPlan, g.Limits.MaxDepth, persona.LangName(g.Language))
+Return JSON: {"title": short mission title in the player's language, "criteria": [measurable completion criteria], "milestones": [3-5 short names], "tasks": [ {key,title,instructions,tools,deps,verify,wait_days} ]}.
+Rules: keep every verify check and approval step the playbook has — never remove them (these guards in particular: %v). You may drop steps that clearly do not apply, add at most 4 steps, and make instructions specific to the request. Keys are lowercase-with-dashes. Tools must come from the playbook. At most %d tasks, depth at most %d. Task titles in the player's language (%s).`,
+		sk.Name, sk.Description, tmplJSON, p.Store.RecentConversation(ctx, g.ConversationID, 10)+"\nObjective: "+g.Objective+memoLine(memories),
+		guardNames(), g.Limits.MaxTasksPerPlan, g.Limits.MaxDepth, persona.LangName(g.Language))
 
 	var plan struct {
 		Title      string        `json:"title"`
@@ -258,7 +261,7 @@ Rules: keep the playbook's safety steps (red-flag checks, citation verification,
 	if err == nil {
 		var reverted bool
 		if plan.Tasks, reverted = keepSafetySteps(plan.Tasks, template); reverted {
-			why = "playbook used as written (the tailored plan dropped a safety step)"
+			why = "playbook used as written (the tailored plan dropped a guard check)"
 		}
 		depth, err = validate(plan.Tasks, map[string]int{}, g.Limits)
 	}
@@ -309,13 +312,13 @@ Rules: keep the playbook's safety steps (red-flag checks, citation verification,
 	})
 }
 
-// keepSafetySteps re-adds verification requirements the model dropped. A plan
-// may be reshaped; its safety properties may not.
+// keepSafetySteps restores the guard verifiers the model dropped. A plan may
+// be reshaped; its safety properties may not.
 func keepSafetySteps(proposed, template []PlannedTask) ([]PlannedTask, bool) {
 	need := map[string]bool{}
 	for _, t := range template {
 		for _, v := range t.Verify {
-			if v == "signed_off" || v == "citations_verified" {
+			if isGuard(v) {
 				need[v] = true
 			}
 		}
@@ -352,7 +355,7 @@ type replanOp struct {
 }
 
 // Replan compares state to the goal and adjusts the plan. Modes: replan (a task
-// failed), review (periodic), change (the client changed something), cycle
+// failed), review (periodic), change (the player changed something), cycle
 // (a recurring plan finished a cycle).
 func (p *Planner) Replan(ctx context.Context, g *Goal, t *Task) error {
 	if g.Replans >= g.Limits.MaxReplans {
@@ -410,15 +413,15 @@ HISTORY
 RECENT CONVERSATION
 %s
 
-Return JSON: {"assessment": one paragraph, "ops": [...], "goal_status": "continue" | "needs_attention", "attention_reason": "...", "message_to_client": optional short update in %s}.
+Return JSON: {"assessment": one paragraph, "ops": [...], "goal_status": "continue" | "needs_attention", "attention_reason": "...", "message_to_player": optional short update in %s}.
 ops: {"op":"retry","key","instructions","why"} re-run a failed/cancelled task with better instructions;
      {"op":"skip","key","why"} mark a blocked/failed task not needed so its dependents can proceed;
      {"op":"cancel","key","why"} drop a task that no longer serves the goal;
      {"op":"update","key","instructions","why"} change a task that has not started;
      {"op":"add","task":{key,title,instructions,tools,deps,verify,wait_days},"why"} add a task (deps may name existing keys).
-Never skip or cancel a professional sign-off or a citation check that the goal still needs. Use goal_status "needs_attention" when only a person can unblock it (e.g. missing information from the client — then ask for it in message_to_client). Allowed tools: %v. At most %d new tasks.`,
+Never skip or cancel a task that carries one of these guard checks while the goal still needs it: %v. Use goal_status "needs_attention" when only a person can unblock it (e.g. missing information from the player — then ask for it in message_to_player). Allowed tools: %v. At most %d new tasks.`,
 		t.Spec.Mode, t.Spec.Reason, g.Title, g.Objective, g.Criteria, state.String(), p.Store.History(ctx, g.ID, 15),
-		p.Store.RecentConversation(ctx, g.ConversationID, 6), persona.LangName(g.Language), allowed, g.Limits.MaxTasksPerPlan)
+		p.Store.RecentConversation(ctx, g.ConversationID, 6), persona.LangName(g.Language), guardNames(), allowed, g.Limits.MaxTasksPerPlan)
 
 	resp, err := p.Model.Chat(ctx, CallMeta{Purpose: "replan", UserID: g.UserID, GoalID: g.ID, TaskID: t.ID, CountIteration: true},
 		llm.Request{Model: p.LLM, JSON: true, Temperature: 0.2, Messages: []llm.Message{
@@ -431,7 +434,7 @@ Never skip or cancel a professional sign-off or a citation check that the goal s
 		Ops             []replanOp `json:"ops"`
 		GoalStatus      string     `json:"goal_status"`
 		AttentionReason string     `json:"attention_reason"`
-		Message         string     `json:"message_to_client"`
+		Message         string     `json:"message_to_player"`
 	}
 	if err := json.Unmarshal([]byte(llm.ExtractJSON(resp.Message.Content)), &out); err != nil {
 		return fmt.Errorf("replan output unreadable: %w", err)
@@ -472,8 +475,8 @@ Never skip or cancel a professional sign-off or a citation check that the goal s
 			case x.Status == "succeeded":
 				dropped = append(dropped, fmt.Sprintf("op %d: %q already succeeded", i, op.Key))
 				continue
-			case (op.Op == "skip" || op.Op == "cancel") && containsAny(x.Spec.Verify, "signed_off", "citations_verified"):
-				dropped = append(dropped, fmt.Sprintf("op %d: refused to drop safety step %q", i, op.Key))
+			case (op.Op == "skip" || op.Op == "cancel") && hasGuard(x.Spec.Verify):
+				dropped = append(dropped, fmt.Sprintf("op %d: refused to drop guarded step %q", i, op.Key))
 				continue
 			case op.Op == "update" && x.Status != "blocked" && x.Status != "ready":
 				dropped = append(dropped, fmt.Sprintf("op %d: %q is %s and cannot be updated", i, op.Key, x.Status))
@@ -574,12 +577,11 @@ Never skip or cancel a professional sign-off or a citation check that the goal s
 	return nil
 }
 
-func containsAny(xs []string, want ...string) bool {
-	for _, x := range xs {
-		for _, w := range want {
-			if x == w {
-				return true
-			}
+// hasGuard reports whether any of a task's verifiers is a guard.
+func hasGuard(verify []string) bool {
+	for _, v := range verify {
+		if isGuard(v) {
+			return true
 		}
 	}
 	return false
@@ -599,7 +601,6 @@ func (p *Planner) Finish(ctx context.Context, g *Goal, t *Task) error {
 		}
 		fmt.Fprintf(&work, "- %s [%s]: %s\n", x.Title, x.Status, truncate(summariseOutput(x.Output, 500), 500))
 	}
-	docs := p.Store.GoalDocuments(ctx, g.ID)
 	prompt := fmt.Sprintf(`Decide whether this goal is complete.
 
 GOAL: %s
@@ -608,11 +609,9 @@ COMPLETION CRITERIA:
 %s
 WORK DONE:
 %s
-DOCUMENTS PRODUCED: %v
-
-Return JSON {"complete": bool, "unmet": [criteria not met, with why], "message_to_client": a warm closing (if complete) or short status (if not), in %s, naming the documents and what happens next}.
+Return JSON {"complete": bool, "unmet": [criteria not met, with why], "message_to_player": a warm closing (if complete) or short status (if not), in %s, naming what was produced and what happens next}.
 Be strict: a criterion is met only if the work above shows it.`,
-		g.Title, g.Objective, "- "+strings.Join(g.Criteria, "\n- "), work.String(), docs, persona.LangName(g.Language))
+		g.Title, g.Objective, "- "+strings.Join(g.Criteria, "\n- "), work.String(), persona.LangName(g.Language))
 	resp, err := p.Model.Chat(ctx, CallMeta{Purpose: "judge", UserID: g.UserID, GoalID: g.ID, TaskID: t.ID},
 		llm.Request{Model: p.LLM, JSON: true, Temperature: 0, Messages: []llm.Message{
 			{Role: "system", Content: p.system(g)}, {Role: "user", Content: prompt}}})
@@ -622,7 +621,7 @@ Be strict: a criterion is met only if the work above shows it.`,
 	var v struct {
 		Complete bool     `json:"complete"`
 		Unmet    []string `json:"unmet"`
-		Message  string   `json:"message_to_client"`
+		Message  string   `json:"message_to_player"`
 	}
 	if err := json.Unmarshal([]byte(llm.ExtractJSON(resp.Message.Content)), &v); err != nil {
 		return fmt.Errorf("judge output unreadable: %w", err)
@@ -642,7 +641,7 @@ Be strict: a criterion is met only if the work above shows it.`,
 			p.Store.PostMessage(ctx, g.ConversationID, g.UserID, v.Message, map[string]any{"goal_id": g.ID, "kind": "update"}, "finish-"+t.ID)
 		}
 		_, err := p.Store.EnqueuePlan(ctx, g.ID, fmt.Sprintf("cycle-%d", g.PlanVersion), "cycle",
-			"a cycle of this recurring plan finished; add the next cycle (wait 7 days, then a check-in, and a physician review every 4 weeks) unless the client or physician has closed it")
+			"a cycle of this recurring plan finished; add the next cycle as the playbook describes, unless the owner has closed it")
 		return err
 	case v.Complete:
 		p.Store.PostMessage(ctx, g.ConversationID, g.UserID, v.Message, map[string]any{"goal_id": g.ID, "kind": "complete"}, "finish-"+t.ID)
@@ -663,21 +662,5 @@ func (s *Store) PostMessage(ctx context.Context, convID, userID, content string,
 	_, _ = s.Pool.Exec(context.WithoutCancel(ctx), `INSERT INTO messages (conversation_id, role, content, meta, client_msg_id)
 		VALUES ($1, 'assistant', $2, $3, $4) ON CONFLICT DO NOTHING`, convID, content, raw, key)
 	_, _ = s.Pool.Exec(context.WithoutCancel(ctx), `UPDATE conversations SET updated_at=now() WHERE id=$1`, convID)
-	_, _ = s.Pool.Exec(context.WithoutCancel(ctx), `SELECT pg_notify('act_user', $1)`, userID)
-}
-
-func (s *Store) GoalDocuments(ctx context.Context, goalID string) []string {
-	rows, err := s.Pool.Query(ctx, `SELECT title || ' (' || kind || ', v' || version || ')' FROM documents WHERE goal_id=$1 ORDER BY created_at`, goalID)
-	if err != nil {
-		return nil
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var s string
-		if rows.Scan(&s) == nil {
-			out = append(out, s)
-		}
-	}
-	return out
+	_, _ = s.Pool.Exec(context.WithoutCancel(ctx), `SELECT pg_notify('play_user', $1)`, userID)
 }

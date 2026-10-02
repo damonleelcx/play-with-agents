@@ -146,7 +146,7 @@ func (s *Store) EnqueuePlan(ctx context.Context, goalID, key, mode, reason strin
 		return false, err
 	}
 	if tag.RowsAffected() == 1 {
-		_, _ = s.Pool.Exec(ctx, `SELECT pg_notify('act_work', $1)`, goalID)
+		_, _ = s.Pool.Exec(ctx, `SELECT pg_notify('play_work', $1)`, goalID)
 	}
 	return tag.RowsAffected() == 1, nil
 }
@@ -308,7 +308,7 @@ func promoteTx(ctx context.Context, tx pgx.Tx, goalID string) error {
 		AND NOT EXISTS (SELECT 1 FROM task_deps d JOIN tasks p ON p.id=d.depends_on
 			WHERE d.task_id=t.id AND p.status NOT IN ('succeeded','skipped'))`, goalID)
 	if err == nil {
-		_, _ = tx.Exec(ctx, `SELECT pg_notify('act_work', $1)`, goalID)
+		_, _ = tx.Exec(ctx, `SELECT pg_notify('play_work', $1)`, goalID)
 	}
 	return err
 }
@@ -376,7 +376,7 @@ func eventTx(ctx context.Context, tx pgx.Tx, userID, goalID, taskID, typ string,
 	_, err := tx.Exec(ctx, `INSERT INTO events (user_id, goal_id, task_id, type, data)
 		VALUES (nullif($1,'')::uuid, nullif($2,'')::uuid, nullif($3,'')::uuid, $4, $5)`, userID, goalID, taskID, typ, raw)
 	if err == nil && userID != "" {
-		_, _ = tx.Exec(ctx, `SELECT pg_notify('act_user', $1)`, userID)
+		_, _ = tx.Exec(ctx, `SELECT pg_notify('play_user', $1)`, userID)
 	}
 	return err
 }

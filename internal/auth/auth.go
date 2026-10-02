@@ -28,10 +28,9 @@ type User struct {
 	ID            string     `json:"id"`
 	Email         string     `json:"email"`
 	Name          string     `json:"name"`
-	Role          string     `json:"role"`
+	Role          string     `json:"role"` // player | admin
 	EmailVerified bool       `json:"email_verified"`
 	CreatedAt     time.Time  `json:"created_at"`
-	Licensed      bool       `json:"licensed"` // holds a VERIFIED licence matching the role
 	Admin         bool       `json:"admin"`
 	VerifiedAt    *time.Time `json:"-"`
 }
@@ -41,7 +40,10 @@ type Service struct {
 	Mailer       mailer.Mailer
 	PublicOrigin string
 	SessionTTL   time.Duration
-	AdminEmails  []string
+	// AdminEmails are operators (moderation of community games). An address
+	// counts only once it is verified, so signing up with an admin's address
+	// grants nothing.
+	AdminEmails []string
 }
 
 var (
@@ -151,7 +153,7 @@ func (s *Service) SignUp(ctx context.Context, email, password, name, lang string
 			}
 			return err
 		}
-		_, err = tx.Exec(ctx, `INSERT INTO user_preferences (user_id, data) VALUES ($1, jsonb_build_object('language', $2::text, 'notify_email', true, 'memory_enabled', true))`,
+		_, err = tx.Exec(ctx, `INSERT INTO user_preferences (user_id, data) VALUES ($1, jsonb_build_object('language', $2::text))`,
 			id, lang)
 		return err
 	})
@@ -184,11 +186,9 @@ func (s *Service) SignIn(ctx context.Context, email, password string) (*User, er
 
 func (s *Service) UserByID(ctx context.Context, id string) (*User, error) {
 	var u User
-	err := s.Pool.QueryRow(ctx, `SELECT u.id, u.email, u.name, u.role, u.email_verified_at, u.created_at,
-		EXISTS (SELECT 1 FROM professional_licenses l WHERE l.user_id=u.id AND l.status='verified'
-			AND ((u.role='attorney' AND l.kind='bar') OR (u.role='physician' AND l.kind='medical')))
+	err := s.Pool.QueryRow(ctx, `SELECT u.id, u.email, u.name, u.role, u.email_verified_at, u.created_at
 		FROM users u WHERE u.id=$1 AND u.deleted_at IS NULL`, id).
-		Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.VerifiedAt, &u.CreatedAt, &u.Licensed)
+		Scan(&u.ID, &u.Email, &u.Name, &u.Role, &u.VerifiedAt, &u.CreatedAt)
 	if err != nil {
 		return nil, err
 	}
@@ -399,27 +399,35 @@ func (s *Service) DeleteAccount(ctx context.Context, userID, password string) er
 }
 
 // ── Mail templates (English / 中文) ─────────────────────────────────────────
+// Aoi writes them. They carry a link and nothing else of value: the token is
+// single-use and short-lived, and only its hash is stored.
 
 func verifyMail(lang, name, link string) mailer.Message {
+	sig := mailer.Signature(lang)
 	if lang == "zh" {
-		return mailer.Message{Subject: "请验证你的邮箱 · ACT",
-			Text: fmt.Sprintf("%s你好，\n\n欢迎来到 ACT。请点击下面的链接验证邮箱（48 小时内有效）：\n\n%s\n\n如果不是你本人注册，请忽略此邮件。\n\n—— 维拉，ACT", greetName(name), link),
-			HTML: mailer.Page("验证你的邮箱", greetName(name)+"你好，欢迎来到 ACT。我是维拉，会和持证律师、医生一起照看你的事情。先确认一下这是你的邮箱：", "验证邮箱", link, "链接 48 小时内有效。如果不是你本人注册，请忽略此邮件。")}
+		lead := greetName(name) + "你好！我是葵，Play with Agents 的 AI 主持人。牌桌已经给你留好位置了——先确认一下这是你的邮箱："
+		return mailer.Message{Subject: "确认你的邮箱 · Play with Agents",
+			Text: fmt.Sprintf("%s\n\n%s\n\n链接 48 小时内有效。如果不是你本人注册，忽略这封邮件就好。\n\n%s", lead, link, sig),
+			HTML: mailer.Page(lang, "确认你的邮箱", lead, "确认邮箱", link, "链接 48 小时内有效。如果不是你本人注册，忽略这封邮件就好。")}
 	}
-	return mailer.Message{Subject: "Confirm your email · ACT",
-		Text: fmt.Sprintf("Hi %s,\n\nWelcome to ACT. Confirm your email address with this link (valid for 48 hours):\n\n%s\n\nIf you didn't sign up, you can ignore this message.\n\n— Vera, ACT", orThere(name), link),
-		HTML: mailer.Page("Confirm your email", "Hi "+orThere(name)+", welcome to ACT. I'm Vera — I'll look after your matters together with our licensed attorneys and physicians. First, let's confirm this is your email:", "Confirm email", link, "This link is valid for 48 hours. If you didn't sign up, you can ignore this message.")}
+	lead := "Hi " + orThere(name) + "! I'm Aoi, the AI host at Play with Agents. Your seat at the table is saved — let's just confirm this is your email:"
+	return mailer.Message{Subject: "Confirm your email · Play with Agents",
+		Text: fmt.Sprintf("%s\n\n%s\n\nThis link is valid for 48 hours. If you didn't sign up, you can ignore this message.\n\n%s", lead, link, sig),
+		HTML: mailer.Page(lang, "Confirm your email", lead, "Confirm email", link, "This link is valid for 48 hours. If you didn't sign up, you can ignore this message.")}
 }
 
 func resetMail(lang, name, link string) mailer.Message {
+	sig := mailer.Signature(lang)
 	if lang == "zh" {
-		return mailer.Message{Subject: "重置你的 ACT 密码",
-			Text: fmt.Sprintf("%s你好，\n\n我们收到了重置密码的请求。点击下面的链接设置新密码（1 小时内有效）：\n\n%s\n\n如果不是你本人操作，请忽略此邮件，你的密码不会改变。\n\n—— 维拉，ACT", greetName(name), link),
-			HTML: mailer.Page("重置密码", greetName(name)+"你好，我们收到了重置密码的请求。", "设置新密码", link, "链接 1 小时内有效，且只能使用一次。如果不是你本人操作，请忽略此邮件，你的密码不会改变。")}
+		lead := greetName(name) + "你好，我们收到了重置密码的请求。点下面的按钮设置新密码，然后回来接着玩！"
+		return mailer.Message{Subject: "重置你的密码 · Play with Agents",
+			Text: fmt.Sprintf("%s\n\n%s\n\n链接 1 小时内有效，只能用一次。如果不是你本人操作，忽略这封邮件即可，密码不会改变。\n\n%s", lead, link, sig),
+			HTML: mailer.Page(lang, "重置密码", lead, "设置新密码", link, "链接 1 小时内有效，只能用一次。如果不是你本人操作，忽略这封邮件即可，密码不会改变。")}
 	}
-	return mailer.Message{Subject: "Reset your ACT password",
-		Text: fmt.Sprintf("Hi %s,\n\nWe received a request to reset your password. Set a new one with this link (valid for 1 hour):\n\n%s\n\nIf you didn't ask for this, ignore this message — your password won't change.\n\n— Vera, ACT", orThere(name), link),
-		HTML: mailer.Page("Reset your password", "Hi "+orThere(name)+", we received a request to reset your password.", "Set a new password", link, "This link is valid for 1 hour and works once. If you didn't ask for this, ignore this message — your password won't change.")}
+	lead := "Hi " + orThere(name) + ", we received a request to reset your password. Set a new one and come back to the table!"
+	return mailer.Message{Subject: "Reset your password · Play with Agents",
+		Text: fmt.Sprintf("%s\n\n%s\n\nThis link is valid for 1 hour and works once. If you didn't ask for this, ignore this message — your password won't change.\n\n%s", lead, link, sig),
+		HTML: mailer.Page(lang, "Reset your password", lead, "Set a new password", link, "This link is valid for 1 hour and works once. If you didn't ask for this, ignore this message — your password won't change.")}
 }
 
 func orThere(n string) string {

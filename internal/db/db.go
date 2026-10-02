@@ -6,6 +6,7 @@ import (
 	"embed"
 	"fmt"
 	"io/fs"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -92,4 +93,34 @@ func Migrate(ctx context.Context, pool *pgxpool.Pool) error {
 		}
 	}
 	return nil
+}
+
+// EnsureDatabase returns the URL of database name on the same server as
+// baseURL, creating the database first if it does not exist. Test packages
+// run in parallel and the engine's tests clear its tables, so each package
+// that needs Postgres gets a database of its own.
+func EnsureDatabase(ctx context.Context, baseURL, name string) (string, error) {
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return "", err
+	}
+	conn, err := pgx.Connect(ctx, baseURL)
+	if err != nil {
+		return "", err
+	}
+	defer conn.Close(context.Background())
+	var exists bool
+	if err := conn.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname=$1)`, name).Scan(&exists); err != nil {
+		return "", err
+	}
+	if !exists {
+		// CREATE DATABASE takes no parameters; the name is quoted as an
+		// identifier. Two packages racing to create it is fine: the loser
+		// sees "already exists" (42P04) and uses it.
+		if _, err := conn.Exec(ctx, `CREATE DATABASE `+pgx.Identifier{name}.Sanitize()); err != nil && !strings.Contains(err.Error(), "42P04") {
+			return "", err
+		}
+	}
+	u.Path = "/" + name
+	return u.String(), nil
 }

@@ -1,4 +1,4 @@
-// Package tools holds every action the agent can take, each behind a strict
+// Package tools holds every action an agent can take, each behind a strict
 // contract: typed input, typed output, a gate, a timeout, a retry policy, an
 // idempotency rule for side effects, and a verifier that checks the effect
 // actually happened. See docs/01-intents-tools-skills.md §2.
@@ -11,7 +11,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"strings"
 	"sync"
 	"time"
@@ -33,18 +32,19 @@ const (
 
 type Gate string
 
+// Gate classes. There is deliberately nothing between "the owner says yes"
+// and "never": an action riskier than a player's own approval covers is not
+// something an agent on a games platform should be doing at all.
 const (
-	G0 Gate = "G0" // no approval
-	G1 Gate = "G1" // the client approves
-	G2 Gate = "G2" // a licensed professional approves
-	G3 Gate = "G3" // never automated
+	G0 Gate = "G0" // automatic: runs without asking
+	G1 Gate = "G1" // the goal's owner approves this exact call (e.g. publish a game)
+	G3 Gate = "G3" // never automated: refused, reported to the model, never queued
 )
 
 // Env is what a tool may touch. Tools get no other handle on the world.
 type Env struct {
 	Pool           *pgxpool.Pool
 	Mailer         mail.Mailer
-	HTTP           *http.Client
 	UserID         string
 	UserEmail      string
 	UserName       string
@@ -52,10 +52,8 @@ type Env struct {
 	TaskID         string
 	ConversationID string
 	Lang           string
-	CourtListener  string // optional API token
-	OnCallEmail    string
-	// Scope distinguishes side effects that happen outside any task (a chat
-	// turn's emergency page): it is the message id there.
+	// Scope distinguishes side effects that happen outside any task (a tool
+	// invoked from a chat turn): it is the message id there.
 	Scope string
 }
 
@@ -66,10 +64,13 @@ type Tool struct {
 	Output      string // JSON Schema
 	Effect      Effect
 	Gate        Gate
-	Role        string // required approver role for G2
-	// GateFor refines the gate from the arguments, e.g. a prescription for a
-	// scheduled drug is G3 whatever the static gate says.
-	GateFor    func(args map[string]any) (Gate, string)
+	// GateFor refines the gate from the arguments, e.g. a call that would
+	// reach outside the platform is G3 whatever the static gate says.
+	GateFor func(args map[string]any) Gate
+	// Notify is the outbox notification kind the owner receives when a G1
+	// call parks for approval. Empty means "approval_requested"; the studio's
+	// publish step uses "build_ready".
+	Notify     string
 	Timeout    time.Duration
 	MaxRetries int
 	// IdemKey must be set for External tools. It is derived from the task and
@@ -88,7 +89,11 @@ var (
 	regMu    sync.RWMutex
 )
 
-func register(t *Tool) {
+// Register adds a tool to the registry. It panics on a malformed schema, an
+// external tool without an idempotency key, or a duplicate name: all three
+// are programming errors that must stop the process at start-up, not surface
+// at the first call.
+func Register(t *Tool) {
 	c := jsonschema.NewCompiler()
 	must := func(name, src string) *jsonschema.Schema {
 		doc, err := jsonschema.UnmarshalJSON(strings.NewReader(src))
@@ -114,8 +119,11 @@ func register(t *Tool) {
 		t.Timeout = 30 * time.Second
 	}
 	regMu.Lock()
+	defer regMu.Unlock()
+	if _, dup := registry[t.Name]; dup {
+		panic("tool registered twice: " + t.Name)
+	}
 	registry[t.Name] = t
-	regMu.Unlock()
 }
 
 func Get(name string) (*Tool, bool) {
@@ -139,28 +147,28 @@ func Names() []string {
 func (t *Tool) Schema() json.RawMessage { return json.RawMessage(t.Input) }
 
 // EffectiveGate is the gate for these exact arguments.
-func (t *Tool) EffectiveGate(args map[string]any) (Gate, string) {
+func (t *Tool) EffectiveGate(args map[string]any) Gate {
 	if t.GateFor != nil {
 		return t.GateFor(args)
 	}
-	return t.Gate, t.Role
+	return t.Gate
 }
 
 // ── Errors the worker branches on ──────────────────────────────────────────
 
 // NeedsApproval stops the step; the worker persists it as an approval row and
-// parks the task until a person decides.
+// parks the task until the owner decides.
 type NeedsApproval struct {
 	Gate    Gate
-	Role    string
 	Preview string
+	Notify  string // outbox kind for the owner; see Tool.Notify
 }
 
 func (e *NeedsApproval) Error() string { return "approval required (" + string(e.Gate) + ")" }
 
 // ErrBlocked is a G3 action. It is reported to the model as a refusal so it
-// can explain the lawful path; it is never queued for approval.
-var ErrBlocked = errors.New("this action can only be performed by a licensed professional in person and is never automated")
+// can explain what the player can do instead; it is never queued for approval.
+var ErrBlocked = errors.New("this action is never automated on this platform")
 
 // ErrAmbiguous means a previous attempt of this exact side effect started and
 // never recorded an outcome. Re-running could duplicate it, so the task stops
@@ -179,7 +187,7 @@ type Result struct {
 }
 
 // Invoke runs a tool through its full contract. approved is true only when the
-// worker is replaying a call a person approved — with the approved arguments.
+// worker is replaying a call the owner approved — with the approved arguments.
 func Invoke(ctx context.Context, env *Env, name string, rawArgs json.RawMessage, approved bool) (*Result, error) {
 	t, ok := Get(name)
 	if !ok {
@@ -201,19 +209,24 @@ func Invoke(ctx context.Context, env *Env, name string, rawArgs json.RawMessage,
 		return nil, &InvalidInput{err}
 	}
 
-	gate, role := t.EffectiveGate(args)
-	switch gate {
-	case G3:
-		record(ctx, env, t, args, nil, "failed", "", ErrBlocked, 0)
-		return nil, ErrBlocked
-	case G1, G2:
+	switch gate := t.EffectiveGate(args); gate {
+	case G0:
+	case G1:
 		if !approved {
 			preview := ""
 			if t.Preview != nil {
 				preview = t.Preview(args)
 			}
-			return nil, &NeedsApproval{Gate: gate, Role: role, Preview: preview}
+			kind := t.Notify
+			if kind == "" {
+				kind = "approval_requested"
+			}
+			return nil, &NeedsApproval{Gate: gate, Preview: preview, Notify: kind}
 		}
+	default:
+		// G3, and any gate this code does not know: fail closed.
+		record(ctx, env, t, args, nil, "failed", "", ErrBlocked, 0)
+		return nil, ErrBlocked
 	}
 
 	key := ""
@@ -378,33 +391,13 @@ func Key(env *Env, tool string, parts ...any) string {
 
 // ── small helpers for tool bodies ──────────────────────────────────────────
 
-func str(m map[string]any, k string) string {
+// Str reads a string argument; a missing or mistyped one is "". Exported for
+// tools registered from other packages (the studio).
+func Str(m map[string]any, k string) string {
 	if v, ok := m[k].(string); ok {
 		return v
 	}
 	return ""
-}
-
-func num(m map[string]any, k string) float64 {
-	switch v := m[k].(type) {
-	case float64:
-		return v
-	case int:
-		return float64(v)
-	}
-	return 0
-}
-
-func strs(m map[string]any, k string) []string {
-	var out []string
-	if arr, ok := m[k].([]any); ok {
-		for _, v := range arr {
-			if s, ok := v.(string); ok {
-				out = append(out, s)
-			}
-		}
-	}
-	return out
 }
 
 func truncate(s string, n int) string {

@@ -9,9 +9,9 @@ REG="$ACCOUNT.dkr.ecr.$REGION.amazonaws.com"
 [ -z "$(git status --porcelain)" ] || { echo "commit first: the image is built from the working tree and tagged with HEAD" >&2; exit 1; }
 TAG=$(git rev-parse --short HEAD)
 aws ecr get-login-password --region "$REGION" | docker login --username AWS --password-stdin "$REG" >/dev/null
-if ! aws ecr describe-images --repository-name act --image-ids imageTag="$TAG" --region "$REGION" >/dev/null 2>&1; then
-  docker buildx build --platform linux/arm64 --provenance=false --sbom=false -t "$REG/act:$TAG" --push .
+if ! aws ecr describe-images --repository-name play --image-ids imageTag="$TAG" --region "$REGION" >/dev/null 2>&1; then
+  docker buildx build --platform linux/arm64 --provenance=false --sbom=false -t "$REG/play:$TAG" --push .
 fi
-DIGEST=$(aws ecr describe-images --repository-name act --image-ids imageTag="$TAG" --region "$REGION" --query 'imageDetails[0].imageDigest' --output text)
-echo "image $REG/act@$DIGEST ($TAG)"
-exec deploy/deploy.sh "$REG/act@$DIGEST" "${1:-}"
+DIGEST=$(aws ecr describe-images --repository-name play --image-ids imageTag="$TAG" --region "$REGION" --query 'imageDetails[0].imageDigest' --output text)
+echo "image $REG/play@$DIGEST ($TAG)"
+exec deploy/deploy.sh "$REG/play@$DIGEST" "${1:-}"

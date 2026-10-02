@@ -2,7 +2,6 @@ package engine
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -139,7 +138,6 @@ func (s *Scheduler) Tick(ctx context.Context) {
 		}
 	}
 
-	s.deliverReminders(ctx)
 	notify.Deliver(ctx, s.Store.Pool, s.Mailer, s.PublicOrigin)
 }
 
@@ -165,7 +163,8 @@ func (s *Scheduler) SlowTick(ctx context.Context) {
 	}
 
 	// Periodic review: compare state with the goal even when nothing failed,
-	// because the world changes (a deadline moved, a reply never came).
+	// because a mission can stall quietly (an approval nobody answered, a
+	// task that keeps parking).
 	rows, err = p.Query(ctx, `UPDATE goals SET next_review_at = now() + interval '1 day'
 		WHERE status='active' AND next_review_at < now()
 		AND NOT EXISTS (SELECT 1 FROM events e WHERE e.goal_id=goals.id AND e.created_at > now() - interval '12 hours')
@@ -190,51 +189,6 @@ func (s *Scheduler) SlowTick(ctx context.Context) {
 	}
 
 	s.compact(ctx)
-}
-
-func (s *Scheduler) deliverReminders(ctx context.Context) {
-	// Claim-and-mark in one statement: a reminder is delivered at most once
-	// even if two schedulers ever overlapped.
-	rows, err := s.Store.Pool.Query(ctx, `UPDATE reminders r SET sent_at=now()
-		FROM users u WHERE r.id IN (SELECT id FROM reminders WHERE sent_at IS NULL AND due_at <= now() ORDER BY due_at LIMIT 50 FOR UPDATE SKIP LOCKED)
-		AND u.id = r.user_id
-		RETURNING r.id, r.user_id, coalesce(r.goal_id::text,''), r.text, u.email,
-			coalesce((SELECT data FROM user_preferences p WHERE p.user_id=r.user_id), '{}')`)
-	if err != nil {
-		return
-	}
-	type rem struct {
-		id, user, goal, text, email string
-		prefs                       []byte
-	}
-	var rs []rem
-	for rows.Next() {
-		var r rem
-		if rows.Scan(&r.id, &r.user, &r.goal, &r.text, &r.email, &r.prefs) == nil {
-			rs = append(rs, r)
-		}
-	}
-	rows.Close()
-	for _, r := range rs {
-		var prefs map[string]any
-		_ = json.Unmarshal(r.prefs, &prefs)
-		conv := ""
-		if r.goal != "" {
-			_ = s.Store.Pool.QueryRow(ctx, `SELECT coalesce(conversation_id::text,'') FROM goals WHERE id=$1`, r.goal).Scan(&conv)
-		}
-		if conv == "" {
-			_ = s.Store.Pool.QueryRow(ctx, `SELECT id FROM conversations WHERE user_id=$1 ORDER BY updated_at DESC LIMIT 1`, r.user).Scan(&conv)
-		}
-		zh := prefs["language"] == "zh"
-		prefix := map[bool]string{true: "⏰ 提醒：", false: "⏰ Reminder: "}[zh]
-		s.Store.PostMessage(ctx, conv, r.user, prefix+r.text, map[string]any{"goal_id": r.goal, "kind": "reminder"}, "reminder-"+r.id)
-		if v, ok := prefs["notify_email"].(bool); !ok || v {
-			subj := map[bool]string{true: "维拉提醒您", false: "A reminder from Vera"}[zh]
-			_, _ = s.Mailer.Send(ctx, mail.Message{To: r.email, Subject: subj,
-				Text: r.text + "\n\n" + s.PublicOrigin + "/app", MessageID: "reminder-" + r.id})
-		}
-		s.Store.Event(ctx, r.user, r.goal, "", "reminder.sent", map[string]any{"summary": truncate(r.text, 120)})
-	}
 }
 
 // compact folds old events into an episode summary so long-running goals keep
@@ -279,8 +233,8 @@ func (s *Scheduler) compactGoal(ctx context.Context, goalID, userID string, upto
 	}
 	resp, err := s.Model.Chat(ctx, CallMeta{Purpose: "compact", UserID: userID, GoalID: goalID}, llm.Request{
 		Model: s.FastLLM, Temperature: 0, MaxTokens: 600,
-		Messages: []llm.Message{{Role: "user", Content: "Compress this execution history of a legal/medical case into one factual paragraph (max 180 words): " +
-			"what was done, what was decided and why, what failed, what is pending. Keep dates, document names, deadlines and approvals.\n\nPREVIOUS SUMMARY:\n" +
+		Messages: []llm.Message{{Role: "user", Content: "Compress this execution history of a mission into one factual paragraph (max 180 words): " +
+			"what was done, what was decided and why, what failed, what is pending. Keep names of what was produced, check results, decisions and approvals.\n\nPREVIOUS SUMMARY:\n" +
 			prev + "\n\nNEW EVENTS:\n" + b.String()}},
 	})
 	if err != nil {
@@ -290,8 +244,8 @@ func (s *Scheduler) compactGoal(ctx context.Context, goalID, userID string, upto
 		goalID, old[len(old)-1].ID, strings.TrimSpace(resp.Message.Content))
 }
 
-// Listen turns Postgres NOTIFY on act_work into worker wake-ups, and on
-// act_user into calls to onUser (the web tier's live-update fan-out).
+// Listen turns Postgres NOTIFY on play_work into worker wake-ups, and on
+// play_user into calls to onUser (the web tier's live-update fan-out).
 func Listen(ctx context.Context, pool *pgxpool.Pool, wake chan<- struct{}, onUser func(userID string)) {
 	for ctx.Err() == nil {
 		conn, err := pool.Acquire(ctx)
@@ -299,7 +253,7 @@ func Listen(ctx context.Context, pool *pgxpool.Pool, wake chan<- struct{}, onUse
 			sleepCtx(ctx, 3*time.Second)
 			continue
 		}
-		_, err = conn.Exec(ctx, `LISTEN act_work; LISTEN act_user`)
+		_, err = conn.Exec(ctx, `LISTEN play_work; LISTEN play_user`)
 		for err == nil {
 			n, e := conn.Conn().WaitForNotification(ctx)
 			if e != nil {
@@ -307,14 +261,14 @@ func Listen(ctx context.Context, pool *pgxpool.Pool, wake chan<- struct{}, onUse
 				break
 			}
 			switch n.Channel {
-			case "act_work":
+			case "play_work":
 				if wake != nil {
 					select {
 					case wake <- struct{}{}:
 					default:
 					}
 				}
-			case "act_user":
+			case "play_user":
 				if onUser != nil {
 					onUser(n.Payload)
 				}

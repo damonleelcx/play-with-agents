@@ -5,11 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
-
-	"github.com/damonleelcx/play-with-agents/internal/tools"
 )
 
-// Client is who the goal belongs to, as the worker needs it.
+// Client is the player a goal belongs to, as the worker needs it.
 type Client struct {
 	ID, Email, Name string
 	Prefs           map[string]any
@@ -24,7 +22,7 @@ func (s *Store) Client(ctx context.Context, userID string) (*Client, error) {
 	return c, err
 }
 
-// Memories returns the client's durable facts, newest first.
+// Memories returns the player's durable facts, newest first.
 func (s *Store) Memories(ctx context.Context, userID string, limit int) []string {
 	rows, err := s.Pool.Query(ctx, `SELECT content FROM memories WHERE user_id=$1 ORDER BY created_at DESC LIMIT $2`, userID, limit)
 	if err != nil {
@@ -43,13 +41,13 @@ func (s *Store) Memories(ctx context.Context, userID string, limit int) []string
 
 // BuildTaskContext assembles ONLY what this step needs, from persisted state:
 // the goal, the current task, what its dependencies produced, the plan at a
-// glance, compressed history, the client, and a few retrieved documents.
-// Nothing here comes from a previous model call's memory.
+// glance, compressed history and the player. Nothing here comes from a
+// previous model call's memory.
 func (s *Store) BuildTaskContext(ctx context.Context, g *Goal, t *Task, c *Client) string {
 	var b strings.Builder
 	w := func(format string, a ...any) { fmt.Fprintf(&b, format, a...) }
 
-	w("# GOAL\n%s\nObjective: %s\nDomain: %s · Playbook: %s\n", g.Title, g.Objective, g.Domain, g.Skill)
+	w("# GOAL\n%s\nObjective: %s\nPlaybook: %s\n", g.Title, g.Objective, g.Skill)
 	if len(g.Criteria) > 0 {
 		w("Done when:\n")
 		for _, c := range g.Criteria {
@@ -94,29 +92,21 @@ func (s *Store) BuildTaskContext(ctx context.Context, g *Goal, t *Task, c *Clien
 		w("\n# HISTORY\n%s\n", hist)
 	}
 
-	w("\n# CLIENT\nName: %s\n", c.Name)
-	if tz, _ := c.Prefs["timezone"].(string); tz != "" {
-		w("Timezone: %s\n", tz)
-	}
-	if mem := s.Memories(ctx, c.ID, 20); len(mem) > 0 {
-		w("Known facts:\n")
-		for _, m := range mem {
-			w("- %s\n", m)
-		}
-	}
-
-	env := &tools.Env{Pool: s.Pool, UserID: c.ID}
-	if hits, err := tools.SearchKnowledge(ctx, env, g.Title+" "+t.Title, 3); err == nil && len(hits) > 0 {
-		w("\n# RELEVANT DOCUMENTS IN THE CLIENT'S FILE (use get_document for full text)\n")
-		for _, h := range hits {
-			m := h.(map[string]any)
-			w("- [%v] %v (%v): %v\n", m["document_id"], m["title"], m["kind"], strings.ReplaceAll(fmt.Sprint(m["excerpt"]), "\n", " "))
+	w("\n# PLAYER\nName: %s\n", c.Name)
+	// A player who switched memory off asked not to be profiled: whatever
+	// facts remain stay out of the prompt as well.
+	if c.Prefs["memory_enabled"] != false {
+		if mem := s.Memories(ctx, c.ID, 20); len(mem) > 0 {
+			w("Known facts:\n")
+			for _, m := range mem {
+				w("- %s\n", m)
+			}
 		}
 	}
 
 	if g.ConversationID != "" {
 		if conv := s.RecentConversation(ctx, g.ConversationID, 8); conv != "" {
-			w("\n# RECENT CONVERSATION WITH THE CLIENT\n%s\n", conv)
+			w("\n# RECENT CONVERSATION WITH THE PLAYER\n%s\n", conv)
 		}
 	}
 
@@ -172,16 +162,9 @@ func summariseOutput(o map[string]any, n int) string {
 	if o == nil {
 		return "(no output)"
 	}
-	var parts []string
-	if s, ok := o["summary"].(string); ok {
-		parts = append(parts, s)
+	if s, ok := o["summary"].(string); ok && s != "" {
+		return truncate(s, n)
 	}
-	if docs, ok := o["documents"].([]any); ok && len(docs) > 0 {
-		parts = append(parts, fmt.Sprintf("Documents: %v", docs))
-	}
-	if len(parts) == 0 {
-		raw, _ := json.Marshal(o)
-		parts = append(parts, string(raw))
-	}
-	return truncate(strings.Join(parts, "\n"), n)
+	raw, _ := json.Marshal(o)
+	return truncate(string(raw), n)
 }

@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,39 +13,114 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/damonleelcx/play-with-agents/internal/db"
 	"github.com/damonleelcx/play-with-agents/internal/llm"
 	"github.com/damonleelcx/play-with-agents/internal/mail"
+	"github.com/damonleelcx/play-with-agents/internal/tools"
 )
 
 // These tests run against a real Postgres, because the properties under test
-// — SKIP LOCKED, fencing, transactional checkpoints — only exist there.
+// — SKIP LOCKED, fencing, transactional checkpoints — only exist there. They
+// use the local dev container (scripts/dev.sh starts it) unless
+// PLAY_TEST_DATABASE_URL points elsewhere:
 //
-//	docker run -d --name act-pg -e POSTGRES_USER=act -e POSTGRES_HOST_AUTH_METHOD=trust -e POSTGRES_DB=act -p 127.0.0.1:55850:5432 postgres:17
-//	ACT_TEST_DATABASE_URL=postgres://act@127.0.0.1:55850/act?sslmode=disable go test ./internal/engine/
+//	docker run -d --name play-pg -e POSTGRES_USER=play -e POSTGRES_HOST_AUTH_METHOD=trust \
+//	  -e POSTGRES_DB=play -p 127.0.0.1:55860:5432 postgres:17
+//	go test ./internal/engine/
+//
+// When neither is reachable the tests skip rather than fail.
+const defaultTestDSN = "postgres://play@127.0.0.1:55860/play?sslmode=disable"
+
+func testDSN(t *testing.T) string {
+	t.Helper()
+	url := os.Getenv("PLAY_TEST_DATABASE_URL")
+	if url == "" {
+		url = defaultTestDSN
+	}
+	// db.Open waits ~30s for a database that is starting; a test run with no
+	// database at all should skip in a second, so probe first.
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	conn, err := pgx.Connect(ctx, url)
+	if err != nil {
+		t.Skipf("no test database at %s (%v); start play-pg or set PLAY_TEST_DATABASE_URL", url, err)
+	}
+	_ = conn.Close(ctx)
+	return url
+}
+
 func testPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	url := os.Getenv("ACT_TEST_DATABASE_URL")
-	if url == "" {
-		t.Skip("ACT_TEST_DATABASE_URL not set")
-	}
 	ctx := context.Background()
-	pool, err := db.Open(ctx, url)
+	pool, err := db.Open(ctx, testDSN(t))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := db.Migrate(ctx, pool); err != nil {
 		t.Fatal(err)
 	}
-	_, err = pool.Exec(ctx, `TRUNCATE users, goals, tasks, task_deps, checkpoints, tool_calls, approvals, events, episode_summaries,
-		documents, knowledge_chunks, llm_calls, reminders, conversations, messages, memories, user_preferences, sessions, email_tokens, professional_licenses, outbox CASCADE`)
+	// Only the engine's own tables are cleared: Claim takes ANY ready task, so
+	// they must start empty. Accounts are per test (unique emails, deleted on
+	// cleanup) so that other packages' tests sharing this database keep theirs.
+	_, err = pool.Exec(ctx, `TRUNCATE goals, tasks, task_deps, checkpoints, tool_calls, approvals, events,
+		episode_summaries, llm_calls, outbox CASCADE`)
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(pool.Close)
 	return pool
+}
+
+// ── Test-only tools and verifiers ──────────────────────────────────────────
+//
+// The production registry holds only generic tools, so the engine's
+// properties are exercised through these. Registered once per test binary.
+func init() {
+	obj := `{"type":"object"}`
+	tools.Register(&tools.Tool{Name: "test_count", Description: "Pure computation.",
+		Input:  `{"type":"object","required":["n"],"properties":{"n":{"type":"integer"}}}`,
+		Output: obj, Effect: tools.Read, Gate: tools.G0,
+		Run: func(_ context.Context, _ *tools.Env, a map[string]any) (map[string]any, error) {
+			return map[string]any{"n": a["n"]}, nil
+		}})
+	tools.Register(&tools.Tool{Name: "test_note", Description: "Writes our own database.",
+		Input: obj, Output: obj, Effect: tools.Write, Gate: tools.G0,
+		Run: func(context.Context, *tools.Env, map[string]any) (map[string]any, error) {
+			return map[string]any{"ok": true}, nil
+		}})
+	// An external side effect gated on the owner — and refused outright when
+	// the arguments say it would involve real money, whatever else they say.
+	tools.Register(&tools.Tool{Name: "test_send", Description: "Sends a message to someone outside.",
+		Input:  `{"type":"object","required":["to","body"],"properties":{"to":{"type":"string"},"body":{"type":"string"},"real_money":{"type":"boolean"}}}`,
+		Output: `{"type":"object","required":["message_id"]}`, Effect: tools.External, Gate: tools.G1,
+		GateFor: func(a map[string]any) tools.Gate {
+			if a["real_money"] == true {
+				return tools.G3
+			}
+			return tools.G1
+		},
+		IdemKey: func(env *tools.Env, a map[string]any) string { return tools.Key(env, "test_send", a["to"], a["body"]) },
+		Preview: func(a map[string]any) string { return "To: " + tools.Str(a, "to") },
+		Run: func(ctx context.Context, env *tools.Env, a map[string]any) (map[string]any, error) {
+			id, err := env.Mailer.Send(ctx, mail.Message{To: tools.Str(a, "to"), Subject: "test", Text: tools.Str(a, "body"),
+				MessageID: strings.ReplaceAll(tools.Key(env, "test_send", a["to"], a["body"]), ":", "-")})
+			if err != nil {
+				return nil, &tools.Transient{Err: err}
+			}
+			return map[string]any{"message_id": id}, nil
+		}})
+	tools.Register(&tools.Tool{Name: "test_publish", Description: "Publishes the result.",
+		Input: obj, Output: obj, Effect: tools.Write, Gate: tools.G1, Notify: "build_ready",
+		Run: func(context.Context, *tools.Env, map[string]any) (map[string]any, error) {
+			return map[string]any{"published": true}, nil
+		}})
+	RegisterVerifier(Verifier{Name: "test_guard", Guard: true, Check: func(ctx context.Context, s *Store, t *Task) []string {
+		v, _ := lookupVerifier("called:test_note")
+		return v.Check(ctx, s, t)
+	}})
 }
 
 // fakeModel is a scripted OpenAI-compatible endpoint. The script sees the
@@ -109,15 +185,6 @@ func toolResults(req fakeReq) int {
 	return n
 }
 
-func lastUser(req fakeReq) string {
-	for i := len(req.Messages) - 1; i >= 0; i-- {
-		if req.Messages[i].Role == "user" {
-			return req.Messages[i].Content
-		}
-	}
-	return ""
-}
-
 // countingMailer records sends; it is the "external system" in the
 // idempotency tests.
 type countingMailer struct {
@@ -141,8 +208,30 @@ type rig struct {
 	fake    *fakeModel
 	mailer  *countingMailer
 	userID  string
+	email   string
 	convID  string
 	planner *Planner
+}
+
+var userSeq atomic.Int64
+
+// newUser creates a verified account unique to this test run and deletes it
+// (and, by cascade, everything it owns) when the test ends.
+func newUser(t *testing.T, pool *pgxpool.Pool, prefs map[string]any) (id, email string) {
+	t.Helper()
+	ctx := context.Background()
+	email = fmt.Sprintf("engine-%d-%d@example.com", time.Now().UnixNano(), userSeq.Add(1))
+	if err := pool.QueryRow(ctx, `INSERT INTO users (email, password_hash, name, email_verified_at) VALUES ($1,'x','Casey', now()) RETURNING id`, email).Scan(&id); err != nil {
+		t.Fatal(err)
+	}
+	if prefs != nil {
+		raw, _ := json.Marshal(prefs)
+		if _, err := pool.Exec(ctx, `INSERT INTO user_preferences (user_id, data) VALUES ($1, $2)`, id, raw); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM users WHERE id=$1`, id) })
+	return id, email
 }
 
 func newRig(t *testing.T, script func(fakeReq) llm.Message) *rig {
@@ -154,11 +243,8 @@ func newRig(t *testing.T, script func(fakeReq) llm.Message) *rig {
 	r := &rig{pool: pool, store: st, fake: f, mailer: &countingMailer{},
 		model: &Model{Client: c, Store: st}}
 	r.planner = &Planner{Store: st, Model: r.model, LLM: "m"}
-	ctx := context.Background()
-	if err := pool.QueryRow(ctx, `INSERT INTO users (email, password_hash, name, email_verified_at) VALUES ('c@example.com','x','Casey', now()) RETURNING id`).Scan(&r.userID); err != nil {
-		t.Fatal(err)
-	}
-	if err := pool.QueryRow(ctx, `INSERT INTO conversations (user_id) VALUES ($1) RETURNING id`, r.userID).Scan(&r.convID); err != nil {
+	r.userID, r.email = newUser(t, pool, nil)
+	if err := pool.QueryRow(context.Background(), `INSERT INTO conversations (user_id) VALUES ($1) RETURNING id`, r.userID).Scan(&r.convID); err != nil {
 		t.Fatal(err)
 	}
 	return r
@@ -172,7 +258,7 @@ func (r *rig) worker(id string) *Worker {
 func (r *rig) goalWith(t *testing.T, tasks []PlannedTask, lim Limits) *Goal {
 	t.Helper()
 	ctx := context.Background()
-	g := &Goal{UserID: r.userID, ConversationID: r.convID, Title: "Test matter", Objective: "test", Domain: "legal", Skill: "general-task",
+	g := &Goal{UserID: r.userID, ConversationID: r.convID, Title: "Test mission", Objective: "test", Domain: "general", Skill: "general-task",
 		Criteria: []string{"done"}, Limits: lim, Language: "en"}
 	if err := r.store.CreateGoal(ctx, g); err != nil {
 		t.Fatal(err)

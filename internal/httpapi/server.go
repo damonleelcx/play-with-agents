@@ -1,5 +1,5 @@
-// Package httpapi is the web tier: JSON API, streamed chat, live updates, and
-// the single-page app.
+// Package httpapi is the web tier: JSON API, streamed chat with Aoi, live
+// updates, and the single-page app. Tables and games are in tables_api.go.
 package httpapi
 
 import (
@@ -23,7 +23,9 @@ import (
 	"github.com/damonleelcx/play-with-agents/internal/auth"
 	"github.com/damonleelcx/play-with-agents/internal/engine"
 	"github.com/damonleelcx/play-with-agents/internal/persona"
+	"github.com/damonleelcx/play-with-agents/internal/rooms"
 	"github.com/damonleelcx/play-with-agents/internal/tools"
+	"github.com/damonleelcx/play-with-agents/internal/tts"
 )
 
 type Server struct {
@@ -35,11 +37,21 @@ type Server struct {
 	CookieSecure bool
 	MailEnabled  bool
 	Hub          *Hub
+	Rooms        *rooms.Service // tables, games, agents (tables_api.go)
+	Speech       *tts.Service   // Aoi's voice; nil when no TTS key is configured
 
 	limiter *limiter
 }
 
-const cookieName = "act_session"
+const cookieName = "play_session"
+
+// csrfHeader must be present (value "1") on every state-changing API call; see
+// middleware. legacyCSRFHeader is the name inherited from the fork, accepted
+// until every client sends csrfHeader.
+const (
+	csrfHeader       = "X-Play"
+	legacyCSRFHeader = "X-ACT"
+)
 
 type ctxKey int
 
@@ -74,7 +86,6 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("POST /api/account/sessions/revoke-others", s.authed(s.revokeOthers))
 	m.HandleFunc("GET /api/account/export", s.authed(s.export))
 	m.HandleFunc("POST /api/account/delete", s.limit("delete", 5, s.authed(s.deleteAccount)))
-	m.HandleFunc("POST /api/account/license", s.authed(s.requestLicense))
 	m.HandleFunc("GET /api/account/usage", s.authed(s.usage))
 	m.HandleFunc("GET /api/memories", s.authed(s.memories))
 	m.HandleFunc("DELETE /api/memories/{id}", s.authed(s.deleteMemory))
@@ -88,7 +99,7 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("GET /api/conversations/{id}/messages", s.verified(s.messages))
 	m.HandleFunc("POST /api/conversations/{id}/messages", s.limit("chat", 30, s.verified(s.postMessage)))
 
-	// Goals, timeline, approvals
+	// Missions (goals), timeline, approvals
 	m.HandleFunc("GET /api/goals", s.verified(s.goals))
 	m.HandleFunc("GET /api/goals/{id}", s.verified(s.goal))
 	m.HandleFunc("GET /api/goals/{id}/timeline", s.verified(s.timeline))
@@ -96,16 +107,17 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("GET /api/approvals", s.verified(s.approvals))
 	m.HandleFunc("POST /api/approvals/{id}", s.verified(s.decide))
 
-	// Documents
-	m.HandleFunc("GET /api/documents", s.verified(s.documents))
-	m.HandleFunc("GET /api/documents/{id}", s.verified(s.document))
-	m.HandleFunc("POST /api/documents", s.limit("upload", 20, s.verified(s.upload)))
-
-	// Admin
-	m.HandleFunc("GET /api/admin/licenses", s.admin(s.licenses))
-	m.HandleFunc("POST /api/admin/licenses/{id}", s.admin(s.decideLicense))
+	// Aoi's voice: GET says whether it exists; POST returns MP3.
+	m.HandleFunc("GET /api/speech", s.authed(s.speechStatus))
+	m.HandleFunc("POST /api/speech", s.verified(s.speak))
 
 	m.HandleFunc("GET /api/stream", s.authed(s.stream))
+
+	// ── Tables & games (rooms) ──
+	// Registered in tables_api.go; absent when no rooms service is wired.
+	if s.Rooms != nil {
+		s.tableRoutes(m)
+	}
 
 	m.Handle("/", s.spa())
 	return s.middleware(m)
@@ -136,7 +148,7 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		// cross-site form cannot set one, and a cross-site fetch that sets one
 		// is preflighted — and this server answers no preflight.
 		if strings.HasPrefix(r.URL.Path, "/api/") && r.Method != http.MethodGet && r.Method != http.MethodHead {
-			if r.Header.Get("X-ACT") != "1" {
+			if r.Header.Get(csrfHeader) != "1" && r.Header.Get(legacyCSRFHeader) != "1" {
 				writeErr(w, 403, "missing request header")
 				return
 			}
@@ -193,16 +205,6 @@ func (s *Server) verified(h handler) http.HandlerFunc {
 	return s.authed(func(w http.ResponseWriter, r *http.Request, u *auth.User) {
 		if !u.EmailVerified {
 			writeErr(w, 403, "email_unverified")
-			return
-		}
-		h(w, r, u)
-	})
-}
-
-func (s *Server) admin(h handler) http.HandlerFunc {
-	return s.verified(func(w http.ResponseWriter, r *http.Request, u *auth.User) {
-		if !u.Admin {
-			writeErr(w, 403, "admins only")
 			return
 		}
 		h(w, r, u)
@@ -503,7 +505,7 @@ func (s *Server) spa() http.Handler {
 
 // ── live updates ───────────────────────────────────────────────────────────
 
-// Hub fans NOTIFY act_user out to that user's open streams.
+// Hub fans NOTIFY play_user out to that user's open streams.
 type Hub struct {
 	mu   sync.Mutex
 	subs map[string]map[chan struct{}]bool

@@ -29,45 +29,58 @@ type Config struct {
 	SMTPFrom    string
 	SMTPReplyTo string
 
-	// AdminEmails may verify professional licences. Comma separated.
+	// AdminEmails are operators (moderation of community games), comma separated.
+	// An address counts only once its owner has verified it.
 	AdminEmails []string
 
 	WorkerCount   int
 	LeaseDuration time.Duration
+
+	// Table workers play agents' turns, run turn clocks and write table talk
+	// (internal/rooms). Short jobs, so a short lease.
+	TableWorkers int
+	TableLease   time.Duration
 
 	// Spending ceilings in tokens. Per-goal limits live on the goal; these
 	// bound a whole account and the whole deployment per UTC day.
 	AccountDailyTokens    int
 	DeploymentDailyTokens int
 
-	// CourtListenerToken is optional; the anonymous API is rate limited but works.
-	CourtListenerToken string
+	// Aoi's voice (Fish Audio). No key or no voice id means no voice: the
+	// speech endpoint reports disabled and the client hides its controls.
+	TTSAPIKey  string
+	TTSVoiceID string // a published fish.audio model id; never defaulted
+	TTSModel   string // the synthesis backbone (tts.DefaultModel when empty)
 }
 
 func Load() (Config, error) {
 	c := Config{
-		Addr:                  env("ACT_ADDR", ":8080"),
-		DatabaseURL:           os.Getenv("ACT_DATABASE_URL"),
-		PublicOrigin:          strings.TrimRight(os.Getenv("ACT_PUBLIC_ORIGIN"), "/"),
-		SessionTTL:            envDur("ACT_SESSION_TTL", 30*24*time.Hour),
-		CookieSecure:          envBool("ACT_COOKIE_SECURE", true),
-		LLMBaseURL:            env("ACT_LLM_BASE_URL", "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"),
-		LLMAPIKey:             os.Getenv("ACT_LLM_API_KEY"),
-		LLMModel:              env("ACT_LLM_MODEL", "qwen3.8-max"),
-		LLMFastModel:          env("ACT_LLM_FAST_MODEL", "qwen3.8-flash"),
-		SMTPHost:              os.Getenv("ACT_SMTP_HOST"),
-		SMTPPort:              envInt("ACT_SMTP_PORT", 587),
-		SMTPUser:              os.Getenv("ACT_SMTP_USERNAME"),
-		SMTPPass:              os.Getenv("ACT_SMTP_PASSWORD"),
-		SMTPFrom:              os.Getenv("ACT_SMTP_FROM"),
-		SMTPReplyTo:           os.Getenv("ACT_SMTP_REPLY_TO"),
-		WorkerCount:           envInt("ACT_WORKERS", 2),
-		LeaseDuration:         envDur("ACT_LEASE", 90*time.Second),
-		AccountDailyTokens:    envInt("ACT_ACCOUNT_DAILY_TOKENS", 1_500_000),
-		DeploymentDailyTokens: envInt("ACT_DEPLOYMENT_DAILY_TOKENS", 40_000_000),
-		CourtListenerToken:    os.Getenv("ACT_COURTLISTENER_TOKEN"),
+		Addr:                  env("PLAY_ADDR", ":8080"),
+		DatabaseURL:           os.Getenv("PLAY_DATABASE_URL"),
+		PublicOrigin:          strings.TrimRight(os.Getenv("PLAY_PUBLIC_ORIGIN"), "/"),
+		SessionTTL:            envDur("PLAY_SESSION_TTL", 30*24*time.Hour),
+		CookieSecure:          envBool("PLAY_COOKIE_SECURE", true),
+		LLMBaseURL:            env("PLAY_LLM_BASE_URL", "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"),
+		LLMAPIKey:             os.Getenv("PLAY_LLM_API_KEY"),
+		LLMModel:              env("PLAY_LLM_MODEL", "qwen3.8-max"),
+		LLMFastModel:          env("PLAY_LLM_FAST_MODEL", "qwen3.8-flash"),
+		SMTPHost:              os.Getenv("PLAY_SMTP_HOST"),
+		SMTPPort:              envInt("PLAY_SMTP_PORT", 587),
+		SMTPUser:              os.Getenv("PLAY_SMTP_USERNAME"),
+		SMTPPass:              os.Getenv("PLAY_SMTP_PASSWORD"),
+		SMTPFrom:              os.Getenv("PLAY_SMTP_FROM"),
+		SMTPReplyTo:           os.Getenv("PLAY_SMTP_REPLY_TO"),
+		WorkerCount:           envInt("PLAY_WORKERS", 2),
+		LeaseDuration:         envDur("PLAY_LEASE", 90*time.Second),
+		TableWorkers:          envInt("PLAY_TABLE_WORKERS", 4),
+		TableLease:            envDur("PLAY_TABLE_LEASE", 15*time.Second),
+		AccountDailyTokens:    envInt("PLAY_ACCOUNT_DAILY_TOKENS", 1_500_000),
+		DeploymentDailyTokens: envInt("PLAY_DEPLOYMENT_DAILY_TOKENS", 40_000_000),
+		TTSAPIKey:             os.Getenv("PLAY_TTS_API_KEY"),
+		TTSVoiceID:            os.Getenv("PLAY_TTS_VOICE_ID"),
+		TTSModel:              env("PLAY_TTS_MODEL", "s2.1-pro-free"),
 	}
-	for _, e := range strings.Split(os.Getenv("ACT_ADMIN_EMAILS"), ",") {
+	for _, e := range strings.Split(os.Getenv("PLAY_ADMIN_EMAILS"), ",") {
 		if e = strings.ToLower(strings.TrimSpace(e)); e != "" {
 			c.AdminEmails = append(c.AdminEmails, e)
 		}
@@ -78,7 +91,7 @@ func Load() (Config, error) {
 		c.SMTPFrom = c.SMTPUser
 	}
 	if c.DatabaseURL == "" {
-		return c, fmt.Errorf("ACT_DATABASE_URL is required")
+		return c, fmt.Errorf("PLAY_DATABASE_URL is required")
 	}
 	return c, nil
 }

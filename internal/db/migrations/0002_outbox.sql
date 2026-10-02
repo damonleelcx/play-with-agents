@@ -1,7 +1,7 @@
 -- 0002 · Transactional outbox for notification email.
 --
 -- A notification is written in the SAME transaction as the fact it announces
--- (an approval requested, an approval decided), and delivered later by the
+-- (an approval requested), and delivered later by the
 -- scheduler. So a crash can neither lose the email nor send one for a change
 -- that rolled back. Delivery is at-least-once; the Message-ID is the key, so a
 -- rare duplicate is recognisable as the same message.

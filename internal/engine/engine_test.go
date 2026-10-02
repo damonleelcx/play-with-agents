@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/damonleelcx/play-with-agents/internal/llm"
+	"github.com/damonleelcx/play-with-agents/internal/skills"
 )
 
 var finish = llm.Message{Content: "Done."}
@@ -92,12 +93,11 @@ func TestCrashResumesFromCheckpoint(t *testing.T) {
 		n := toolResults(req)
 		steps.Store(n, true)
 		if n < 3 {
-			return llm.Message{ToolCalls: []llm.ToolCall{call("c"+string(rune('0'+n)), "legal_deadline_calc",
-				map[string]any{"trigger_date": "2026-01-02", "days": 10 + n, "count": "calendar"})}}
+			return llm.Message{ToolCalls: []llm.ToolCall{call("c"+string(rune('0'+n)), "test_count", map[string]any{"n": 10 + n})}}
 		}
 		return finish
 	})
-	g := r.goalWith(t, []PlannedTask{{Key: "a", Title: "A", Instructions: "compute", Tools: []string{"legal_deadline_calc"}}}, Limits{})
+	g := r.goalWith(t, []PlannedTask{{Key: "a", Title: "A", Instructions: "compute", Tools: []string{"test_count"}}}, Limits{})
 	ctx, crash := context.WithCancel(context.Background())
 	w1 := r.worker("w1")
 	w1.Hook = func(_ *Task, step int) {
@@ -134,17 +134,17 @@ func TestCrashResumesFromCheckpoint(t *testing.T) {
 	}
 }
 
-// A client-gated side effect parks the task; approval runs EXACTLY the
+// An owner-gated side effect parks the task; approval runs EXACTLY the
 // approved call once; a retry of the same step does not send twice.
 func TestApprovalGateAndIdempotentSend(t *testing.T) {
 	r := newRig(t, func(req fakeReq) llm.Message {
 		if toolResults(req) == 0 {
-			return llm.Message{ToolCalls: []llm.ToolCall{call("s1", "email_send", map[string]any{
-				"to": "landlord@example.com", "subject": "Demand", "body": "Return my deposit.", "on_behalf_of": "client"})}}
+			return llm.Message{ToolCalls: []llm.ToolCall{call("s1", "test_send", map[string]any{
+				"to": "friend@example.com", "body": "Game night at eight?"})}}
 		}
 		return finish
 	})
-	g := r.goalWith(t, []PlannedTask{{Key: "send", Title: "Send", Instructions: "send it", Tools: []string{"email_send"}}}, Limits{})
+	g := r.goalWith(t, []PlannedTask{{Key: "send", Title: "Send", Instructions: "send it", Tools: []string{"test_send"}}}, Limits{})
 	ctx := context.Background()
 	w := r.worker("w")
 
@@ -179,8 +179,8 @@ func TestApprovalGateAndIdempotentSend(t *testing.T) {
 	_, _ = r.pool.Exec(ctx, `UPDATE approvals SET status='approved'`)
 	task, _ = r.store.Claim(ctx, "w", time.Minute)
 	// Re-run with the approval pre-granted by replaying the pending call.
-	cp := &Checkpoint{Step: 1, PendingCall: &PendingCall{CallID: "s1", Tool: "email_send", ApprovalID: apID,
-		Args: []byte(`{"to":"landlord@example.com","subject":"Demand","body":"Return my deposit.","on_behalf_of":"client"}`)}}
+	cp := &Checkpoint{Step: 1, PendingCall: &PendingCall{CallID: "s1", Tool: "test_send", ApprovalID: apID,
+		Args: []byte(`{"to":"friend@example.com","body":"Game night at eight?"}`)}}
 	_ = r.store.SaveCheckpoint(ctx, task, cp)
 	w.Execute(ctx, task)
 	if r.mailer.count() != 1 {
@@ -198,18 +198,17 @@ func TestRejectedApprovalIsReportedNotExecuted(t *testing.T) {
 				return finish
 			}
 		}
-		return llm.Message{ToolCalls: []llm.ToolCall{call("s1", "email_send", map[string]any{
-			"to": "x@example.com", "subject": "s", "body": "b", "on_behalf_of": "counsel"})}}
+		return llm.Message{ToolCalls: []llm.ToolCall{call("s1", "test_send", map[string]any{"to": "x@example.com", "body": "b"})}}
 	})
-	g := r.goalWith(t, []PlannedTask{{Key: "send", Title: "Send", Instructions: "send", Tools: []string{"email_send"}}}, Limits{})
+	g := r.goalWith(t, []PlannedTask{{Key: "send", Title: "Send", Instructions: "send", Tools: []string{"test_send"}}}, Limits{})
 	ctx := context.Background()
 	w := r.worker("w")
 	task, _ := r.store.Claim(ctx, "w", time.Minute)
 	w.Execute(ctx, task)
-	var apID, role, gate string
-	_ = r.pool.QueryRow(ctx, `SELECT id, required_role, gate FROM approvals WHERE goal_id=$1`, g.ID).Scan(&apID, &role, &gate)
-	if gate != "G2" || role != "attorney" {
-		t.Fatalf("sending as counsel must need a G2 attorney approval, got %s %s", gate, role)
+	var apID, gate, owner string
+	_ = r.pool.QueryRow(ctx, `SELECT id, gate, user_id FROM approvals WHERE goal_id=$1`, g.ID).Scan(&apID, &gate, &owner)
+	if gate != "G1" || owner != r.userID {
+		t.Fatalf("an external send must need the owner's G1 approval, got %s for %s", gate, owner)
 	}
 	_ = r.store.Decide(ctx, apID, r.userID, false, "not accurate")
 	task, _ = r.store.Claim(ctx, "w", time.Minute)
@@ -219,8 +218,9 @@ func TestRejectedApprovalIsReportedNotExecuted(t *testing.T) {
 	}
 }
 
-// Controlled substances are G3: blocked outright, never queued for approval.
-func TestControlledSubstanceIsNeverAutomated(t *testing.T) {
+// G3 is refused outright, never queued for approval — decided from the
+// arguments by GateFor, whatever the static gate says.
+func TestNeverAutomatedActionIsBlocked(t *testing.T) {
 	var blocked bool
 	r := newRig(t, func(req fakeReq) llm.Message {
 		for _, m := range req.Messages {
@@ -229,17 +229,17 @@ func TestControlledSubstanceIsNeverAutomated(t *testing.T) {
 				return finish
 			}
 		}
-		return llm.Message{ToolCalls: []llm.ToolCall{call("rx", "rx_submit", map[string]any{
-			"drug": "oxycodone 5mg", "dose": "5 mg", "route": "oral", "frequency": "q6h", "quantity": 20, "refills": 0, "controlled_schedule": "none"})}}
+		return llm.Message{ToolCalls: []llm.ToolCall{call("rm", "test_send", map[string]any{
+			"to": "bookie@example.com", "body": "put 100 dollars on it", "real_money": true})}}
 	})
-	g := r.goalWith(t, []PlannedTask{{Key: "rx", Title: "Rx", Instructions: "x", Tools: []string{"rx_submit"}}}, Limits{})
+	g := r.goalWith(t, []PlannedTask{{Key: "x", Title: "X", Instructions: "x", Tools: []string{"test_send"}}}, Limits{})
 	ctx := context.Background()
 	task, _ := r.store.Claim(ctx, "w", time.Minute)
 	r.worker("w").Execute(ctx, task)
 	var n int
 	_ = r.pool.QueryRow(ctx, `SELECT count(*) FROM approvals WHERE goal_id=$1`, g.ID).Scan(&n)
-	if !blocked || n != 0 {
-		t.Fatalf("blocked=%v approvals=%d (the model lied that it is not scheduled; the deny-list must still catch it)", blocked, n)
+	if !blocked || n != 0 || r.mailer.count() != 0 {
+		t.Fatalf("blocked=%v approvals=%d sends=%d", blocked, n, r.mailer.count())
 	}
 }
 
@@ -277,9 +277,9 @@ func TestDAGPromotionAndWait(t *testing.T) {
 // A goal that exhausts its budget stops and asks for a person.
 func TestBudgetStopsTheGoal(t *testing.T) {
 	r := newRig(t, func(fakeReq) llm.Message {
-		return llm.Message{ToolCalls: []llm.ToolCall{call("c", "legal_deadline_calc", map[string]any{"trigger_date": "2026-01-02", "days": 3, "count": "court"})}}
+		return llm.Message{ToolCalls: []llm.ToolCall{call("c", "test_count", map[string]any{"n": 3})}}
 	})
-	g := r.goalWith(t, []PlannedTask{{Key: "a", Title: "A", Instructions: "x", Tools: []string{"legal_deadline_calc"}}}, Limits{MaxIterations: 3})
+	g := r.goalWith(t, []PlannedTask{{Key: "a", Title: "A", Instructions: "x", Tools: []string{"test_count"}}}, Limits{MaxIterations: 3})
 	ctx := context.Background()
 	task, _ := r.store.Claim(ctx, "w", time.Minute)
 	r.worker("w").Execute(ctx, task)
@@ -298,11 +298,11 @@ func TestCancellationIsSafe(t *testing.T) {
 	var goalID string
 	r = newRig(t, func(req fakeReq) llm.Message {
 		if toolResults(req) == 1 {
-			_ = r.store.SetGoalStatus(context.Background(), goalID, "cancelled", "client cancelled")
+			_ = r.store.SetGoalStatus(context.Background(), goalID, "cancelled", "owner cancelled")
 		}
-		return llm.Message{ToolCalls: []llm.ToolCall{call("c", "legal_deadline_calc", map[string]any{"trigger_date": "2026-01-02", "days": 3, "count": "court"})}}
+		return llm.Message{ToolCalls: []llm.ToolCall{call("c", "test_count", map[string]any{"n": 3})}}
 	})
-	g := r.goalWith(t, []PlannedTask{{Key: "a", Title: "A", Instructions: "x", Tools: []string{"legal_deadline_calc"}},
+	g := r.goalWith(t, []PlannedTask{{Key: "a", Title: "A", Instructions: "x", Tools: []string{"test_count"}},
 		{Key: "b", Title: "B", Instructions: "x", Deps: []string{"a"}}}, Limits{})
 	goalID = g.ID
 	ctx := context.Background()
@@ -318,39 +318,56 @@ func TestCancellationIsSafe(t *testing.T) {
 	}
 }
 
-// Deterministic verification: a draft citing an unverified case is not done.
-func TestVerifierRejectsUnverifiedCitation(t *testing.T) {
+// Deterministic verification: a task that declares "called:test_note" is not
+// done until the ledger shows that call succeeded, whatever the model says.
+func TestVerifierRejectsUnfinishedTask(t *testing.T) {
 	r := newRig(t, func(req fakeReq) llm.Message {
 		if toolResults(req) == 0 {
-			return llm.Message{ToolCalls: []llm.ToolCall{call("d", "save_document", map[string]any{
-				"title": "Memo", "kind": "memo", "content": "As held in Smith v. Jones, 999 F.3d 12345 (9th Cir. 2031), the deposit must be returned."})}}
+			return llm.Message{ToolCalls: []llm.ToolCall{call("d", "test_count", map[string]any{"n": 1})}}
 		}
-		return finish // claims done without verifying
+		return finish // claims done without ever saving
 	})
-	g := r.goalWith(t, []PlannedTask{{Key: "m", Title: "Memo", Instructions: "x", Tools: []string{"save_document"},
-		Verify: []string{"document_saved", "citations_verified"}}}, Limits{})
+	g := r.goalWith(t, []PlannedTask{{Key: "m", Title: "Make", Instructions: "x", Tools: []string{"test_count", "test_note"},
+		Verify: []string{"called:test_note"}}}, Limits{})
 	ctx := context.Background()
 	task, _ := r.store.Claim(ctx, "w", time.Minute)
 	r.worker("w").Execute(ctx, task)
 	got := r.task(t, g.ID, "m")
 	if got.Status == "succeeded" {
-		t.Fatal("a memo with an unverified citation was accepted")
+		t.Fatal("a task whose required call never happened was accepted")
 	}
 	var vf int
 	_ = r.pool.QueryRow(ctx, `SELECT count(*) FROM events WHERE goal_id=$1 AND type='task.verify_failed'`, g.ID).Scan(&vf)
 	if vf == 0 {
 		t.Fatal("verification failure was not recorded on the timeline")
 	}
+
+	// Once the model does the work, the same verifier passes.
+	r2 := newRig(t, func(req fakeReq) llm.Message {
+		if toolResults(req) == 0 {
+			return llm.Message{ToolCalls: []llm.ToolCall{call("n", "test_note", map[string]any{})}}
+		}
+		return finish
+	})
+	g2 := r2.goalWith(t, []PlannedTask{{Key: "m", Title: "Make", Instructions: "x", Tools: []string{"test_note"},
+		Verify: []string{"called:test_note"}}}, Limits{})
+	task, _ = r2.store.Claim(ctx, "w", time.Minute)
+	r2.worker("w").Execute(ctx, task)
+	if st := r2.task(t, g2.ID, "m").Status; st != "succeeded" {
+		t.Fatalf("verified task is %s", st)
+	}
 }
 
 func TestPlanValidation(t *testing.T) {
 	lim := Limits{}.WithDefaults()
 	cases := map[string][]PlannedTask{
-		"cycle":        {{Key: "a", Title: "a", Instructions: "x", Deps: []string{"b"}}, {Key: "b", Title: "b", Instructions: "x", Deps: []string{"a"}}},
-		"unknown tool": {{Key: "a", Title: "a", Instructions: "x", Tools: []string{"launch_missiles"}}},
-		"missing dep":  {{Key: "a", Title: "a", Instructions: "x", Deps: []string{"zzz"}}},
-		"bad key":      {{Key: "A B", Title: "a", Instructions: "x"}},
-		"long wait":    {{Key: "a", Title: "a", WaitDays: 400}},
+		"cycle":                {{Key: "a", Title: "a", Instructions: "x", Deps: []string{"b"}}, {Key: "b", Title: "b", Instructions: "x", Deps: []string{"a"}}},
+		"unknown tool":         {{Key: "a", Title: "a", Instructions: "x", Tools: []string{"launch_missiles"}}},
+		"missing dep":          {{Key: "a", Title: "a", Instructions: "x", Deps: []string{"zzz"}}},
+		"bad key":              {{Key: "A B", Title: "a", Instructions: "x"}},
+		"long wait":            {{Key: "a", Title: "a", WaitDays: 400}},
+		"unknown verifier":     {{Key: "a", Title: "a", Instructions: "x", Verify: []string{"looks_fine"}}},
+		"called: unknown tool": {{Key: "a", Title: "a", Instructions: "x", Verify: []string{"called:launch_missiles"}}},
 	}
 	for name, ts := range cases {
 		if _, err := validate(ts, map[string]int{}, lim); err == nil {
@@ -364,11 +381,23 @@ func TestPlanValidation(t *testing.T) {
 	if _, err := validate(deep, map[string]int{}, lim); err == nil {
 		t.Error("depth limit not enforced")
 	}
-	// Dropping the sign-off from a template reverts to the template.
-	tmpl := []PlannedTask{{Key: "a", Title: "a", Instructions: "x"}, {Key: "r", Title: "r", Instructions: "x", Verify: []string{"signed_off"}}}
+	if _, err := validate([]PlannedTask{{Key: "a", Title: "a", Instructions: "x", Tools: []string{"test_note"},
+		Verify: []string{"called:test_note", "test_guard"}}}, map[string]int{}, lim); err != nil {
+		t.Errorf("valid verifiers rejected: %v", err)
+	}
+	// Dropping a guard from a template reverts to the template; a quality
+	// check is the model's to reshape.
+	tmpl := []PlannedTask{{Key: "a", Title: "a", Instructions: "x"}, {Key: "r", Title: "r", Instructions: "x", Verify: []string{"test_guard"}}}
 	got, reverted := keepSafetySteps([]PlannedTask{{Key: "a", Title: "a", Instructions: "x"}}, tmpl)
 	if len(got) != 2 || !reverted {
-		t.Error("a plan without the professional sign-off was accepted")
+		t.Error("a plan without the guard was accepted")
+	}
+	tmpl[1].Verify = []string{"called:test_note"}
+	if _, reverted := keepSafetySteps([]PlannedTask{{Key: "a", Title: "a", Instructions: "x"}}, tmpl); reverted {
+		t.Error("a non-guard verifier was treated as a guard")
+	}
+	if !hasGuard([]string{"called:test_note", "test_guard"}) || hasGuard([]string{"called:test_note"}) {
+		t.Error("hasGuard misclassifies")
 	}
 }
 
@@ -389,37 +418,16 @@ func TestSchedulerFinishAndReplanAreIdempotent(t *testing.T) {
 	}
 }
 
-// Reminders are delivered once, even when ticks overlap.
-func TestReminderDeliveredOnce(t *testing.T) {
-	r := newRig(t, func(fakeReq) llm.Message { return finish })
-	ctx := context.Background()
-	_, _ = r.pool.Exec(ctx, `INSERT INTO reminders (user_id, due_at, text, key) VALUES ($1, now()-interval '1 minute', 'Hearing tomorrow', 'k1')`, r.userID)
-	s := &Scheduler{Store: r.store, Mailer: r.mailer}
-	var wg sync.WaitGroup
-	for i := 0; i < 4; i++ {
-		wg.Add(1)
-		go func() { defer wg.Done(); s.deliverReminders(ctx) }()
-	}
-	wg.Wait()
-	if r.mailer.count() != 1 {
-		t.Fatalf("reminder emails: %d", r.mailer.count())
-	}
-	var msgs int
-	_ = r.pool.QueryRow(ctx, `SELECT count(*) FROM messages WHERE conversation_id=$1`, r.convID).Scan(&msgs)
-	if msgs != 1 {
-		t.Fatalf("reminder messages: %d", msgs)
-	}
-}
-
 // The initial planner falls back to the playbook when the model's plan is
-// invalid — and the goal still gets a valid DAG.
+// invalid — and to the fallback playbook when the goal's skill is unknown —
+// and the goal still gets a valid DAG.
 func TestPlannerFallsBackToPlaybook(t *testing.T) {
 	r := newRig(t, func(req fakeReq) llm.Message {
 		return llm.Message{Content: `{"title":"x","tasks":[{"key":"a","title":"a","instructions":"x","deps":["a"],"verify":["citations_verified"]}]}`}
 	})
 	ctx := context.Background()
-	g := &Goal{UserID: r.userID, ConversationID: r.convID, Title: "Deposit", Objective: "get deposit back", Domain: "legal",
-		Skill: "demand-letter", Language: "en"}
+	g := &Goal{UserID: r.userID, ConversationID: r.convID, Title: "Something", Objective: "do a thing", Domain: "general",
+		Skill: "not-registered-here", Language: "en"}
 	if err := r.store.CreateGoal(ctx, g); err != nil {
 		t.Fatal(err)
 	}
@@ -427,7 +435,8 @@ func TestPlannerFallsBackToPlaybook(t *testing.T) {
 	r.worker("w").Execute(ctx, task)
 	g, _ = r.store.Goal(ctx, g.ID)
 	ts, _ := r.store.Tasks(ctx, g.ID)
-	if g.Status != "active" || len(ts) != 5 {
+	fb, _ := skills.Get(skills.Fallback)
+	if g.Status != "active" || len(ts) != 1+len(fb.Steps) {
 		t.Fatalf("goal %s with %d tasks", g.Status, len(ts))
 	}
 	var why string

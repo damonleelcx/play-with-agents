@@ -1,10 +1,12 @@
-// Command act runs ACT: the web tier, the workers and the scheduler.
+// Command play runs Play with Agents: the web tier, the mission and table
+// workers, and the scheduler. Every knob is a PLAY_* environment variable
+// (internal/config).
 //
-//	act serve    web + workers + scheduler in one process (development)
-//	act web      web tier only
-//	act worker   workers + scheduler only
-//	act migrate    apply migrations and exit
-//	act mailcheck  prove the mail relay accepts our login, send nothing
+//	play serve      web + workers + scheduler in one process (development)
+//	play web        web tier only
+//	play worker     workers + scheduler only
+//	play migrate    apply migrations and exit
+//	play mailcheck  prove the mail relay accepts our login, send nothing
 package main
 
 import (
@@ -24,9 +26,16 @@ import (
 	"github.com/damonleelcx/play-with-agents/internal/config"
 	"github.com/damonleelcx/play-with-agents/internal/db"
 	"github.com/damonleelcx/play-with-agents/internal/engine"
+	"github.com/damonleelcx/play-with-agents/internal/games"
+	"github.com/damonleelcx/play-with-agents/internal/games/ai"
+	"github.com/damonleelcx/play-with-agents/internal/games/holdem"
+	"github.com/damonleelcx/play-with-agents/internal/games/script"
 	"github.com/damonleelcx/play-with-agents/internal/httpapi"
 	"github.com/damonleelcx/play-with-agents/internal/llm"
 	"github.com/damonleelcx/play-with-agents/internal/mail"
+	"github.com/damonleelcx/play-with-agents/internal/rooms"
+	"github.com/damonleelcx/play-with-agents/internal/rooms/talk"
+	"github.com/damonleelcx/play-with-agents/internal/tts"
 	"github.com/damonleelcx/play-with-agents/internal/web"
 )
 
@@ -81,14 +90,24 @@ func run(mode string) error {
 		slog.Warn("MAIL_DISABLED: verification and reset links are logged, not sent", "missing_origin", cfg.PublicOrigin == "", "missing_smtp", cfg.SMTPHost == "" || cfg.SMTPUser == "")
 	}
 	if cfg.LLMAPIKey == "" {
-		slog.Warn("MODEL_DISABLED: ACT_LLM_API_KEY is empty; chat and background work will fail until it is set")
+		slog.Warn("MODEL_DISABLED: PLAY_LLM_API_KEY is empty; chat with Aoi and studio builds will fail until it is set")
+	}
+	// Aoi's voice. Optional: without a key (or a voice id) the speech
+	// endpoint reports disabled. Whether the backbone may train on what she
+	// says is logged every start, because speech is a second vendor seeing
+	// the same text the model does.
+	var speech *tts.Service
+	if fish, err := tts.NewFish(tts.DefaultEndpoint, cfg.TTSAPIKey, cfg.TTSVoiceID, cfg.TTSModel); err == nil {
+		speech = tts.NewService(fish, 200)
+		slog.Info("voice enabled", "tts_model", fish.Model, "tts_voice", fish.VoiceID, "tts_trains_on_input", tts.TrainsOnRequests(fish.Model))
+	} else {
+		slog.Warn("VOICE_DISABLED: PLAY_TTS_API_KEY or PLAY_TTS_VOICE_ID is empty; Aoi has no voice", "missing_key", cfg.TTSAPIKey == "", "missing_voice", cfg.TTSVoiceID == "")
 	}
 	client := llm.New(cfg.LLMBaseURL, cfg.LLMAPIKey)
 	// A failing primary falls back to the fast model rather than stopping.
 	client.Fallback = map[string]string{cfg.LLMModel: cfg.LLMFastModel}
 	store := &engine.Store{Pool: pool}
 	model := &engine.Model{Client: client, Store: store, AccountDailyTokens: cfg.AccountDailyTokens, DeploymentDailyTokens: cfg.DeploymentDailyTokens}
-	onCall := os.Getenv("ACT_ONCALL_EMAIL")
 	hub := httpapi.NewHub()
 	wake := make(chan struct{}, 16)
 
@@ -97,25 +116,52 @@ func run(mode string) error {
 
 	start(func() { engine.Listen(ctx, pool, wake, hub.Notify) })
 
+	// Tables (internal/rooms). Its one LISTEN play_table connection fans
+	// changes out to SSE streams (serve/web) and wakes table workers
+	// (serve/worker), so it runs in every mode.
+	tables := rooms.New(pool)
+	tables.Lease = cfg.TableLease
+	tables.Chatter = &talk.ModelChatter{Model: model, LLM: cfg.LLMFastModel}
+	tables.Loader = rooms.SourceLoader(pool, func(id, src string) (games.Game, error) {
+		g, err := script.Load(id, src, script.Options{})
+		if err != nil {
+			return nil, err
+		}
+		return g, nil
+	})
+	holdemBrain, anyBrain := holdem.Brain{}, ai.New(ai.Options{})
+	tables.BrainFor = func(g games.Game) games.Brain {
+		if _, ok := g.(*holdem.Game); ok {
+			return holdemBrain
+		}
+		return anyBrain
+	}
+	start(func() { tables.Listen(ctx) })
+
 	if mode == "serve" || mode == "worker" {
 		planner := &engine.Planner{Store: store, Model: model, LLM: cfg.LLMModel}
-		httpc := &http.Client{Timeout: 60 * time.Second}
 		for i := 0; i < cfg.WorkerCount; i++ {
 			w := &engine.Worker{ID: engine.NewWorkerID(), Store: store, Model: model, Planner: planner, LLM: cfg.LLMModel,
-				Mailer: mailer, HTTP: httpc, Lease: cfg.LeaseDuration, CourtListener: cfg.CourtListenerToken, OnCallEmail: onCall, Wake: wake}
+				Mailer: mailer, Lease: cfg.LeaseDuration, Wake: wake}
 			start(func() { w.Run(ctx) })
 		}
 		sched := &engine.Scheduler{Store: store, Model: model, FastLLM: cfg.LLMFastModel, Mailer: mailer, PublicOrigin: cfg.PublicOrigin}
 		start(func() { sched.Run(ctx) })
+		start(func() { tables.RunWorkers(ctx, cfg.TableWorkers) })
 	}
 
 	var srv *http.Server
 	var serveErr error
 	if mode == "serve" || mode == "web" {
 		authSvc := &auth.Service{Pool: pool, Mailer: mailer, PublicOrigin: originOr(cfg.PublicOrigin, cfg.Addr), SessionTTL: cfg.SessionTTL, AdminEmails: cfg.AdminEmails}
-		ag := &agent.Agent{Store: store, Model: model, LLM: cfg.LLMModel, FastLLM: cfg.LLMFastModel, Mailer: mailer, OnCallEmail: onCall}
+		// Aoi's capabilities. Each is optional and nil-safe: until a service
+		// is wired here she tells the player it is not open yet. The rooms
+		// service (tables, catalog) and the studio plug in as
+		// agent.Tables, agent.Catalog and agent.Studio.
+		ag := &agent.Agent{Store: store, Model: model, LLM: cfg.LLMModel, FastLLM: cfg.LLMFastModel, Mailer: mailer,
+			Tables: nil, Studio: nil, Catalog: nil}
 		api := &httpapi.Server{Pool: pool, Auth: authSvc, Store: store, Agent: ag, Static: web.FS(), CookieSecure: cfg.CookieSecure,
-			MailEnabled: mailer.Enabled(), Hub: hub}
+			MailEnabled: mailer.Enabled(), Hub: hub, Rooms: tables, Speech: speech}
 		srv = &http.Server{Addr: cfg.Addr, Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second}
 		start(func() {
 			slog.Info("listening", "addr", cfg.Addr, "mode", mode)

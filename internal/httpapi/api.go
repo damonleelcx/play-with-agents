@@ -1,67 +1,112 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"github.com/jackc/pgx/v5"
+
 	"github.com/damonleelcx/play-with-agents/internal/agent"
 	"github.com/damonleelcx/play-with-agents/internal/auth"
 	"github.com/damonleelcx/play-with-agents/internal/engine"
-	"github.com/damonleelcx/play-with-agents/internal/persona"
-	"github.com/damonleelcx/play-with-agents/internal/tools"
+	"github.com/damonleelcx/play-with-agents/internal/tts"
 )
 
 // ── settings ───────────────────────────────────────────────────────────────
+//
+// GET /api/settings → { user, preferences, defaults, schema }
+//   preferences: every key at its stored value or its default, plus
+//                display_name (which is users.name)
+//   schema:      [{ key, group, kind, values?, max_len?, min?, max?, default }] — what
+//                the settings page renders and what PUT accepts
+// PUT /api/settings { name?, preferences?: { key: value | null } }
+//   Every key is validated before anything is written; one bad key rejects
+//   the whole request. null resets a key to its default.
 
-// Preference keys the client may set, with a validator each. Anything else is
-// rejected rather than stored, so the preferences blob stays meaningful.
-var prefKeys = map[string]func(any) bool{
-	"language": func(v any) bool { s, ok := v.(string); return ok && (s == "en" || s == "zh") },
-	"verbosity": func(v any) bool {
-		s, ok := v.(string)
-		return ok && (s == "brief" || s == "balanced" || s == "detailed")
-	},
-	"tone":              func(v any) bool { s, ok := v.(string); return ok && (s == "warm" || s == "neutral" || s == "formal") },
-	"timezone":          func(v any) bool { s, ok := v.(string); _, err := time.LoadLocation(s); return ok && err == nil },
-	"notify_email":      func(v any) bool { _, ok := v.(bool); return ok },
-	"notify_approvals":  func(v any) bool { _, ok := v.(bool); return ok },
-	"memory_enabled":    func(v any) bool { _, ok := v.(bool); return ok },
-	"theme":             func(v any) bool { s, ok := v.(string); return ok && (s == "light" || s == "dark" || s == "system") },
-	"font_size":         func(v any) bool { s, ok := v.(string); return ok && (s == "small" || s == "medium" || s == "large") },
-	"enter_to_send":     func(v any) bool { _, ok := v.(bool); return ok },
-	"reduce_motion":     func(v any) bool { _, ok := v.(bool); return ok },
-	"jurisdiction":      func(v any) bool { s, ok := v.(string); return ok && utf8.RuneCountInString(s) <= 80 },
-	"goal_max_cost_usd": func(v any) bool { f, ok := v.(float64); return ok && f >= 1 && f <= 200 },
-	"goal_max_days":     func(v any) bool { f, ok := v.(float64); return ok && f >= 1 && f <= 180 },
-	"approval_mode":     func(v any) bool { s, ok := v.(string); return ok && (s == "ask" || s == "ask_always") },
+type prefSchema struct {
+	Key     string   `json:"key"`
+	Group   string   `json:"group"`
+	Kind    string   `json:"kind"`
+	Values  []string `json:"values,omitempty"`
+	MaxLen  int      `json:"max_len,omitempty"`
+	Min     *int     `json:"min,omitempty"`
+	Max     *int     `json:"max,omitempty"`
+	Default any      `json:"default"`
+}
+
+var prefKindName = map[agent.PrefKind]string{agent.PrefEnum: "enum", agent.PrefInt: "int", agent.PrefBool: "bool",
+	agent.PrefText: "text", agent.PrefAgents: "agents", agent.PrefRange: "range"}
+
+func settingsSchema() []prefSchema {
+	out := []prefSchema{{Key: "display_name", Group: "profile", Kind: "text", MaxLen: maxNameLen, Default: ""}}
+	for _, p := range agent.PrefSpecs {
+		ps := prefSchema{Key: p.Key, Group: p.Group, Kind: prefKindName[p.Kind], Values: p.Values, MaxLen: p.MaxLen, Default: p.Default}
+		if p.Kind == agent.PrefRange {
+			lo, hi := p.Min, p.Max
+			ps.Min, ps.Max = &lo, &hi
+		}
+		out = append(out, ps)
+	}
+	return out
+}
+
+const maxNameLen = 80
+
+func (s *Server) storedPrefs(ctx context.Context, userID string) map[string]any {
+	var raw []byte
+	_ = s.Pool.QueryRow(ctx, `SELECT coalesce(data,'{}') FROM user_preferences WHERE user_id=$1`, userID).Scan(&raw)
+	m := map[string]any{}
+	_ = json.Unmarshal(raw, &m)
+	return m
 }
 
 func (s *Server) getSettings(w http.ResponseWriter, r *http.Request, u *auth.User) {
-	var prefs []byte
-	_ = s.Pool.QueryRow(r.Context(), `SELECT coalesce(data,'{}') FROM user_preferences WHERE user_id=$1`, u.ID).Scan(&prefs)
-	if prefs == nil {
-		prefs = []byte("{}")
+	prefs := agent.WithDefaults(s.storedPrefs(r.Context(), u.ID))
+	prefs["display_name"] = u.Name
+	writeJSON(w, 200, map[string]any{"user": s.view(r, u), "preferences": prefs, "defaults": agent.PrefDefaults(), "schema": settingsSchema()})
+}
+
+// validateSettings checks a PUT body and splits it into the users.name change
+// (if any), the keys to set and the keys to reset.
+func validateSettings(name *string, prefs map[string]any) (newName *string, set map[string]any, reset []string, err error) {
+	if name != nil {
+		n := strings.TrimSpace(*name)
+		newName = &n
 	}
-	var lic []map[string]any
-	rows, err := s.Pool.Query(r.Context(), `SELECT id, kind, number, jurisdiction, status, created_at FROM professional_licenses WHERE user_id=$1 ORDER BY created_at DESC`, u.ID)
-	if err == nil {
-		for rows.Next() {
-			var id, kind, num, jur, st string
-			var at time.Time
-			if rows.Scan(&id, &kind, &num, &jur, &st, &at) == nil {
-				lic = append(lic, map[string]any{"id": id, "kind": kind, "number": num, "jurisdiction": jur, "status": st, "created_at": at})
+	set = map[string]any{}
+	for k, v := range prefs {
+		if k == "display_name" {
+			n, ok := v.(string)
+			if !ok {
+				return nil, nil, nil, fmt.Errorf("display_name must be text")
 			}
+			n = strings.TrimSpace(n)
+			newName = &n
+			continue
 		}
-		rows.Close()
+		if v == nil {
+			if _, known := agent.PrefSpecFor(k); !known {
+				return nil, nil, nil, fmt.Errorf("unknown setting %q", k)
+			}
+			reset = append(reset, k)
+			continue
+		}
+		if err := agent.ValidatePref(k, v); err != nil {
+			return nil, nil, nil, err
+		}
+		set[k] = agent.NormalizePref(k, v)
 	}
-	writeJSON(w, 200, map[string]any{"user": s.view(r, u), "preferences": json.RawMessage(prefs), "licenses": lic})
+	if newName != nil && (utf8.RuneCountInString(*newName) > maxNameLen || strings.ContainsAny(*newName, "\n\r\t")) {
+		return nil, nil, nil, fmt.Errorf("name must be one line of at most %d characters", maxNameLen)
+	}
+	return newName, set, reset, nil
 }
 
 func (s *Server) putSettings(w http.ResponseWriter, r *http.Request, u *auth.User) {
@@ -73,30 +118,37 @@ func (s *Server) putSettings(w http.ResponseWriter, r *http.Request, u *auth.Use
 		writeErr(w, 400, "bad request")
 		return
 	}
-	if in.Name != nil {
-		n := strings.TrimSpace(*in.Name)
-		if utf8.RuneCountInString(n) > 80 {
-			writeErr(w, 400, "name is too long")
-			return
-		}
-		_, _ = s.Pool.Exec(r.Context(), `UPDATE users SET name=$2, updated_at=now() WHERE id=$1`, u.ID, n)
+	name, set, reset, err := validateSettings(in.Name, in.Preferences)
+	if err != nil {
+		writeErr(w, 400, err.Error())
+		return
 	}
-	if len(in.Preferences) > 0 {
-		for k, v := range in.Preferences {
-			ok, known := prefKeys[k]
-			if !known || !ok(v) {
-				writeErr(w, 400, "invalid preference: "+k)
-				return
+	patch, _ := json.Marshal(set)
+	err = pgx.BeginFunc(r.Context(), s.Pool, func(tx pgx.Tx) error {
+		if name != nil {
+			if _, err := tx.Exec(r.Context(), `UPDATE users SET name=$2, updated_at=now() WHERE id=$1`, u.ID, *name); err != nil {
+				return err
 			}
 		}
-		patch, _ := json.Marshal(in.Preferences)
-		if _, err := s.Pool.Exec(r.Context(), `INSERT INTO user_preferences (user_id, data) VALUES ($1,$2)
-			ON CONFLICT (user_id) DO UPDATE SET data = user_preferences.data || EXCLUDED.data, updated_at=now()`, u.ID, patch); err != nil {
-			writeErr(w, 500, "could not save")
-			return
+		if len(set) > 0 || len(reset) > 0 {
+			// jsonb - text[] removes the reset keys; || merges the rest.
+			_, err := tx.Exec(r.Context(), `INSERT INTO user_preferences (user_id, data) VALUES ($1, $2)
+				ON CONFLICT (user_id) DO UPDATE SET data = (user_preferences.data - $3::text[]) || EXCLUDED.data, updated_at=now()`,
+				u.ID, patch, reset)
+			return err
 		}
+		return nil
+	})
+	if err != nil {
+		slog.Error("put settings", "err", err)
+		writeErr(w, 500, "could not save")
+		return
 	}
-	nu, _ := s.Auth.UserByID(r.Context(), u.ID)
+	nu, err := s.Auth.UserByID(r.Context(), u.ID)
+	if err != nil {
+		writeErr(w, 500, "could not reload the account")
+		return
+	}
 	s.getSettings(w, r, nu)
 }
 
@@ -142,7 +194,9 @@ func (s *Server) revokeOthers(w http.ResponseWriter, r *http.Request, u *auth.Us
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
-// export returns everything held about the account, as JSON.
+// export returns everything held about the account, as JSON. A query whose
+// table does not exist in this deployment contributes nothing rather than
+// failing the export.
 func (s *Server) export(w http.ResponseWriter, r *http.Request, u *auth.User) {
 	ctx := r.Context()
 	q := func(sql string) []map[string]any {
@@ -172,11 +226,11 @@ func (s *Server) export(w http.ResponseWriter, r *http.Request, u *auth.User) {
 		"preferences":   q(`SELECT data FROM user_preferences WHERE user_id=$1`),
 		"memories":      q(`SELECT content, kind, created_at FROM memories WHERE user_id=$1`),
 		"conversations": q(`SELECT c.id, c.title, c.created_at, (SELECT json_agg(json_build_object('role',m.role,'content',m.content,'at',m.created_at) ORDER BY m.id) FROM messages m WHERE m.conversation_id=c.id) AS messages FROM conversations c WHERE c.user_id=$1`),
-		"cases":         q(`SELECT id, title, objective, skill, status, created_at FROM goals WHERE user_id=$1`),
-		"documents":     q(`SELECT id, title, kind, version, content, created_at FROM documents WHERE user_id=$1`),
-		"reminders":     q(`SELECT due_at, text, sent_at FROM reminders WHERE user_id=$1`),
+		"missions":      q(`SELECT id, title, objective, skill, status, created_at FROM goals WHERE user_id=$1`),
+		"approvals":     q(`SELECT tool, preview, status, created_at, decided_at FROM approvals WHERE user_id=$1`),
+		"games":         q(`SELECT id, name, summary, rules_md, status, visibility, created_at FROM games WHERE owner_id=$1`),
 	}
-	w.Header().Set("Content-Disposition", `attachment; filename="act-export.json"`)
+	w.Header().Set("Content-Disposition", `attachment; filename="play-with-agents-export.json"`)
 	writeJSON(w, 200, data)
 }
 
@@ -192,28 +246,6 @@ func (s *Server) deleteAccount(w http.ResponseWriter, r *http.Request, u *auth.U
 	}
 	clearCookie(w, s.CookieSecure)
 	writeJSON(w, 200, map[string]bool{"deleted": true})
-}
-
-// requestLicense records a professional licence for an admin to verify. The
-// role changes now; the ability to approve G2 actions waits for verification.
-func (s *Server) requestLicense(w http.ResponseWriter, r *http.Request, u *auth.User) {
-	var in struct{ Kind, Number, Jurisdiction string }
-	if err := readJSON(r, &in); err != nil {
-		writeErr(w, 400, "bad request")
-		return
-	}
-	role := map[string]string{"bar": "attorney", "medical": "physician"}[in.Kind]
-	if role == "" || strings.TrimSpace(in.Number) == "" || strings.TrimSpace(in.Jurisdiction) == "" {
-		writeErr(w, 400, "kind (bar|medical), number and jurisdiction are required")
-		return
-	}
-	if _, err := s.Pool.Exec(r.Context(), `INSERT INTO professional_licenses (user_id, kind, number, jurisdiction) VALUES ($1,$2,$3,$4)`,
-		u.ID, in.Kind, strings.TrimSpace(in.Number), strings.TrimSpace(in.Jurisdiction)); err != nil {
-		writeErr(w, 500, "could not save")
-		return
-	}
-	_, _ = s.Pool.Exec(r.Context(), `UPDATE users SET role=$2 WHERE id=$1 AND role <> 'admin'`, u.ID, role)
-	writeJSON(w, 201, map[string]string{"status": "pending"})
 }
 
 func (s *Server) usage(w http.ResponseWriter, r *http.Request, u *auth.User) {
@@ -392,7 +424,7 @@ func (s *Server) postMessage(w http.ResponseWriter, r *http.Request, u *auth.Use
 		return
 	}
 	if utf8.RuneCountInString(in.Content) > 12000 {
-		writeErr(w, 400, "message is too long (12,000 characters max) — upload long text as a document")
+		writeErr(w, 400, "message is too long (12,000 characters max)")
 		return
 	}
 	fl, ok := w.(http.Flusher)
@@ -475,21 +507,8 @@ func (s *Server) goal(w http.ResponseWriter, r *http.Request, u *auth.User) {
 			"attempts": t.Attempts, "deps": t.Deps, "error": t.Error, "run_after": t.RunAfter, "started_at": t.StartedAt,
 			"finished_at": t.FinishedAt, "summary": outputSummary(t.Output), "mode": t.Spec.Mode, "activity": activity[t.ID]})
 	}
-	docs := []map[string]any{}
-	rows, err := s.Pool.Query(r.Context(), `SELECT id, title, kind, version, created_at FROM documents WHERE goal_id=$1 ORDER BY created_at DESC`, g.ID)
-	if err == nil {
-		for rows.Next() {
-			var id, title, kind string
-			var v int
-			var at time.Time
-			if rows.Scan(&id, &title, &kind, &v, &at) == nil {
-				docs = append(docs, map[string]any{"id": id, "title": title, "kind": kind, "version": v, "created_at": at})
-			}
-		}
-		rows.Close()
-	}
 	out := goalView(g)
-	out["tasks"], out["documents"], out["approvals"] = tasks, docs, s.approvalList(r, u, g.ID)
+	out["tasks"], out["approvals"] = tasks, s.approvalList(r, u, g.ID)
 	writeJSON(w, 200, out)
 }
 
@@ -536,19 +555,7 @@ func (s *Server) timeline(w http.ResponseWriter, r *http.Request, u *auth.User) 
 		}
 		rows.Close()
 	}
-	var rems []map[string]any
-	rows, err = s.Pool.Query(r.Context(), `SELECT due_at, text FROM reminders WHERE goal_id=$1 AND sent_at IS NULL ORDER BY due_at LIMIT 10`, g.ID)
-	if err == nil {
-		for rows.Next() {
-			var at time.Time
-			var t string
-			if rows.Scan(&at, &t) == nil {
-				rems = append(rems, map[string]any{"due_at": at, "text": t})
-			}
-		}
-		rows.Close()
-	}
-	writeJSON(w, 200, map[string]any{"events": evs, "summaries": summaries, "next": next, "reminders": rems})
+	writeJSON(w, 200, map[string]any{"events": evs, "summaries": summaries, "next": next})
 }
 
 func (s *Server) goalAction(w http.ResponseWriter, r *http.Request, u *auth.User) {
@@ -560,18 +567,18 @@ func (s *Server) goalAction(w http.ResponseWriter, r *http.Request, u *auth.User
 	switch r.PathValue("action") {
 	case "pause":
 		if g.Status == "active" || g.Status == "planning" {
-			err = s.Store.SetGoalStatus(r.Context(), g.ID, "paused", "paused by the client")
+			err = s.Store.SetGoalStatus(r.Context(), g.ID, "paused", "paused by the owner")
 		}
 	case "resume":
 		if g.Status == "paused" || g.Status == "needs_attention" {
-			err = s.Store.SetGoalStatus(r.Context(), g.ID, "active", "resumed by the client")
+			err = s.Store.SetGoalStatus(r.Context(), g.ID, "active", "resumed by the owner")
 			if err == nil {
-				_, err = s.Store.EnqueuePlan(r.Context(), g.ID, fmt.Sprintf("resume-%d", time.Now().Unix()), "review", "the client resumed the case; check the plan still fits")
+				_, err = s.Store.EnqueuePlan(r.Context(), g.ID, fmt.Sprintf("resume-%d", time.Now().Unix()), "review", "the owner resumed the mission; check the plan still fits")
 			}
 		}
 	case "cancel":
 		if g.Status != "completed" && g.Status != "cancelled" {
-			err = s.Store.SetGoalStatus(r.Context(), g.ID, "cancelled", "cancelled by the client")
+			err = s.Store.SetGoalStatus(r.Context(), g.ID, "cancelled", "cancelled by the owner")
 		}
 	default:
 		writeErr(w, 404, "unknown action")
@@ -587,16 +594,14 @@ func (s *Server) goalAction(w http.ResponseWriter, r *http.Request, u *auth.User
 
 // ── approvals ──────────────────────────────────────────────────────────────
 
-// approvalList: the client sees their own; a licensed professional also sees
-// the queue of G2 items for their role.
+// approvalList: G1 approvals belong to the goal's owner, who alone sees and
+// decides them.
 func (s *Server) approvalList(r *http.Request, u *auth.User, goalID string) []map[string]any {
-	q := `SELECT a.id, a.goal_id, g.title, a.tool, a.args, a.preview, a.gate, a.required_role, a.status, a.note, a.created_at, a.decided_at,
-		u.name, u.email, a.user_id = $1 AS own
-		FROM approvals a JOIN goals g ON g.id=a.goal_id JOIN users u ON u.id=a.user_id
-		WHERE (a.user_id=$1 OR (a.gate='G2' AND a.required_role=$2 AND $3))`
-	args := []any{u.ID, u.Role, u.Licensed}
+	q := `SELECT a.id, a.goal_id, g.title, a.tool, a.args, a.preview, a.gate, a.status, a.note, a.created_at, a.decided_at
+		FROM approvals a JOIN goals g ON g.id=a.goal_id WHERE a.user_id=$1`
+	args := []any{u.ID}
 	if goalID != "" {
-		q += ` AND a.goal_id=$4`
+		q += ` AND a.goal_id=$2`
 		args = append(args, goalID)
 	} else {
 		q += ` AND (a.status='pending' OR a.decided_at > now()-interval '14 days')`
@@ -609,21 +614,15 @@ func (s *Server) approvalList(r *http.Request, u *auth.User, goalID string) []ma
 	}
 	defer rows.Close()
 	for rows.Next() {
-		var id, gid, title, tool, preview, gate, role, st, note, cname, cemail string
+		var id, gid, title, tool, preview, gate, st, note string
 		var argsRaw json.RawMessage
 		var at time.Time
 		var dec *time.Time
-		var own bool
-		if rows.Scan(&id, &gid, &title, &tool, &argsRaw, &preview, &gate, &role, &st, &note, &at, &dec, &cname, &cemail, &own) != nil {
+		if rows.Scan(&id, &gid, &title, &tool, &argsRaw, &preview, &gate, &st, &note, &at, &dec) != nil {
 			continue
 		}
-		canDecide := st == "pending" && ((gate == "G1" && own) || (gate == "G2" && u.Role == role && u.Licensed))
-		v := map[string]any{"id": id, "goal_id": gid, "goal_title": title, "tool": tool, "args": argsRaw, "preview": preview,
-			"gate": gate, "required_role": role, "status": st, "note": note, "created_at": at, "decided_at": dec, "can_decide": canDecide, "own": own}
-		if !own {
-			v["client"] = map[string]string{"name": cname, "email": cemail}
-		}
-		out = append(out, v)
+		out = append(out, map[string]any{"id": id, "goal_id": gid, "goal_title": title, "tool": tool, "args": argsRaw, "preview": preview,
+			"gate": gate, "status": st, "note": note, "created_at": at, "decided_at": dec, "can_decide": st == "pending"})
 	}
 	return out
 }
@@ -642,21 +641,20 @@ func (s *Server) decide(w http.ResponseWriter, r *http.Request, u *auth.User) {
 		return
 	}
 	id := r.PathValue("id")
-	var owner, gate, role, status string
-	err := s.Pool.QueryRow(r.Context(), `SELECT user_id, gate, required_role, status FROM approvals WHERE id=$1::uuid`, id).Scan(&owner, &gate, &role, &status)
-	if err != nil {
+	var owner, gate string
+	if err := s.Pool.QueryRow(r.Context(), `SELECT user_id, gate FROM approvals WHERE id=$1::uuid`, id).Scan(&owner, &gate); err != nil {
 		writeErr(w, 404, "not found")
 		return
 	}
-	// The gate decides who may decide — checked here, on the server, against
-	// the stored approval, never against anything the client sent.
-	allowed := (gate == "G1" && owner == u.ID) || (gate == "G2" && u.Role == role && u.Licensed)
-	if !allowed {
-		if gate == "G2" {
-			writeErr(w, 403, "only a verified licensed "+role+" can approve this")
-			return
-		}
-		writeErr(w, 403, "not yours to approve")
+	// Checked here, on the server, against the stored approval — never
+	// against anything the client sent. Someone else's approval is reported
+	// as missing, not as forbidden, so ids reveal nothing.
+	if owner != u.ID {
+		writeErr(w, 404, "not found")
+		return
+	}
+	if gate != "G1" {
+		writeErr(w, 403, "this action cannot be approved")
 		return
 	}
 	if err := s.Store.Decide(r.Context(), id, u.ID, in.Approve, strings.TrimSpace(in.Note)); err != nil {
@@ -666,109 +664,64 @@ func (s *Server) decide(w http.ResponseWriter, r *http.Request, u *auth.User) {
 	writeJSON(w, 200, map[string]bool{"ok": true})
 }
 
-// ── documents ──────────────────────────────────────────────────────────────
+// ── Aoi's voice ────────────────────────────────────────────────────────────
+//
+// GET  /api/speech → { enabled }
+// POST /api/speech { text } → audio/mpeg
+// Signed in and verified (every request costs a vendor call), 20 a minute
+// per user, text cleaned of Markdown and emoji and capped at
+// tts.MaxSpokenChars, identical lines served from the in-memory cache. 503
+// when the deployment has no voice configured.
 
-func (s *Server) documents(w http.ResponseWriter, r *http.Request, u *auth.User) {
-	rows, err := s.Pool.Query(r.Context(), `SELECT d.id, d.title, d.kind, d.version, d.created_at, coalesce(d.goal_id::text,''), coalesce(g.title,''), length(d.content)
-		FROM documents d LEFT JOIN goals g ON g.id=d.goal_id WHERE d.user_id=$1 ORDER BY d.created_at DESC LIMIT 300`, u.ID)
-	if err != nil {
-		writeErr(w, 500, "error")
-		return
-	}
-	defer rows.Close()
-	out := []map[string]any{}
-	for rows.Next() {
-		var id, title, kind, gid, gt string
-		var v, n int
-		var at time.Time
-		if rows.Scan(&id, &title, &kind, &v, &at, &gid, &gt, &n) == nil {
-			out = append(out, map[string]any{"id": id, "title": title, "kind": kind, "version": v, "created_at": at, "goal_id": gid, "goal_title": gt, "chars": n})
-		}
-	}
-	writeJSON(w, 200, out)
+const speechPerMinute = 20
+
+// maxSpeechInput bounds what the cleaner is asked to process at all; the
+// spoken part is capped far lower after cleaning.
+const maxSpeechInput = 20000
+
+func (s *Server) speechStatus(w http.ResponseWriter, r *http.Request, u *auth.User) {
+	writeJSON(w, 200, map[string]bool{"enabled": s.Speech != nil})
 }
 
-func (s *Server) document(w http.ResponseWriter, r *http.Request, u *auth.User) {
-	var id, title, kind, content, sum string
-	var v int
-	var at time.Time
-	err := s.Pool.QueryRow(r.Context(), `SELECT id, title, kind, content, sha256, version, created_at FROM documents WHERE id=$1::uuid AND user_id=$2`,
-		r.PathValue("id"), u.ID).Scan(&id, &title, &kind, &content, &sum, &v, &at)
-	if err != nil {
-		writeErr(w, 404, "not found")
+func (s *Server) speak(w http.ResponseWriter, r *http.Request, u *auth.User) {
+	if s.Speech == nil {
+		writeErr(w, 503, "voice is not available")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"id": id, "title": title, "kind": kind, "content": content, "sha256": sum, "version": v, "created_at": at})
-}
-
-func (s *Server) upload(w http.ResponseWriter, r *http.Request, u *auth.User) {
-	r.Body = http.MaxBytesReader(w, r.Body, 12<<20)
-	if err := r.ParseMultipartForm(12 << 20); err != nil {
-		writeErr(w, 400, "file too large (12 MB max)")
+	// Per user, not per IP: a whole household behind one address should not
+	// share one bucket, and one account should not get more by changing IPs.
+	if !s.limiter.allow("speech|"+u.ID, speechPerMinute) {
+		w.Header().Set("Retry-After", "60")
+		writeErr(w, 429, "too many requests, try again in a minute")
 		return
 	}
-	f, hdr, err := r.FormFile("file")
-	if err != nil {
-		writeErr(w, 400, "no file")
-		return
+	var in struct {
+		Text string `json:"text"`
 	}
-	defer f.Close()
-	data, err := io.ReadAll(f)
-	if err != nil {
-		writeErr(w, 400, "could not read the file")
-		return
-	}
-	text, err := s.Agent.ExtractText(r.Context(), u.ID, hdr.Filename, data)
-	if err != nil {
-		writeErr(w, 400, err.Error())
-		return
-	}
-	if strings.TrimSpace(text) == "" {
-		writeErr(w, 400, "no readable text found in this file")
-		return
-	}
-	env := &tools.Env{Pool: s.Pool, UserID: u.ID}
-	id, ver, _, err := tools.SaveDocument(r.Context(), env, hdr.Filename, "upload", text)
-	if err != nil {
-		writeErr(w, 500, "could not save")
-		return
-	}
-	writeJSON(w, 201, map[string]any{"id": id, "title": hdr.Filename, "version": ver, "chars": utf8.RuneCountInString(text),
-		"language": persona.Normalize(agent.DetectLang(text, ""))})
-}
-
-// ── admin: licence verification ────────────────────────────────────────────
-
-func (s *Server) licenses(w http.ResponseWriter, r *http.Request, u *auth.User) {
-	rows, err := s.Pool.Query(r.Context(), `SELECT l.id, l.kind, l.number, l.jurisdiction, l.status, l.created_at, us.name, us.email
-		FROM professional_licenses l JOIN users us ON us.id=l.user_id ORDER BY (l.status='pending') DESC, l.created_at DESC LIMIT 200`)
-	if err != nil {
-		writeErr(w, 500, "error")
-		return
-	}
-	defer rows.Close()
-	out := []map[string]any{}
-	for rows.Next() {
-		var id, kind, num, jur, st, name, email string
-		var at time.Time
-		if rows.Scan(&id, &kind, &num, &jur, &st, &at, &name, &email) == nil {
-			out = append(out, map[string]any{"id": id, "kind": kind, "number": num, "jurisdiction": jur, "status": st, "created_at": at, "name": name, "email": email})
-		}
-	}
-	writeJSON(w, 200, out)
-}
-
-func (s *Server) decideLicense(w http.ResponseWriter, r *http.Request, u *auth.User) {
-	var in struct{ Verify bool }
 	if err := readJSON(r, &in); err != nil {
 		writeErr(w, 400, "bad request")
 		return
 	}
-	st := map[bool]string{true: "verified", false: "rejected"}[in.Verify]
-	tag, err := s.Pool.Exec(r.Context(), `UPDATE professional_licenses SET status=$2, verified_by=$3, verified_at=now() WHERE id=$1::uuid`, r.PathValue("id"), st, u.ID)
-	if err != nil || tag.RowsAffected() == 0 {
-		writeErr(w, 404, "not found")
+	if utf8.RuneCountInString(in.Text) > maxSpeechInput {
+		writeErr(w, 400, "text is too long")
 		return
 	}
-	writeJSON(w, 200, map[string]string{"status": st})
+	ctx, cancel := context.WithTimeout(r.Context(), 50*time.Second)
+	defer cancel()
+	audio, ct, err := s.Speech.Speak(ctx, in.Text)
+	if err != nil {
+		if errors.Is(err, tts.ErrEmpty) {
+			writeErr(w, 400, "nothing to speak")
+			return
+		}
+		slog.Error("speech", "user", u.ID, "err", err)
+		writeErr(w, 502, "the voice is unavailable right now")
+		return
+	}
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Content-Length", fmt.Sprint(len(audio)))
+	// The same text always renders the same audio, so the browser may keep it.
+	w.Header().Set("Cache-Control", "private, max-age=86400")
+	w.WriteHeader(200)
+	_, _ = w.Write(audio)
 }

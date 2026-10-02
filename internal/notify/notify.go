@@ -1,9 +1,10 @@
 // Package notify is the email outbox: rows are enqueued inside the transaction
 // that makes the announced fact true, and delivered later with retries.
 //
-// Privacy: a notification says WHAT kind of action waits and for WHICH case,
-// never the content (a letter body, a prescription, a diagnosis). The content
-// stays behind sign-in; the email only brings the person there.
+// Privacy: a notification says WHAT is waiting and for WHICH mission, never
+// the content. In particular an email never carries a game's source code or
+// rules text; those stay behind sign-in, and the email only brings the player
+// there.
 package notify
 
 import (
@@ -18,50 +19,35 @@ import (
 	"github.com/damonleelcx/play-with-agents/internal/mail"
 )
 
-// ApprovalRequested enqueues "an action waits for you" to whoever may decide
-// the approval: the client for G1; every verified professional of the
-// required role for G2. Each recipient's notify_approvals preference is
-// honoured (default on). Idempotent per (approval, recipient).
-func ApprovalRequested(ctx context.Context, tx pgx.Tx, approvalID string) (int64, error) {
-	tag, err := tx.Exec(ctx, `
-		INSERT INTO outbox (key, kind, user_id, to_email, lang, params)
-		SELECT 'approval-req:' || a.id || ':' || u.id, 'approval_requested', u.id, u.email,
-		       coalesce(p.data->>'language', 'en'),
-		       jsonb_build_object('approval_id', a.id, 'tool', a.tool, 'gate', a.gate, 'role', a.required_role,
-		                          'goal_title', g.title, 'own', u.id = a.user_id,
-		                          'client', CASE WHEN u.id = a.user_id THEN '' ELSE coalesce(nullif(owner.name, ''), 'a client') END)
-		FROM approvals a
-		JOIN goals g ON g.id = a.goal_id
-		JOIN users owner ON owner.id = a.user_id
-		JOIN users u ON (a.gate = 'G1' AND u.id = a.user_id)
-		             OR (a.gate = 'G2' AND u.role = a.required_role AND EXISTS (
-		                   SELECT 1 FROM professional_licenses l WHERE l.user_id = u.id AND l.status = 'verified'
-		                   AND l.kind = CASE a.required_role WHEN 'attorney' THEN 'bar' WHEN 'physician' THEN 'medical' END))
-		LEFT JOIN user_preferences p ON p.user_id = u.id
-		WHERE a.id = $1 AND u.deleted_at IS NULL AND u.email_verified_at IS NOT NULL
-		  AND coalesce((p.data->>'notify_approvals')::boolean, true)
-		ON CONFLICT (key) DO NOTHING`, approvalID)
-	if err != nil {
-		return 0, err
-	}
-	return tag.RowsAffected(), nil
-}
+// Notification kinds the outbox renders.
+const (
+	// KindApprovalRequested: a mission action waits for the owner's approval.
+	KindApprovalRequested = "approval_requested"
+	// KindBuildReady: a game is built, playtested and reviewed, and waits for
+	// the owner's approval to publish it.
+	KindBuildReady = "build_ready"
+)
 
-// ApprovalDecided tells the client that a professional decided an action on
-// their case. A client deciding their own G1 approval is not emailed about it.
-func ApprovalDecided(ctx context.Context, tx pgx.Tx, approvalID string) (int64, error) {
+// ApprovalRequested enqueues the owner's notification for a G1 approval, as
+// the given kind (KindApprovalRequested or KindBuildReady). It honours the
+// owner's email_build_done preference (default on) and is idempotent per
+// approval.
+func ApprovalRequested(ctx context.Context, tx pgx.Tx, approvalID, kind string) (int64, error) {
+	if kind != KindBuildReady {
+		kind = KindApprovalRequested
+	}
 	tag, err := tx.Exec(ctx, `
 		INSERT INTO outbox (key, kind, user_id, to_email, lang, params)
-		SELECT 'approval-dec:' || a.id, 'approval_decided', u.id, u.email, coalesce(p.data->>'language', 'en'),
-		       jsonb_build_object('approval_id', a.id, 'tool', a.tool, 'decision', a.status, 'role', a.required_role, 'goal_title', g.title)
+		SELECT 'approval-req:' || a.id, $2, u.id, u.email,
+		       coalesce(p.data->>'language', 'en'),
+		       jsonb_build_object('approval_id', a.id, 'goal_id', a.goal_id, 'tool', a.tool, 'goal_title', g.title)
 		FROM approvals a
 		JOIN goals g ON g.id = a.goal_id
 		JOIN users u ON u.id = a.user_id
 		LEFT JOIN user_preferences p ON p.user_id = u.id
-		WHERE a.id = $1 AND a.status IN ('approved', 'rejected') AND a.decided_by IS DISTINCT FROM a.user_id
-		  AND u.deleted_at IS NULL AND u.email_verified_at IS NOT NULL
-		  AND coalesce((p.data->>'notify_email')::boolean, true)
-		ON CONFLICT (key) DO NOTHING`, approvalID)
+		WHERE a.id = $1 AND u.deleted_at IS NULL AND u.email_verified_at IS NOT NULL
+		  AND coalesce((p.data->>'email_build_done')::boolean, true)
+		ON CONFLICT (key) DO NOTHING`, approvalID, kind)
 	if err != nil {
 		return 0, err
 	}
@@ -101,8 +87,8 @@ func Deliver(ctx context.Context, pool *pgxpool.Pool, m mail.Mailer, origin stri
 	sent := 0
 	for _, r := range rs {
 		// "Waiting for your approval" is stale once the approval was decided
-		// or withdrawn (e.g. the case was cancelled) — don't send it.
-		if r.kind == "approval_requested" {
+		// or withdrawn (e.g. the build was cancelled) — don't send it.
+		if r.kind == KindApprovalRequested || r.kind == KindBuildReady {
 			var pending bool
 			_ = pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM approvals WHERE id=$1::uuid AND status='pending')`, str(r.params, "approval_id")).Scan(&pending)
 			if !pending {
@@ -132,34 +118,22 @@ func Deliver(ctx context.Context, pool *pgxpool.Pool, m mail.Mailer, origin stri
 	return sent
 }
 
+// toolNames are the player-facing names of actions that can wait for
+// approval. An unknown tool falls back to a generic phrase rather than its
+// internal name.
 var toolNames = map[string][2]string{
-	"email_send":                   {"send an email", "发送一封邮件"},
-	"court_efile":                  {"file a document with the court", "向法院提交文书"},
-	"rx_submit":                    {"send a prescription", "开具处方"},
-	"lab_order":                    {"order tests", "开具检查单"},
-	"referral_send":                {"send a referral", "开具转诊"},
-	"request_professional_signoff": {"sign off on a work product", "对工作成果签字确认"},
+	"publish_game": {"publish your game", "发布你的游戏"},
 }
 
 func toolName(tool, lang string) string {
 	n, ok := toolNames[tool]
 	if !ok {
-		n = [2]string{tool, tool}
+		n = [2]string{"a step in your mission", "任务中的一个步骤"}
 	}
 	if lang == "zh" {
 		return n[1]
 	}
 	return n[0]
-}
-
-func roleName(role, lang string) string {
-	zh := map[string]string{"attorney": "律师", "physician": "医生"}
-	if lang == "zh" {
-		if v, ok := zh[role]; ok {
-			return v
-		}
-	}
-	return role
 }
 
 func str(m map[string]any, k string) string {
@@ -169,49 +143,37 @@ func str(m map[string]any, k string) string {
 	return ""
 }
 
-// Render builds the bilingual message for an outbox row.
+// Render builds the bilingual message for an outbox row. Only the mission
+// title travels in params; nothing a game contains is ever rendered here.
 func Render(kind, lang string, p map[string]any, origin string) (mail.Message, error) {
-	link := origin + "/app/approvals"
-	action := toolName(str(p, "tool"), lang)
 	title := str(p, "goal_title")
+	sig := mail.Signature(lang)
 	switch kind {
-	case "approval_requested":
-		own := p["own"] == true
+	case KindBuildReady:
+		link := origin + "/app/studio/" + str(p, "goal_id")
 		if lang == "zh" {
-			lead := fmt.Sprintf("维拉准备好了一项需要你同意的操作：%s（案件：「%s」）。在你确认之前，它不会被执行。", action, title)
-			if !own {
-				lead = fmt.Sprintf("客户 %s 的案件「%s」中，有一项需要持证%s审批的操作：%s。", str(p, "client"), title, roleName(str(p, "role"), lang), action)
-			}
-			return mail.Message{Subject: "有一项操作等待你的审批 · ACT",
-				Text: lead + "\n\n查看并决定：" + link + "\n\n出于隐私考虑，具体内容只在登录后显示。\n\n—— 维拉，ACT",
-				HTML: mail.Page("等待你的审批", lead, "查看并决定", link, "出于隐私考虑，具体内容只在登录后显示。你可以在设置 → 通知中关闭此类邮件。")}, nil
+			lead := fmt.Sprintf("好消息！「%s」已经做好了：规则写完、代码搭好、模拟对局也跑过了。你同意之后它才会发布；在那之前你随时可以先自己玩一局。", title)
+			return mail.Message{Subject: "你的游戏做好了，等你发布 · Play with Agents",
+				Text: lead + "\n\n查看并发布：" + link + "\n\n" + sig,
+				HTML: mail.Page(lang, "你的游戏做好了", lead, "查看并发布", link, "你可以在设置 → 通知 中关闭此类邮件。")}, nil
 		}
-		lead := fmt.Sprintf("Vera has an action ready that needs your approval: %s (case: “%s”). Nothing happens until you decide.", action, title)
-		if !own {
-			lead = fmt.Sprintf("A case for %s (“%s”) has an action that needs a licensed %s's approval: %s.", str(p, "client"), title, str(p, "role"), action)
-		}
-		return mail.Message{Subject: "An action is waiting for your approval · ACT",
-			Text: lead + "\n\nReview and decide: " + link + "\n\nFor privacy, the details are only shown after you sign in.\n\n— Vera, ACT",
-			HTML: mail.Page("Waiting for your approval", lead, "Review and decide", link, "For privacy, the details are only shown after you sign in. You can turn these emails off in Settings → Notifications.")}, nil
-	case "approval_decided":
-		approved := str(p, "decision") == "approved"
-		link = origin + "/app/cases"
+		lead := fmt.Sprintf("Good news! “%s” is built: the rules are written, the game is coded, and the agents have playtested it. It goes live only when you say so — and you can play it yourself first, any time.", title)
+		return mail.Message{Subject: "Your game is ready to publish · Play with Agents",
+			Text: lead + "\n\nReview and publish: " + link + "\n\n" + sig,
+			HTML: mail.Page(lang, "Your game is ready", lead, "Review and publish", link, "You can turn these emails off in Settings → Notifications.")}, nil
+	case KindApprovalRequested:
+		link := origin + "/app/approvals"
+		action := toolName(str(p, "tool"), lang)
 		if lang == "zh" {
-			verb := "已同意"
-			if !approved {
-				verb = "未同意"
-			}
-			lead := fmt.Sprintf("持证%s%s你案件「%s」中的一项操作：%s。维拉会据此继续推进。", roleName(str(p, "role"), lang), verb, title, action)
-			return mail.Message{Subject: "你的案件有新进展 · ACT", Text: lead + "\n\n" + link + "\n\n—— 维拉，ACT",
-				HTML: mail.Page("你的案件有新进展", lead, "查看案件", link, "你可以在设置 → 通知中关闭此类邮件。")}, nil
+			lead := fmt.Sprintf("「%s」里有一步需要你点头：%s。你确认之前，什么都不会发生。", title, action)
+			return mail.Message{Subject: "有一步等你确认 · Play with Agents",
+				Text: lead + "\n\n查看并决定：" + link + "\n\n" + sig,
+				HTML: mail.Page(lang, "等你确认", lead, "查看并决定", link, "你可以在设置 → 通知 中关闭此类邮件。")}, nil
 		}
-		verb := "approved"
-		if !approved {
-			verb = "declined"
-		}
-		lead := fmt.Sprintf("A licensed %s %s an action on your case “%s”: %s. Vera will carry on from here.", str(p, "role"), verb, title, action)
-		return mail.Message{Subject: "An update on your case · ACT", Text: lead + "\n\n" + link + "\n\n— Vera, ACT",
-			HTML: mail.Page("An update on your case", lead, "View your case", link, "You can turn these emails off in Settings → Notifications.")}, nil
+		lead := fmt.Sprintf("A step in “%s” needs your OK: %s. Nothing happens until you decide.", title, action)
+		return mail.Message{Subject: "A step is waiting for your OK · Play with Agents",
+			Text: lead + "\n\nReview and decide: " + link + "\n\n" + sig,
+			HTML: mail.Page(lang, "Waiting for your OK", lead, "Review and decide", link, "You can turn these emails off in Settings → Notifications.")}, nil
 	}
 	return mail.Message{}, fmt.Errorf("unknown notification kind %q", kind)
 }
