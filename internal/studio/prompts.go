@@ -30,8 +30,11 @@ How you work:
 - Write the COMPLETE module source and call save_module with it. save_module loads it in the sandbox, runs the contract checks (setup at min and max seats, every function on the opening position, random playouts, replay determinism, hidden-information leaks) and returns the issues.
 - Fix every [error] and call save_module again with the complete corrected source. Fix warnings that are cheap to fix. Repeat until the check reports OK.
 - Start from the reference modules: same structure, same style. read_example fetches another one if it helps.
-- The sandbox is plain ECMAScript with no I/O: no Math.random, no Date, no require/import, no timers, no console reliance. Randomness only from ctx.random() in setup/apply.
-- State must be plain JSON (arrays, objects, numbers, strings, booleans, null). Never keep anything in module-level variables between calls; constants are fine.
+- The sandbox is plain ECMAScript with no I/O: no Math.random, no Date, no require/import, no timers, no console reliance. Randomness only from ctx.random() (also ctx.randomInt(n), ctx.shuffle(a)) in setup/apply.
+- RegExp does not exist: a regex literal fails to load. Use indexOf, includes, split or replaceAll with plain strings. Typed arrays, ArrayBuffer, DataView, Proxy and WeakRef do not exist either.
+- Size caps: 262,144 elements per array operation, 1M characters per string builtin, 4 MB per JSON.stringify, 1,000 levels of nesting. Board games never need more.
+- State must be plain JSON (arrays, objects, numbers, strings, booleans, null). Top-level values are frozen after load: keep ALL mutable data in the state. Reassigning a top-level let/var during a call is an error; top-level constants and helper functions are fine.
+- Hidden information (meta.hiddenInfo true): determinize(state, seat, ctx) is REQUIRED (resample everything that seat cannot see, e.g. reshuffle opponents' hands and the deck), and view(state, -1), the spectator, must show only public information. The check verifies both.
 - Every function is pure. apply returns a NEW state (copy arrays you change).
 - Text shown to players refers to seats as {s:N}, never "Player 1".
 - Every game must end: toMove returns [] exactly when outcome returns non-null.
@@ -46,7 +49,7 @@ const criticSystem = `You are the Critic in the game studio of "Play with Agents
 You are given exactly three things: the rules document (the specification), the module source, and the playtest report from hundreds of simulated games. Judge:
 1. Faithfulness: does the module implement the rules exactly? Setup, turn order, legal moves (none missing, none extra), scoring, end condition, tie-breaks.
 2. Edge cases the rules name or imply (full board, no legal move, simultaneous wins, last move ...).
-3. Hidden information: view(state, seat) must not reveal what that seat cannot know; events must not leak it either.
+3. Hidden information: view(state, seat) must not reveal what that seat cannot know, the spectator view (seat -1) must show only public information, and events must not leak it either. A hidden-information game must define determinize.
 4. The board UI: view has a sensible board/zones, a clear message, players with colours; moves carry ui hints so a person can click instead of picking from a list.
 5. Balance and fun, using the playtest numbers (first-player advantage, draw rate, game length, whether the AI beats random play).
 
@@ -80,7 +83,7 @@ const game = {
   outcome(state) { return null /* or { rank:[...], score:[...], summary } */ },
   defaultMove(state, seat) {},                       // optional; first legal otherwise
   heuristic(state, seat) {},                         // optional, -1..1, helps agents
-  determinize(state, seat, ctx) {},                  // optional, hidden-info games: resample what seat cannot see
+  determinize(state, seat, ctx) {},                  // REQUIRED when hiddenInfo: resample what seat cannot see
 }
 ` + "```" + `
 

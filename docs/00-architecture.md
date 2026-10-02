@@ -71,8 +71,9 @@ pod LISTENs and fans out to that table's SSE subscribers.
 
 `internal/games/game.go` (Go). Built-ins register in `games.Register`.
 Custom games are JavaScript modules run by `internal/games/script` (goja,
-sandboxed: no I/O, no clock, seeded randomness only, a time budget and a memory
-ceiling per call).
+sandboxed: no I/O, no clock, seeded randomness only, a time budget per call, and
+size caps on every builtin that could run or allocate unboundedly in one native
+call; see `internal/games/script/prelude.go`).
 
 ### Script module contract
 
@@ -91,13 +92,23 @@ const game = {
   outcome(state) { return null /* or { rank:[...], score:[...], summary } */ },
   defaultMove(state, seat) {},                       // optional; first legal otherwise
   heuristic(state, seat) {},                         // optional, -1..1, helps agents
-  determinize(state, seat, ctx) {},                  // optional, hidden-info games: resample what seat cannot see
+  determinize(state, seat, ctx) {},                  // REQUIRED when meta.hiddenInfo: resample what seat cannot see
 }
 ```
 
 The runtime owns the random stream (stored next to the module's state), so
 `ctx.random()` is deterministic across replays. `Math.random` and `Date` are
-removed.
+removed. `RegExp` is unavailable (regex literals fail to load: backtracking has no
+time bound). After the top level runs, the builtins, the global object and
+everything the top level bound are frozen; reassigning a top-level `let`/`var`/
+function in a call is a module error (runtimes are pooled, so such state would
+break replay). Keep all game data in the state.
+
+Fairness: `view(state, seat)` must be identical for any two states that differ
+only in what `seat` cannot see, and `view(state, -1)` (spectators, invite-code
+holders, the AI table talk) may show only public information. `Check` and the
+playtester verify both by comparing views across `determinize` from every seat,
+which is why hidden-information games must define it.
 
 ### View kinds
 

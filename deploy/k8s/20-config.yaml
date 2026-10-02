@@ -33,3 +33,9 @@ data:
   # everyone.
   PLAY_ACCOUNT_DAILY_TOKENS: "1500000"
   PLAY_DEPLOYMENT_DAILY_TOKENS: "40000000"
+  # Player-written games run in an in-process JS sandbox. Its builtins are
+  # size-capped, but string concatenation in a loop can only be stopped by
+  # the time budget; this soft limit makes the Go GC fight back well before
+  # the 768Mi container ceiling (30-deploy.yaml) instead of the pod being
+  # OOM-killed mid-table.
+  GOMEMLIMIT: "560MiB"

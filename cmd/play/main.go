@@ -124,7 +124,10 @@ func run(mode string) error {
 	tables.Lease = cfg.TableLease
 	tables.Chatter = &talk.ModelChatter{Model: model, LLM: cfg.LLMFastModel}
 	tables.Loader = rooms.SourceLoader(pool, func(id, src string) (games.Game, error) {
-		g, err := script.Load(id, src, script.Options{})
+		// A live table gets a roomier per-call budget than the playtester's
+		// 250ms: the playtest already proved the module cheap, and a GC
+		// pause on a shared node must not fault somebody's game.
+		g, err := script.Load(id, src, script.Options{CallBudget: time.Second})
 		if err != nil {
 			return nil, err
 		}

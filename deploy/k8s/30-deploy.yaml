@@ -51,8 +51,8 @@ spec:
             periodSeconds: 20
             failureThreshold: 3
           resources:
-            requests: { cpu: 50m, memory: 64Mi }
-            limits: { cpu: "1", memory: 384Mi }
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: "1", memory: 768Mi }
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -93,8 +93,8 @@ spec:
             - secretRef: { name: play-mail, optional: true }
             - secretRef: { name: play-voice, optional: true }
           resources:
-            requests: { cpu: 50m, memory: 64Mi }
-            limits: { cpu: "1", memory: 384Mi }
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: "1", memory: 768Mi }
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
