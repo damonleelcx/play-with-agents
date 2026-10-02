@@ -27,7 +27,10 @@ type ModuleError struct {
 	Message string // JS error message with the position of the throw
 	Stack   string // JS stack trace, truncated
 	Timeout bool
+	cause   error // the caller's context error, for a cancelled call
 }
+
+func (e *ModuleError) Unwrap() error { return e.cause }
 
 func (e *ModuleError) Error() string {
 	if e.Timeout {

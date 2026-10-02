@@ -1,62 +1,16 @@
 package script
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dop251/goja"
 )
-
-// preludeSrc runs in every runtime before the module. It removes the ambient
-// sources of nondeterminism and installs console.
-//
-// goja only checks for interrupts between bytecode instructions, so a single
-// native builtin call cannot be stopped once started. The prelude caps the
-// builtins that can allocate unbounded memory in one call; other natives are
-// bounded in practice by the state size limit (see the package doc).
-const preludeSrc = `(function (g, sink) {
-  "use strict";
-  // No clock and no ambient randomness: every game must replay exactly.
-  // ctx.random() is the only source of randomness.
-  delete g.Date;
-  delete g.Math.random;
-  Object.freeze(g.Math);
-
-  const LIMIT = 1 << 20;
-  const guard = (proto, name, tooBig) => {
-    const orig = proto[name];
-    Object.defineProperty(proto, name, {
-      value: function (...args) {
-        if (tooBig(this, args)) throw new RangeError(name + ": result would exceed " + LIMIT + " elements");
-        return orig.apply(this, args);
-      },
-      writable: true, configurable: true,
-    });
-  };
-  guard(String.prototype, "repeat", (s, a) => String(s).length * Number(a[0]) > LIMIT);
-  guard(String.prototype, "padStart", (s, a) => Number(a[0]) > LIMIT);
-  guard(String.prototype, "padEnd", (s, a) => Number(a[0]) > LIMIT);
-  guard(Array.prototype, "fill", (arr) => arr.length > LIMIT);
-  guard(Array.prototype, "join", (arr) => arr.length > LIMIT);
-  const from = Array.from;
-  Object.defineProperty(Array, "from", {
-    value: function (src, ...rest) {
-      if (src != null && Number(src.length) > LIMIT) throw new RangeError("Array.from: length exceeds " + LIMIT);
-      return from.call(this, src, ...rest);
-    },
-    writable: true, configurable: true,
-  });
-
-  const fmt = (a) => {
-    if (typeof a === "string") return a;
-    try { const j = JSON.stringify(a); return j === undefined ? String(a) : j; } catch (e) { return String(a); }
-  };
-  const out = (level) => (...a) => sink(level, a.map(fmt).join(" "));
-  g.console = Object.freeze({ log: out("log"), info: out("info"), warn: out("warn"), error: out("error"), debug: out("debug") });
-})`
 
 // lookupSrc fetches the module's game object. A top-level "const game" is a
 // lexical binding, not a property of the global object, so it has to be
@@ -67,24 +21,30 @@ const lookupSrc = `typeof game === "undefined" ? undefined : game`
 // stringify inside one JS function keeps each Go→JS crossing to a single call,
 // and every call parses a fresh copy of the state, so a module can never
 // mutate the state it was given in a way that outlives the call.
-const bindSrc = `(function (game, random) {
+//
+// The game object graph is already frozen by lockdown. verify (or null)
+// reports a top-level binding a call reassigned; such a call fails, and the
+// runtime is discarded (see lockdown.go).
+const bindSrc = `(function (game, random, verify) {
   "use strict";
-  const parse = JSON.parse, stringify = JSON.stringify;
+  const parse = JSON.parse, stringify = JSON.stringify, apply = Reflect.apply;
   const FNS = ["setup", "toMove", "legal", "apply", "view", "outcome", "defaultMove", "heuristic", "determinize"];
 
-  // Freeze the module's object graph: module-level state would make calls
-  // depend on which pooled runtime served them, breaking replay.
-  const seen = new Set();
-  const deepFreeze = (o) => {
-    if (o === null || (typeof o !== "object" && typeof o !== "function") || seen.has(o)) return;
-    seen.add(o);
-    Object.freeze(o);
-    for (const k of Object.getOwnPropertyNames(o)) {
-      const d = Object.getOwnPropertyDescriptor(o, k);
-      if (d && "value" in d) deepFreeze(d.value);
+  const checked = (name, f) => verify === null ? f : function (...args) {
+    let ok = false;
+    try {
+      const r = apply(f, this, args);
+      ok = true;
+      return r;
+    } finally {
+      const bad = verify();
+      if (bad !== "") {
+        throw new Error("` + moduleStateMarker + ` " + bad + " changed during " + name + ": game functions must not keep data " +
+          "between calls (replays and other tables would see it). Keep everything in the state; use const for module-level tables" +
+          (ok ? "" : " (the call also threw)"));
+      }
     }
   };
-  if (game !== null && typeof game === "object") deepFreeze(game);
 
   const mkctx = (seats, opts, rand) => Object.freeze({
     seats,
@@ -106,7 +66,7 @@ const bindSrc = `(function (game, random) {
     Object.keys(r).every((k) => k === "state" || k === "events");
   const stateOf = (r) => isWrapped(r) ? r.state : r;
 
-  return {
+  const api = {
     describe() {
       if (game === null || typeof game !== "object") return stringify({ type: game === null ? "null" : typeof game });
       const fns = {};
@@ -172,6 +132,8 @@ const bindSrc = `(function (game, random) {
       }
     },
   };
+  for (const k of Object.keys(api)) api[k] = checked(k, api[k]);
+  return api;
 })`
 
 var (
@@ -199,14 +161,36 @@ type vm struct {
 	budget time.Duration // of the running call, for the error message
 	timer  *time.Timer   // reused across calls; allocating one per call shows up in profiles
 	broken bool          // interrupted or panicked: do not return to the pool
+
+	// ctx, when set by Game.WithContext for the current call, interrupts
+	// the call as soon as it is done.
+	ctx context.Context
+
+	// mutable lists module-level values lockdown could not freeze.
+	mutable []string
+
+	// expired is set with the interrupt so that long Go builtins (the JSON
+	// encoder) can stop too; why is the interrupt value (under mu).
+	expired atomic.Bool
+	why     error
 }
+
+// errInterruptedNative is what a Go builtin panics with when it sees that
+// the call was interrupted; run turns it into the interrupt's error.
+var errInterruptedNative = errors.New("script: interrupted inside a builtin")
 
 type errBudget struct{ d time.Duration }
 
 func (e errBudget) Error() string { return fmt.Sprintf("exceeded the %v time budget", e.d) }
 
-// newVM creates a runtime, applies the sandbox and runs the module.
-func newVM(prog *goja.Program, opts Options, sink func(level, line string)) (*vm, error) {
+// errCancelled is the interrupt value when the caller's context ends.
+type errCancelled struct{ err error }
+
+func (e errCancelled) Error() string { return "cancelled by the caller: " + e.err.Error() }
+
+// newVM creates a runtime, applies the sandbox, runs the module and locks
+// down what its top level created.
+func newVM(prog *goja.Program, info *moduleInfo, opts Options, sink func(level, line string)) (*vm, error) {
 	v := &vm{rt: goja.New(), api: map[string]goja.Callable{}}
 	v.rt.SetMaxCallStackSize(opts.MaxCallStack)
 	v.timer = time.AfterFunc(time.Hour, v.onBudget)
@@ -221,9 +205,11 @@ func newVM(prog *goja.Program, opts Options, sink func(level, line string)) (*vm
 		sink(c.Argument(0).String(), c.Argument(1).String())
 		return goja.Undefined()
 	}
-	if _, err := preFn(goja.Undefined(), v.rt.GlobalObject(), v.rt.ToValue(sinkFn)); err != nil {
+	lockVal, err := preFn(goja.Undefined(), v.rt.GlobalObject(), v.rt.ToValue(sinkFn), v.rt.ToValue(v.stringify))
+	if err != nil {
 		return nil, fmt.Errorf("script: prelude: %w", err)
 	}
+	lockdown, _ := goja.AssertFunction(lockVal)
 
 	// The module's top level runs under a (generous) budget too: an infinite
 	// loop there must not hang Load.
@@ -241,6 +227,22 @@ func newVM(prog *goja.Program, opts Options, sink func(level, line string)) (*vm
 		return nil, errors.New("script: the module must define a global `game` object, e.g. `const game = { meta: {...}, setup(ctx) {...}, ... }`")
 	}
 
+	getLex, err := v.rt.RunProgram(info.getLex)
+	if err != nil {
+		return nil, fmt.Errorf("script: lockdown: %w", err)
+	}
+	locked, err := v.run("<top level>", 4*opts.CallBudget, func() (goja.Value, error) {
+		return lockdown(goja.Undefined(), v.rt.ToValue(info.lexNames), v.rt.ToValue(info.lexKinds), getLex)
+	})
+	if err != nil {
+		return nil, err
+	}
+	lockObj := locked.ToObject(v.rt)
+	verify := lockObj.Get("verify")
+	if err := v.rt.ExportTo(lockObj.Get("mutable"), &v.mutable); err != nil {
+		return nil, fmt.Errorf("script: internal: lockdown: %w", err)
+	}
+
 	bind, err := v.rt.RunProgram(bindProg)
 	if err != nil {
 		return nil, fmt.Errorf("script: bind: %w", err)
@@ -249,7 +251,7 @@ func newVM(prog *goja.Program, opts Options, sink func(level, line string)) (*vm
 	random := func(goja.FunctionCall) goja.Value {
 		return v.rt.ToValue(unitFloat(splitmix64(&v.rng)))
 	}
-	apiVal, err := bindFn(goja.Undefined(), gameVal, v.rt.ToValue(random))
+	apiVal, err := bindFn(goja.Undefined(), gameVal, v.rt.ToValue(random), verify)
 	if err != nil {
 		return nil, fmt.Errorf("script: bind: %w", err)
 	}
@@ -279,11 +281,26 @@ func (v *vm) call(fn string, budget time.Duration, args ...any) (goja.Value, err
 // run executes f with an interrupt timer and converts every failure,
 // including Go panics inside goja, into a *ModuleError.
 func (v *vm) run(fn string, budget time.Duration, f func() (goja.Value, error)) (val goja.Value, err error) {
+	if v.ctx != nil {
+		if cerr := v.ctx.Err(); cerr != nil {
+			return nil, &ModuleError{Func: fn, Message: errCancelled{cerr}.Error(), cause: cerr}
+		}
+	}
 	v.mu.Lock()
-	v.busy, v.budget = true, budget
+	v.busy, v.budget, v.why = true, budget, nil
+	v.expired.Store(false)
 	v.mu.Unlock()
 	v.timer.Reset(budget)
+	var stopCtx func() bool
+	if ctx := v.ctx; ctx != nil {
+		stopCtx = context.AfterFunc(ctx, func() { v.onCancel(ctx) })
+	}
 	defer func() {
+		if stopCtx != nil && !stopCtx() {
+			// The context ended during the call; onCancel may still be about
+			// to interrupt, which would poison the next call: retire it.
+			v.broken = true
+		}
 		if !v.timer.Stop() {
 			// The timer fired (or is firing) for this call. Its callback may
 			// still be about to run, and it could then interrupt the next
@@ -297,6 +314,16 @@ func (v *vm) run(fn string, budget time.Duration, f func() (goja.Value, error)) 
 		if r := recover(); r != nil {
 			v.broken = true
 			val, err = nil, &ModuleError{Func: fn, Message: fmt.Sprintf("runtime panic: %v", r)}
+			if r == errInterruptedNative {
+				v.mu.Lock()
+				why := v.why
+				v.mu.Unlock()
+				if c, ok := why.(errCancelled); ok {
+					err = &ModuleError{Func: fn, Message: c.Error(), cause: c.err}
+				} else if why != nil {
+					err = &ModuleError{Func: fn, Message: why.Error() + " (inside a builtin)", Timeout: true}
+				}
+			}
 		}
 	}()
 	val, err = f()
@@ -306,6 +333,17 @@ func (v *vm) run(fn string, budget time.Duration, f func() (goja.Value, error)) 
 	return val, nil
 }
 
+// onCancel runs when the context of the current call ends.
+func (v *vm) onCancel(ctx context.Context) {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	if v.busy {
+		v.why = errCancelled{ctx.Err()}
+		v.expired.Store(true)
+		v.rt.Interrupt(v.why)
+	}
+}
+
 // onBudget runs on the timer goroutine when a call overruns its budget.
 func (v *vm) onBudget() {
 	v.mu.Lock()
@@ -313,7 +351,9 @@ func (v *vm) onBudget() {
 	// The timer can fire just after the call returned; interrupting then
 	// would poison the next call on this runtime.
 	if v.busy {
-		v.rt.Interrupt(errBudget{v.budget})
+		v.why = errBudget{v.budget}
+		v.expired.Store(true)
+		v.rt.Interrupt(v.why)
 	}
 }
 
@@ -322,6 +362,9 @@ func (v *vm) convert(fn string, err error) error {
 	if errors.As(err, &ie) {
 		// An interrupted runtime may hold half-built objects; never reuse it.
 		v.broken = true
+		if c, ok := ie.Value().(errCancelled); ok {
+			return &ModuleError{Func: fn, Message: c.Error(), cause: c.err}
+		}
 		return &ModuleError{Func: fn, Message: ie.Error(), Timeout: true}
 	}
 	var so *goja.StackOverflowError
@@ -331,6 +374,9 @@ func (v *vm) convert(fn string, err error) error {
 	}
 	var ex *goja.Exception
 	if errors.As(err, &ex) {
+		if strings.Contains(ex.Error(), moduleStateMarker) {
+			v.broken = true // the module-level state is no longer what the top level left
+		}
 		return &ModuleError{Func: fn, Message: ex.Error() + hint(ex.Error()), Stack: truncate(ex.String(), 2000)}
 	}
 	var ce *goja.CompilerSyntaxError
@@ -347,6 +393,13 @@ func hint(msg string) string {
 		return " (Math.random is not available: use ctx.random(), ctx.randomInt(n) or ctx.shuffle(array) in setup/apply/determinize)"
 	case strings.Contains(msg, "Date is not defined"):
 		return " (Date is not available: games must not depend on the clock)"
+	case strings.Contains(msg, "RegExp is not defined"):
+		return " (RegExp is not available: use string methods such as indexOf, includes, split or replaceAll with a string)"
+	case strings.Contains(msg, "Array is not defined") && !strings.Contains(msg, " Array is not defined"),
+		strings.Contains(msg, "ArrayBuffer is not defined"), strings.Contains(msg, "DataView is not defined"):
+		return " (typed arrays and buffers are not available in game modules: use plain arrays)"
+	case strings.Contains(msg, "Proxy is not defined"), strings.Contains(msg, "WeakRef is not defined"):
+		return " (not available in game modules)"
 	}
 	return ""
 }

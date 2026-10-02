@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/damonleelcx/play-with-agents/internal/games"
+	"github.com/damonleelcx/play-with-agents/internal/games/script"
 )
 
 // ErrorClass groups errors by what the module author has to fix.
@@ -104,6 +105,12 @@ type Report struct {
 	FirstPlayerAdvantage float64 `json:"first_player_advantage"`
 	AIVsRandom           AIStats `json:"ai_vs_random"`
 	LeakChecks           int     `json:"leak_checks"`
+	// FlakyTimeouts counts games whose timeout did not reproduce on replay.
+	FlakyTimeouts int `json:"flaky_timeouts"`
+	// HiddenInfo and Determinizer describe the game: a hidden-information
+	// game without a determinizer cannot be checked for leaks and fails.
+	HiddenInfo   bool `json:"hidden_info"`
+	Determinizer bool `json:"determinizer"`
 
 	Latency       Latency            `json:"latency"`
 	LatencyByCall map[string]Latency `json:"latency_by_call"`
@@ -119,10 +126,16 @@ type OptionsIn struct {
 	AIIterations int   `json:"ai_iterations"`
 }
 
-func buildReport(meta games.Meta, opt Options, results []gameResult, elapsed time.Duration) Report {
+func buildReport(meta games.Meta, determinizer bool, opt Options, results []gameResult, elapsed time.Duration) Report {
 	r := Report{
 		Game: meta.ID, Seed: opt.Seed, Elapsed: elapsed, ByClass: map[string]int{}, Errors: []Error{},
 		Options: OptionsIn{Games: opt.Games, Seats: opt.Seats, Mix: opt.Mix, MaxMoves: opt.MaxMoves, AIIterations: opt.AIIterations},
+	}
+	r.HiddenInfo, r.Determinizer = meta.HiddenInfo, determinizer
+	for _, g := range results {
+		if g.flakyTimeout {
+			r.FlakyTimeouts++
+		}
 	}
 	var lengths []float64
 	lat := map[string][]time.Duration{}
@@ -302,6 +315,12 @@ func (r Report) Verdict() (pass bool, reasons []string) {
 	if r.Run == 0 {
 		failf("no games were played")
 		return pass, reasons
+	}
+	if r.FlakyTimeouts > 0 {
+		warnf("%d game(s) timed out once but not on replay (a busy machine, not the module); keep legal/apply/view cheap", r.FlakyTimeouts)
+	}
+	if r.HiddenInfo && !r.Determinizer {
+		failf("%s", script.MsgNoDeterminize)
 	}
 	if r.ErrorCount > 0 {
 		classes := make([]string, 0, len(r.ByClass))

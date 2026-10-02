@@ -11,10 +11,20 @@
 // Every output is validated (see validate.go) and states larger than
 // Options.MaxStateBytes are rejected.
 //
-// Known limit: goja checks for interrupts between bytecode instructions, so
-// one native builtin call (e.g. sorting a huge array) runs to completion. The
-// prelude caps the builtins that can allocate unboundedly in one call, and
-// the state size limit bounds the data a module can work on.
+// goja checks for interrupts between bytecode instructions, so one native
+// builtin call runs to completion whatever the budget. The prelude
+// (prelude.go) therefore removes RegExp and caps every builtin that could
+// iterate or allocate unboundedly in one call, and JSON.stringify is a Go
+// implementation (json.go) that enforces an output budget and polls the
+// deadline. Known residual: the + operator on strings is one instruction
+// per concatenation, so doubling a string in a loop is bounded only by the
+// time budget (about 1 GB of garbage within 250ms). goja has no heap limit
+// hook; run the server with GOMEMLIMIT and a container memory limit.
+//
+// After the top level runs, lockdown (lockdown.go) freezes the builtins and
+// everything the module bound, so a call cannot leave state behind for the
+// next call on a pooled runtime. A call bound to a context (WithContext) is
+// interrupted when the context ends.
 //
 // # Randomness
 //
@@ -33,6 +43,7 @@
 package script
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -103,6 +114,11 @@ type Game struct {
 
 	hasDefault, hasHeuristic, hasDeterminize bool
 
+	info    *moduleInfo
+	mutable []string // module-level values that cannot be frozen (Check reports them)
+	// ctx, set on the copies WithContext returns, interrupts their calls.
+	ctx context.Context
+
 	idle    chan *vm      // ready runtimes
 	slots   chan struct{} // one token per live runtime, bounds the pool
 	console *consoleBuf
@@ -110,11 +126,12 @@ type Game struct {
 }
 
 var (
-	_ games.Game      = (*Game)(nil)
-	_ ai.Heuristic    = (*Game)(nil)
-	_ ai.Determinizer = (*Game)(nil)
-	_ ai.Reseeder     = (*Game)(nil)
-	_ ai.Rollouter    = (*Game)(nil)
+	_ games.Game       = (*Game)(nil)
+	_ ai.Heuristic     = (*Game)(nil)
+	_ ai.Determinizer  = (*Game)(nil)
+	_ ai.Reseeder      = (*Game)(nil)
+	_ ai.Rollouter     = (*Game)(nil)
+	_ ai.ContextBinder = (*Game)(nil)
 )
 
 // Load compiles a module and validates its shape (the game object, meta and
@@ -125,18 +142,24 @@ func Load(id string, src string, opts Options) (*Game, error) {
 	if err != nil {
 		return nil, fmt.Errorf("script: syntax error: %v", err)
 	}
+	info, err := analyze(id+".js", src)
+	if err != nil {
+		return nil, err
+	}
 	g := &Game{
 		prog:    prog,
+		info:    info,
 		opts:    opts,
 		idle:    make(chan *vm, opts.PoolSize),
 		slots:   make(chan struct{}, opts.PoolSize),
 		console: newConsole(opts.ConsoleLines),
 		memo:    newMemo(),
 	}
-	v, err := newVM(prog, opts, g.console.add)
+	v, err := newVM(prog, info, opts, g.console.add)
 	if err != nil {
 		return nil, loadErr(err)
 	}
+	g.mutable = v.mutable
 	g.slots <- struct{}{}
 	defer g.release(v)
 
@@ -589,12 +612,31 @@ func (g *Game) Rollout(st games.State, maxPlies int, seed uint64) (ai.RolloutRes
 
 // with runs f on a pooled runtime, creating one if the pool is not full.
 func (g *Game) with(f func(v *vm) error) error {
+	if g.ctx != nil {
+		if err := g.ctx.Err(); err != nil {
+			return &ModuleError{Func: "call", Message: errCancelled{err}.Error(), cause: err}
+		}
+	}
 	v, err := g.acquire()
 	if err != nil {
 		return err
 	}
-	defer g.release(v)
+	v.ctx = g.ctx
+	defer func() {
+		v.ctx = nil
+		g.release(v)
+	}()
 	return f(v)
+}
+
+// WithContext returns a view of g whose calls fail at once when ctx is done
+// and are interrupted when ctx ends mid-call (the runtime is discarded).
+// The AI uses it (ai.ContextBinder) so a search abandoned at its deadline
+// does not keep a runtime busy for up to a whole call or rollout budget.
+func (g *Game) WithContext(ctx context.Context) games.Game {
+	c := *g
+	c.ctx = ctx
+	return &c
 }
 
 func (g *Game) acquire() (*vm, error) {
@@ -607,7 +649,7 @@ func (g *Game) acquire() (*vm, error) {
 	case v := <-g.idle:
 		return v, nil
 	case g.slots <- struct{}{}:
-		v, err := newVM(g.prog, g.opts, g.console.add)
+		v, err := newVM(g.prog, g.info, g.opts, g.console.add)
 		if err != nil {
 			<-g.slots
 			return nil, err

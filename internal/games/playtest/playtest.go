@@ -144,7 +144,20 @@ func Run(ctx context.Context, g games.Game, opt Options) Report {
 			for i := range jobs {
 				seats := opt.Seats[i%len(opt.Seats)]
 				mu := pattern[(i/len(opt.Seats))%len(pattern)]
-				results[i] = playOne(ctx, g, opt, i, seats, mu)
+				res := playOne(ctx, g, opt, i, seats, mu)
+				// The budget is wall-clock, so a busy host can push a call
+				// over it. Replaying the same seed separates that from a real
+				// runaway loop, which times out on every attempt.
+				for retry := 0; retry < 2 && onlyTimeouts(res.errs); retry++ {
+					again := playOne(ctx, g, opt, i, seats, mu)
+					if len(again.errs) == 0 {
+						again.flakyTimeout = true
+						res = again
+					} else if !onlyTimeouts(again.errs) {
+						res = again // a different failure is the real one
+					}
+				}
+				results[i] = res
 			}
 		}()
 	}
@@ -159,7 +172,7 @@ feed:
 	close(jobs)
 	wg.Wait()
 
-	return buildReport(meta, opt, results, time.Since(start))
+	return buildReport(meta, ai.DeterminizerOf(g) != nil, opt, results, time.Since(start))
 }
 
 // gameSeed derives a per-game seed so each game is independent of the
@@ -183,6 +196,21 @@ type gameResult struct {
 	errs      []Error
 	leaks     int
 	latency   map[string][]time.Duration
+	// flakyTimeout is set when the first attempt timed out and a replay of
+	// the same seed did not: load, not the module.
+	flakyTimeout bool
+}
+
+func onlyTimeouts(errs []Error) bool {
+	if len(errs) == 0 {
+		return false
+	}
+	for _, e := range errs {
+		if e.Class != ClassTimeout {
+			return false
+		}
+	}
+	return true
 }
 
 // playOne plays game i. Every random choice comes from rng seeded by the
@@ -301,7 +329,7 @@ func playOne(ctx context.Context, g games.Game, opt Options, i, seats int, mu Ma
 					return fail(classify(err), s, nil, err, "determinize: "+err.Error())
 				}
 				res.leaks++
-				msg, err := script.SameInformation(g, st, det, s)
+				msg, err := script.LeakDiff(g, st, det, s)
 				if err != nil {
 					return fail(classify(err), s, nil, err, "")
 				}

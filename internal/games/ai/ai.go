@@ -14,6 +14,7 @@
 package ai
 
 import (
+	"context"
 	"encoding/json"
 	"math"
 	"math/rand"
@@ -74,6 +75,16 @@ func HeuristicOf(g games.Game) Heuristic {
 		return h
 	}
 	return nil
+}
+
+// ContextBinder is implemented by games whose calls can be bound to a context:
+// the returned game fails its calls once ctx is done and interrupts a call in
+// flight when ctx ends. The Brain searches on the bound game, so a decision
+// abandoned at its deadline stops at once instead of finishing the call (or
+// whole playout) it was in. The bound game must implement the same optional
+// interfaces as the original.
+type ContextBinder interface {
+	WithContext(ctx context.Context) games.Game
 }
 
 // DeterminizerOf returns g's determinizer, or nil when it has none.

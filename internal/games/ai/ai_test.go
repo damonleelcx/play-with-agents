@@ -409,3 +409,131 @@ func TestMCTSBeatsRandomAtConnectFour(t *testing.T) {
 		t.Fatalf("MCTS won %.0f%% against random, want > 80%%", 100*rate)
 	}
 }
+
+// peekGame: seat 0 guesses a hidden number 0..9 and wins on a match. The
+// game is hidden-information without a determinizer, and its heuristic and
+// rollouts read the true (hidden) state, so any brain that evaluated moves
+// with them would always guess right.
+type peekGame struct{ heuristicCalls, applyCalls *int }
+
+type peekState struct{ Secret, Guess int }
+
+func (peekGame) Meta() games.Meta {
+	return games.Meta{ID: "peek", Name: "Peek", MinSeats: 2, MaxSeats: 2, HiddenInfo: true}
+}
+func (peekGame) Setup(cfg games.Config, seed int64) (games.State, error) {
+	return json.Marshal(peekState{Secret: int(seed % 10), Guess: -1})
+}
+func (peekGame) dec(st games.State) peekState { var s peekState; _ = json.Unmarshal(st, &s); return s }
+func (g peekGame) ToMove(st games.State) ([]games.Seat, error) {
+	if g.dec(st).Guess >= 0 {
+		return []games.Seat{}, nil
+	}
+	return []games.Seat{0}, nil
+}
+func (g peekGame) Legal(st games.State, seat games.Seat) ([]games.MoveSpec, error) {
+	if seat != 0 || g.dec(st).Guess >= 0 {
+		return nil, nil
+	}
+	return []games.MoveSpec{{Type: "guess", Label: "Guess", Range: &games.Range{Arg: "n", Min: 0, Max: 9}}}, nil
+}
+func (g peekGame) Apply(st games.State, seat games.Seat, m games.Move) (games.State, []games.Event, error) {
+	*g.applyCalls++
+	s := g.dec(st)
+	n, _ := m.Args["n"].(int)
+	if f, ok := m.Args["n"].(float64); ok {
+		n = int(f)
+	}
+	s.Guess = n
+	b, _ := json.Marshal(s)
+	return b, nil, nil
+}
+func (peekGame) View(games.State, games.Seat) (games.View, error) {
+	return games.View{Kind: "board", Data: map[string]any{}}, nil
+}
+func (g peekGame) Outcome(st games.State) (*games.Outcome, error) {
+	s := g.dec(st)
+	if s.Guess < 0 {
+		return nil, nil
+	}
+	if s.Guess == s.Secret {
+		return &games.Outcome{Rank: []int{1, 2}, Score: []float64{1, 0}}, nil
+	}
+	return &games.Outcome{Rank: []int{2, 1}, Score: []float64{0, 1}}, nil
+}
+func (peekGame) DefaultMove(games.State, games.Seat) (games.Move, error) {
+	return games.Move{Type: "guess", Args: map[string]any{"n": 0}}, nil
+}
+func (peekGame) HasHeuristic() bool { return true }
+func (g peekGame) Heuristic(st games.State, seat games.Seat) (float64, error) {
+	*g.heuristicCalls++
+	s := g.dec(st)
+	if s.Guess == s.Secret {
+		return 1, nil
+	}
+	return -1, nil
+}
+
+// TestHiddenInfoWithoutDeterminizerDoesNotPeek: without a determinizer the
+// brain must not evaluate moves on the true state (heuristic or playouts).
+func TestHiddenInfoWithoutDeterminizerDoesNotPeek(t *testing.T) {
+	var hCalls, aCalls int
+	g := peekGame{&hCalls, &aCalls}
+	b := ai.New(ai.Options{Iterations: [3]int{200, 200, 200}, RangeSamples: 10})
+	right, simulated := 0, 0
+	const n = 100
+	for seed := range int64(n) {
+		st, _ := g.Setup(games.Config{Seats: 2}, seed)
+		before := aCalls
+		m, err := b.Choose(context.Background(), g, st, 0, shark, rand.New(rand.NewSource(seed)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		simulated += aCalls - before
+		isLegal(t, g, st, 0, m)
+		if next, _, _ := g.Apply(st, 0, m); g.dec(next).Guess == g.dec(st).Secret {
+			right++
+		}
+	}
+	if hCalls != 0 {
+		t.Errorf("heuristic called %d times on the true hidden state", hCalls)
+	}
+	if simulated != 0 {
+		t.Errorf("the brain simulated %d moves on the true hidden state", simulated)
+	}
+	if right > n/3 {
+		t.Errorf("guessed the hidden number %d/%d times: the brain is peeking", right, n)
+	}
+}
+
+// TestBrainStopsMidCallAtDeadline: a decision abandoned at its deadline must
+// not keep running the call (or whole playout) it was in. The module below
+// hangs inside every simulated playout; its call budget is 10s, so only the
+// context binding (ai.ContextBinder) can stop it in time.
+func TestBrainStopsMidCallAtDeadline(t *testing.T) {
+	src := `const game = {
+	  meta: { name: "Hang", summary: "Hangs in search.", minSeats: 2, maxSeats: 2, hiddenInfo: false, turnSeconds: 10 },
+	  setup(ctx) { return { n: 0, turn: 0 }; },
+	  toMove(s) { return s.n >= 10 ? [] : [s.turn]; },
+	  legal(s, seat) { return s.n >= 10 || seat !== s.turn ? [] : [{ type: "a", label: "A" }, { type: "b", label: "B" }]; },
+	  apply(s, seat, m) { if (s.n >= 2) { while (true) {} } return { n: s.n + 1, turn: 1 - seat }; },
+	  view(s) { return { message: "x" }; },
+	  outcome(s) { return s.n >= 10 ? { rank: [1, 1], score: [0, 0], summary: "Draw" } : null; },
+	};`
+	g, err := script.Load("hang", src, script.Options{CallBudget: 10 * time.Second, RolloutBudget: 10 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st, _ := g.Setup(games.Config{Seats: 2}, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	m, err := ai.New(ai.Options{}).Choose(ctx, g, st, 0, shark, rand.New(rand.NewSource(1)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d := time.Since(start); d > 3*time.Second {
+		t.Fatalf("Choose took %v with a 200ms deadline", d)
+	}
+	isLegal(t, g, st, 0, m)
+}

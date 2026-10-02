@@ -40,6 +40,11 @@ type CheckReport struct {
 	Finished int `json:"finished"`
 }
 
+// MsgNoDeterminize is the Check error for a hidden-information module without
+// determinize. The playtester reports the same.
+const MsgNoDeterminize = "hidden-information games must define determinize(state, seat, ctx) so fairness can be verified and agents can play without peeking: " +
+	"return a copy of the state with everything seat cannot see (opponents' hands, the deck order) resampled with ctx.random()"
+
 // OK reports whether the module has no errors (warnings allowed).
 func (r CheckReport) OK() bool { return r.count(SevError) == 0 }
 
@@ -146,7 +151,10 @@ func (c *checker) checkMeta(g *Game, m games.Meta) {
 		c.add(SevWarn, "meta", fmt.Sprintf("meta.turnSeconds is %d; use 5..600 (or 0 for no clock)", m.TurnSeconds))
 	}
 	if m.HiddenInfo && !g.HasDeterminizer() {
-		c.add(SevWarn, "meta", "meta.hiddenInfo is true but there is no determinize(state, seat, ctx): AI players cannot search and will play weakly")
+		c.add(SevError, "meta", MsgNoDeterminize)
+	}
+	for _, path := range g.mutable {
+		c.add(SevError, "module", fmt.Sprintf("module-level value %s cannot be frozen: it would be mutable state shared by every call and every table. Build it inside the function that needs it", path))
 	}
 	if !m.HiddenInfo && g.HasDeterminizer() {
 		c.add(SevWarn, "meta", "determinize is defined but meta.hiddenInfo is false; it is only used for hidden-information games")
@@ -338,19 +346,33 @@ func (c *checker) replay(g2 *Game, n int, seed int64, steps []step, want games.S
 	}
 }
 
-// leakCheck determinizes from each seat's point of view and checks that the
-// seat's own view, turn and legal moves did not change. If they did, either
-// the view shows something the seat should not know, or determinize
-// resampled something the seat does know.
+// leakCheck tests the fairness invariant: the view for viewer V must be the
+// same in any two states that differ only in information hidden from V.
+// determinize(state, seat) produces exactly such a state for V = seat, so:
+//
+//   - seat's own view, the seats to move and seat's legal moves must not
+//     change (else the view shows what seat cannot know, or determinize
+//     resampled something seat does know);
+//   - the spectator view must not change either. A spectator knows only
+//     public information, so everything any seat cannot see is hidden from
+//     it too. This matters most: the spectator view is shown to anyone with
+//     the invite code and feeds the AI players' table talk.
+//
+// Determinizing from every seat in turn reaches states that differ in
+// everything any seat hides (the union), which the spectator view must not
+// reveal either. Other seats' views are not compared against seat's
+// determinization: it may legitimately resample their own hands. Each of
+// them is checked against its own determinization instead.
 func (c *checker) leakCheck(g *Game, st games.State, n int, where string) {
-	for seat := 0; seat < n; seat++ {
-		for k := uint64(1); k <= 2; k++ {
+	for k := uint64(1); k <= 2; k++ {
+		chained := st
+		for seat := 0; seat < n; seat++ {
 			det, err := g.Determinize(st, seat, k)
 			if err != nil {
 				c.errf(where+", determinize", err)
 				return
 			}
-			msg, err := SameInformation(g, st, det, seat)
+			msg, err := LeakDiff(g, st, det, seat)
 			if err != nil {
 				c.errf(where+", hidden information check", err)
 				return
@@ -359,8 +381,55 @@ func (c *checker) leakCheck(g *Game, st games.State, n int, where string) {
 				c.add(SevError, where+", hidden information", msg)
 				return
 			}
+			if chained, err = g.Determinize(chained, seat, k+uint64(seat)<<8); err != nil {
+				c.errf(where+", determinize", err)
+				return
+			}
+		}
+		msg, err := SpectatorDiff(g, st, chained, fmt.Sprintf("determinizing from every seat in turn (0..%d)", n-1))
+		if err != nil {
+			c.errf(where+", hidden information check", err)
+			return
+		}
+		if msg != "" {
+			c.add(SevError, where+", hidden information", msg)
+			return
 		}
 	}
+}
+
+// LeakDiff checks det, a determinization of st from seat's point of view,
+// against st: seat's own view, toMove and legal moves (SameInformation) and
+// the spectator view (SpectatorDiff). It describes the first difference, or
+// returns "". The playtester uses it for its leak check.
+func LeakDiff(g games.Game, st, det games.State, seat games.Seat) (string, error) {
+	if msg, err := SameInformation(g, st, det, seat); msg != "" || err != nil {
+		return msg, err
+	}
+	return SpectatorDiff(g, st, det, fmt.Sprintf("determinize(state, %d)", seat))
+}
+
+// SpectatorDiff compares the spectator view (seat -1) of st and of other, a
+// state that differs from st only in information some seat cannot see
+// (produced by how). Any difference means spectators see hidden information.
+func SpectatorDiff(g games.Game, st, other games.State, how string) (string, error) {
+	va, err := g.View(st, games.Spectator)
+	if err != nil {
+		return "", err
+	}
+	vb, err := g.View(other, games.Spectator)
+	if err != nil {
+		return "", err
+	}
+	ja, _ := json.Marshal(va)
+	jb, _ := json.Marshal(vb)
+	if bytes.Equal(ja, jb) {
+		return "", nil
+	}
+	return fmt.Sprintf("the spectator view, view(state, -1), changed after %s: it shows information a seat cannot see (a hand, the deck order), "+
+		"or determinize changed public information. Spectators (anyone with the invite code, and the AI players' table talk) may only see public information: "+
+		"when seat < 0, hide every private zone. Before: %s After: %s",
+		how, truncate(string(ja), 300), truncate(string(jb), 300)), nil
 }
 
 // SameInformation compares what seat sees in two states (view, toMove and

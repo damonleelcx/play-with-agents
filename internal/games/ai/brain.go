@@ -81,8 +81,9 @@ func (o Options) withDefaults() Options {
 //   - Hidden information with a Determinizer: the same search, but every
 //     iteration starts from a fresh determinization from the deciding seat's
 //     point of view, with availability-counted UCB (single-observer ISMCTS).
-//   - Hidden information without one: a 1-ply heuristic search, or a uniformly
-//     random move. It never searches the true hidden state.
+//   - Hidden information without one: a uniformly random legal move. Any
+//     evaluation (heuristic or playout) would run on the true state and so
+//     see the opponents' hidden information. Check rejects such modules.
 //
 // The tree is "open loop": nodes store move statistics, not states, and every
 // iteration re-applies the moves from a (re)sampled root. That one design
@@ -120,17 +121,21 @@ func (b *Brain) Choose(ctx context.Context, g games.Game, st games.State, seat g
 		return b.fallback(g, st, seat, cands), nil
 	}
 
-	var (
-		mv games.Move
-		ok bool
-	)
-	det := DeterminizerOf(g)
-	h := HeuristicOf(g)
-	if g.Meta().HiddenInfo && det == nil {
-		mv, ok = b.onePly(ctx, g, h, st, seat, p, rng, cands)
-	} else {
-		mv, ok = b.search(ctx, g, det, h, st, seat, p, rng, cands)
+	if g.Meta().HiddenInfo && DeterminizerOf(g) == nil {
+		// Without a determinizer every evaluation (heuristic or playout)
+		// would run on the true state, hidden cards included: play a
+		// uniformly random legal move instead of peeking.
+		return cands[rng.Intn(len(cands))], nil
 	}
+
+	// Search on a context-bound view when the game offers one, so an
+	// abandoned decision stops mid-call. The fallback below runs on g:
+	// the bound view fails every call once ctx is done.
+	sg := g
+	if cb, ok := g.(ContextBinder); ok {
+		sg = cb.WithContext(ctx)
+	}
+	mv, ok := b.search(ctx, sg, DeterminizerOf(sg), HeuristicOf(sg), st, seat, p, rng, cands)
 	if ok {
 		for _, c := range cands {
 			if SameMove(c, mv) {
@@ -425,43 +430,6 @@ func (s *searcher) lazyHeuristic(st games.State) values {
 		memo[seat] = v
 		return v
 	}
-}
-
-// ── hidden information without a determinizer ───────────────────────────────
-
-// onePly scores each candidate by the heuristic of the position after it.
-// Without a determinizer there is no honest way to look further: any deeper
-// search would run on the true hidden state. The heuristic contract requires
-// it to use only what seat can see; chance is reseeded first so the
-// evaluation cannot benefit from a known future draw.
-func (b *Brain) onePly(ctx context.Context, g games.Game, h Heuristic, st games.State, seat games.Seat, p games.Persona, rng *rand.Rand, cands []games.Move) (games.Move, bool) {
-	if h == nil {
-		return cands[rng.Intn(len(cands))], true
-	}
-	if rs, ok := g.(Reseeder); ok {
-		if r, err := rs.Reseed(st, rng.Uint64()); err == nil {
-			st = r
-		}
-	}
-	stats := make([]choice, 0, len(cands))
-	for _, c := range cands {
-		if ctx.Err() != nil {
-			break
-		}
-		next, _, err := g.Apply(st, seat, c)
-		if err != nil {
-			continue
-		}
-		v, err := h.Heuristic(next, seat)
-		if err != nil {
-			continue
-		}
-		stats = append(stats, choice{move: c, q: heuristicValue(v), visits: 1})
-	}
-	if len(stats) == 0 {
-		return cands[rng.Intn(len(cands))], true
-	}
-	return b.pick(stats, p, rng), true
 }
 
 // ── persona ─────────────────────────────────────────────────────────────────

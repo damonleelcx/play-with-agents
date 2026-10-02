@@ -637,14 +637,17 @@ func TestCheckCatchesBrokenModules(t *testing.T) {
 		{"view dims", module(`view(s) { return { board: { rows: 3, cols: 3, cells: [] } }; },`), "has 0 rows, but board.rows is 3", SevError},
 		{"no outcome", module(`outcome(s) { return null; },`), "outcome returned null", SevError},
 		{"Math.random", module(`apply(s, seat, m) { return { n: s.n + Math.random(), turn: 1 - seat }; },`), "use ctx.random()", SevError},
-		{"module state", "let calls = 0;\n" + module(`setup(ctx) { calls++; return { n: 0, turn: 0, calls }; },`), "not deterministic", SevError},
+		{"module state", "let calls = 0;\n" + module(`setup(ctx) { calls++; return { n: 0, turn: 0, calls }; },`), "module-level variable calls changed during setup", SevError},
 		{"apply throws", module(`apply(s, seat, m) { if (m.type === "bet") throw new RangeError("bad bet " + m.args.x); return base.apply(s, seat, m); },`), "bad bet", SevError},
 		{"hidden face", module(`view(s) { return { zones: [{ id: "deck", cards: [{ face: "A♠", hidden: true }] }] }; },`), "leaks hidden information", SevError},
 		{"seat names", module(`view(s) { return { message: "Player 1 to move" }; },`), "{s:N}", SevWarn},
 		{"endless", module(`toMove(s) { return [s.turn]; }, outcome(s) { return null; },
 		  legal(s, seat) { return seat === s.turn ? [{ type: "inc", label: "+1" }] : []; },`), "did not end", SevWarn},
-		{"hidden without determinize", baseSrc + `const game = Object.assign({}, base, { meta: Object.assign({}, base.meta, { hiddenInfo: true }) });`, "no determinize", SevWarn},
+		{"hidden without determinize", baseSrc + `const game = Object.assign({}, base, { meta: Object.assign({}, base.meta, { hiddenInfo: true }) });`, "must define determinize(state, seat, ctx)", SevError},
 		{"leaky view", leakySrc, "should not have", SevError},
+		{"spectator sees every hand", spectatorLeakSrc, "spectator view", SevError},
+		{"typed arrays are unavailable", "const scratch = new Int8Array(4);\n" + module(""), "Int8Array is not defined", SevError},
+		{"regex literal", module(`view(s) { return { message: "a".replace(/a/g, "b") }; },`), "regular expressions are not available", SevError},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -674,4 +677,29 @@ const game = {
   view(s, seat) { return { counters: [{ label: "Their secret", value: s.secret[1 - Math.max(seat, 0)] }] }; },
   outcome(s) { return s.n >= 4 ? { rank: [1, 1], score: [0, 0] } : null; },
   determinize(s, seat, ctx) { s.secret[1 - seat] = ctx.randomInt(100); return s; },
+};`
+
+// spectatorLeakSrc deals each seat a hidden hand. Every seat's own view is
+// correct, but the spectator view (seat -1) shows every hand: anyone with
+// the invite code, and the AI table talk, would see them.
+const spectatorLeakSrc = `
+const game = {
+  meta: { name: "Peek", summary: "Spectators see everything.", minSeats: 2, maxSeats: 3, hiddenInfo: true, turnSeconds: 10 },
+  setup(ctx) {
+    const hands = [];
+    for (let i = 0; i < ctx.seats; i++) hands.push([ctx.randomInt(10), ctx.randomInt(10)]);
+    return { hands, turn: 0, n: 0 };
+  },
+  toMove(s) { return s.n >= 4 ? [] : [s.turn]; },
+  legal(s, seat) { return s.n >= 4 || seat !== s.turn ? [] : [{ type: "pass", label: "Pass" }]; },
+  apply(s, seat) { return { hands: s.hands, turn: (seat + 1) % s.hands.length, n: s.n + 1 }; },
+  view(s, seat) {
+    return { zones: s.hands.map((h, i) => ({ id: "hand-" + i, owner: i, cards: h.map((c) =>
+      seat < 0 || seat === i ? { face: String(c) } : { face: "", hidden: true }) })) };
+  },
+  outcome(s) { return s.n >= 4 ? { rank: s.hands.map(() => 1), score: s.hands.map(() => 0), summary: "Done" } : null; },
+  determinize(s, seat, ctx) {
+    s.hands = s.hands.map((h, i) => i === seat ? h : [ctx.randomInt(10), ctx.randomInt(10)]);
+    return s;
+  },
 };`

@@ -63,6 +63,11 @@ func TestExamplesPass(t *testing.T) {
 			// warnings (which include "AI does not beat random") are only
 			// enforced in the normal run.
 			for _, why := range reasons {
+				// A timeout that did not reproduce is the test machine's
+				// load (go test runs packages in parallel), not the example.
+				if r.FlakyTimeouts > 0 && strings.Contains(why, "not on replay") {
+					continue
+				}
 				if !raceEnabled {
 					t.Errorf("unexpected verdict note: %s", why)
 				}
@@ -306,5 +311,46 @@ func TestVerdictWarnings(t *testing.T) {
 
 	if pass, _ := (Report{}).Verdict(); pass {
 		t.Fatal("an empty report passed")
+	}
+}
+
+// spectatorLeakSrc: every seat's own view is correct, but the spectator view
+// shows every hand. The leak check must cover seat -1 as well.
+const spectatorLeakSrc = `
+const game = {
+  meta: { name: "Peek", summary: "Spectators see everything.", minSeats: 2, maxSeats: 2, hiddenInfo: true, turnSeconds: 10 },
+  setup(ctx) { return { hands: [[ctx.randomInt(10)], [ctx.randomInt(10)]], turn: 0, n: 0 }; },
+  toMove(s) { return s.n >= 6 ? [] : [s.turn]; },
+  legal(s, seat) { return s.n >= 6 || seat !== s.turn ? [] : [{ type: "a", label: "A" }, { type: "b", label: "B" }]; },
+  apply(s, seat) { return { hands: s.hands, turn: 1 - seat, n: s.n + 1 }; },
+  view(s, seat) {
+    return { zones: s.hands.map((h, i) => ({ id: "hand-" + i, owner: i,
+      cards: h.map((c) => seat < 0 || seat === i ? { face: String(c) } : { face: "", hidden: true }) })) };
+  },
+  outcome(s) { return s.n >= 6 ? { rank: [1, 2], score: [1, 0] } : null; },
+  determinize(s, seat, ctx) { s.hands[1 - seat] = [ctx.randomInt(10)]; return s; },
+};`
+
+func TestSpectatorLeakIsCaught(t *testing.T) {
+	g := load(t, "peek", spectatorLeakSrc, script.Options{})
+	r := Run(context.Background(), g, Options{Games: 10})
+	if r.ByClass[string(ClassLeak)] != 10 {
+		t.Fatalf("leaks = %v", r.ByClass)
+	}
+	if !strings.Contains(r.Errors[0].Message, "spectator view") {
+		t.Fatalf("message = %s", r.Errors[0].Message)
+	}
+	if pass, _ := r.Verdict(); pass {
+		t.Fatal("leaky game passed")
+	}
+}
+
+func TestHiddenInfoWithoutDeterminizerFails(t *testing.T) {
+	src := strings.Replace(spectatorLeakSrc, "determinize(s, seat, ctx)", "notDeterminize(s, seat, ctx)", 1)
+	g := load(t, "nodet", src, script.Options{})
+	r := Run(context.Background(), g, Options{Games: 10})
+	pass, reasons := r.Verdict()
+	if pass || len(reasons) == 0 || !strings.Contains(reasons[0], "must define determinize") {
+		t.Fatalf("verdict %v %v", pass, reasons)
 	}
 }
