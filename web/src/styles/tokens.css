@@ -89,3 +89,27 @@
 }
 :root[data-fs='small'] { --fs: 14px; }
 :root[data-fs='large'] { --fs: 17px; }
+
+/* App additions (signed-in experience). */
+:root {
+  --blue-600: #2a63e6;
+  --ember-600: #f0712a;
+  --amber-400: #ffc04d;
+  --violet-400: #b07cff;
+  --grad-brand: linear-gradient(135deg, #3d7bff 0%, #4fd6ff 100%);
+  --grad-ember: linear-gradient(135deg, #ff8a3d 0%, #ffb36b 100%);
+  --ok: var(--green-400);
+  --bad: var(--red-400);
+  --warn: var(--amber-400);
+  --side-w: 276px;
+  --rail-w: 76px;
+  --tabbar-h: 62px;
+}
+:root[data-theme='light'] .themed,
+:root[data-theme='light'] body.themed-body {
+  --accent: #2a63e6;
+  --accent-2: #0a86b8;
+  --blue-300: #2a63e6;
+  --ember-400: #d9601c;
+  --focus: 0 0 0 3px rgba(42, 99, 230, 0.28);
+}

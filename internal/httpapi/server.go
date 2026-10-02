@@ -46,12 +46,8 @@ type Server struct {
 const cookieName = "play_session"
 
 // csrfHeader must be present (value "1") on every state-changing API call; see
-// middleware. legacyCSRFHeader is the name inherited from the fork, accepted
-// until every client sends csrfHeader.
-const (
-	csrfHeader       = "X-Play"
-	legacyCSRFHeader = "X-ACT"
-)
+// middleware.
+const csrfHeader = "X-Play"
 
 type ctxKey int
 
@@ -148,7 +144,7 @@ func (s *Server) middleware(next http.Handler) http.Handler {
 		// cross-site form cannot set one, and a cross-site fetch that sets one
 		// is preflighted — and this server answers no preflight.
 		if strings.HasPrefix(r.URL.Path, "/api/") && r.Method != http.MethodGet && r.Method != http.MethodHead {
-			if r.Header.Get(csrfHeader) != "1" && r.Header.Get(legacyCSRFHeader) != "1" {
+			if r.Header.Get(csrfHeader) != "1" {
 				writeErr(w, 403, "missing request header")
 				return
 			}

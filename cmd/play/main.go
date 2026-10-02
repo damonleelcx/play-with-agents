@@ -159,7 +159,7 @@ func run(mode string) error {
 		// service (tables, catalog) and the studio plug in as
 		// agent.Tables, agent.Catalog and agent.Studio.
 		ag := &agent.Agent{Store: store, Model: model, LLM: cfg.LLMModel, FastLLM: cfg.LLMFastModel, Mailer: mailer,
-			Tables: nil, Studio: nil, Catalog: nil}
+			Tables: aoiTables{tables}, Studio: nil, Catalog: aoiCatalog{tables}}
 		api := &httpapi.Server{Pool: pool, Auth: authSvc, Store: store, Agent: ag, Static: web.FS(), CookieSecure: cfg.CookieSecure,
 			MailEnabled: mailer.Enabled(), Hub: hub, Rooms: tables, Speech: speech}
 		srv = &http.Server{Addr: cfg.Addr, Handler: api.Handler(), ReadHeaderTimeout: 10 * time.Second}

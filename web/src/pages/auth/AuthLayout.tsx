@@ -1,59 +1,82 @@
 import { useState, type FormEvent, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
-import { LogoMark } from '../../components/Icons'
+import { AoiFace, Img, type Mood } from '../../components/Aoi'
+import { IconCheck, IconEye, IconEyeOff, LogoMark } from '../../components/Icons'
 import LangSwitch from '../../components/LangSwitch'
 import { useI18n } from '../../lib/i18n'
 import '../../styles/auth.css'
 
-export default function AuthLayout({ title, sub, children, mood = 'smile' }: { title: string; sub?: ReactNode; children: ReactNode; mood?: 'smile' | 'think' | 'laugh' }) {
+type Page = 'signin' | 'signup' | 'verify' | 'forgot' | 'reset'
+
+// The split sign-in layout: Aoi's art and one line from her on one side, an
+// unhurried form on the other. On phones the art becomes a band above the form.
+export default function AuthLayout({ title, sub, children, mood = 'smile', page }: { title: string; sub?: ReactNode; children: ReactNode; mood?: Mood; page: Page }) {
   const { t } = useI18n()
+  const line = t.auth.lines[page]
   return (
-    <div className="auth">
-      <section className="auth-form-side">
+    <div className="auth themed">
+      <aside className="auth-art" aria-hidden="true">
+        <div className="aa-glow" />
+        <div className="aa-grid" />
+        <div className="aa-suits"><span>♠</span><span>♥</span><span>♦</span><span>♣</span></div>
+        <Img className="aa-img" srcs={['/play/aoi/aoi-full.webp', '/play/aoi/aoi-portrait.webp']}
+          fallback={<div className="aa-fallback"><span className="aaf-ring" /><span className="aaf-kanji">葵</span></div>} />
+        <div className="aa-quote">
+          <AoiFace mood={mood} size={44} ring />
+          <div>
+            <p>{line}</p>
+            <small>{t.auth.tagline}</small>
+          </div>
+        </div>
+      </aside>
+
+      <section className="auth-side">
         <header className="auth-top">
-          <Link to="/" className="auth-logo"><LogoMark /><span>ACT</span></Link>
+          <Link to="/" className="auth-brand"><LogoMark size={30} /><span>Play <i>with</i> Agents</span></Link>
           <LangSwitch />
         </header>
+        <div className="auth-band" aria-hidden="true">
+          <AoiFace mood={mood} size={52} ring />
+          <p>{line}</p>
+        </div>
         <div className="auth-card">
-          <img className="auth-face" src={`/vera/vera-face-${mood}.webp`} alt="" width={56} height={56} />
           <h1>{title}</h1>
           {sub && <p className="auth-sub">{sub}</p>}
           {children}
         </div>
         <p className="auth-foot">
-          {t.footer.disclaimer}{' '}
-          <Link to="/privacy">{t.footer.links[0]}</Link> · <Link to="/terms">{t.footer.links[1]}</Link>
+          {t.legal.note}{' '}
+          <Link to="/terms">{t.auth.termsLink}</Link> · <Link to="/privacy">{t.auth.privacyLink}</Link>
         </p>
       </section>
-      <aside className="auth-visual" aria-hidden="true">
-        <div className="auth-arch" />
-        <img src="/vera/vera-full.webp" alt="" className="auth-vera" />
-        <div className="auth-quote">
-          <strong>{t.auth.side[0]}</strong>
-          <span>{t.auth.side[1]}</span>
-        </div>
-      </aside>
     </div>
   )
 }
 
-export function PasswordInput({ value, onChange, label, autoComplete, showMeter }: { value: string; onChange: (v: string) => void; label: string; autoComplete: string; showMeter?: boolean }) {
-  const { t, lang } = useI18n()
+export function PasswordInput({ value, onChange, label, autoComplete, showMeter, autoFocus }: { value: string; onChange: (v: string) => void; label: string; autoComplete: string; showMeter?: boolean; autoFocus?: boolean }) {
+  const { t } = useI18n()
   const [show, setShow] = useState(false)
   const score = strength(value)
+  const tips = [[...value].length >= 10, /[a-z]/.test(value) && /[A-Z]/.test(value), /[\d\W_]/.test(value)]
   return (
     <label className="field">
       <span>{label}</span>
       <div className="pw">
-        <input className="input" type={show ? 'text' : 'password'} value={value} onChange={(e) => onChange(e.target.value)} autoComplete={autoComplete} required minLength={showMeter ? 10 : 1} />
-        <button type="button" className="pw-toggle" onClick={() => setShow(!show)} aria-label={show ? 'Hide password' : 'Show password'}>
-          {show ? (lang === 'zh' ? '隐藏' : 'Hide') : (lang === 'zh' ? '显示' : 'Show')}
+        <input className="input" type={show ? 'text' : 'password'} value={value} onChange={(e) => onChange(e.target.value)} autoComplete={autoComplete}
+          required minLength={showMeter ? 10 : 1} autoFocus={autoFocus} spellCheck={false} />
+        <button type="button" className="pw-toggle" onClick={() => setShow(!show)} aria-label={show ? t.auth.hidePw : t.auth.showPw} title={show ? t.auth.hidePw : t.auth.showPw}>
+          {show ? <IconEyeOff size={18} /> : <IconEye size={18} />}
         </button>
       </div>
       {showMeter && (
         <div className="meter" aria-live="polite">
-          <div className="meter-bar"><i style={{ width: `${(score + 1) * 25}%` }} className={`s${score}`} /></div>
-          <small>{value ? t.auth.strength[score] : t.auth.pwHint}</small>
+          <div className="meter-bar">{[0, 1, 2, 3].map((i) => <i key={i} className={value && i <= score ? `s${score}` : ''} />)}</div>
+          <div className="meter-row">
+            <ul className="pw-tips">
+              {t.auth.pwTips.map((x, i) => <li key={x} className={tips[i] ? 'ok' : ''}>{tips[i] ? <IconCheck size={11} /> : <i />}{x}</li>)}
+            </ul>
+            {value && <small className={`ms s${score}`}>{t.auth.strength[score]}</small>}
+          </div>
         </div>
       )}
     </label>
@@ -88,4 +111,22 @@ export function useSubmit<T>(fn: () => Promise<T>) {
     }
   }
   return { busy, error, submit, setError }
+}
+
+// Server errors come in English; show the friendly local version when known.
+export function useAuthError() {
+  const { t, lang } = useI18n()
+  const zh: Record<string, string> = {
+    'an account with this email already exists': '该邮箱已注册账户',
+    'that email address does not look valid': '邮箱地址格式不正确',
+    'password must be at least 10 characters': '密码至少需要 10 个字符',
+    'password must not be your email address': '密码不能与邮箱相同',
+  }
+  return (e: string) => {
+    if (!e) return ''
+    if (e === 'offline') return t.auth.offline
+    if (/invalid email or password|invalid credentials/i.test(e)) return t.auth.badCreds
+    if (/expired|invalid token|token/i.test(e)) return t.auth.linkInvalid
+    return (lang === 'zh' && zh[e]) || e
+  }
 }

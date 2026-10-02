@@ -1,192 +1,351 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { NavLink, useNavigate, useParams } from 'react-router-dom'
+import { AgentAvatar, AoiFace } from '../components/Aoi'
+import { IconAlert, IconBell, IconCards, IconChart, IconCheck, IconLock, IconPalette, IconRefresh, IconRobot, IconShield, IconSpeaker, IconStar, IconStop, IconUser, IconWand } from '../components/Icons'
 import { PasswordInput } from '../pages/auth/AuthLayout'
-import { api, type User } from '../lib/api'
+import { api, type Agent } from '../lib/api'
+import { setVoiceVolume, speak, stop as stopVoice, useVoice } from '../lib/voice'
 import { useI18n, type Lang } from '../lib/i18n'
-import { useSession } from '../lib/session'
-import { fmtTime } from './parts'
+import { fmtTime } from './missionModel'
+import { usePrefs, useToast } from './prefs'
+import { ROSTER } from './roster'
 
-type SettingsData = {
-  user: User
-  preferences: Record<string, any>
-  licenses: { id: string; kind: string; number: string; jurisdiction: string; status: 'pending' | 'verified' | 'rejected'; created_at: string }[] | null
+const SECTIONS = ['profile', 'aoi', 'table', 'agents', 'studio', 'notifications', 'appearance', 'privacy', 'security', 'usage'] as const
+type Section = (typeof SECTIONS)[number]
+const ICONS: Record<Section, (p: { size?: number }) => JSX.Element> = {
+  profile: IconUser, aoi: IconStar, table: IconCards, agents: IconRobot, studio: IconWand,
+  notifications: IconBell, appearance: IconPalette, privacy: IconShield, security: IconLock, usage: IconChart,
 }
 
-const TABS = ['profile', 'prefs', 'notify', 'privacy', 'security', 'limits', 'pro', 'look', 'admin'] as const
-type Tab = (typeof TABS)[number]
-
-const ZONES = ['America/Los_Angeles', 'America/Denver', 'America/Chicago', 'America/New_York', 'America/Anchorage', 'Pacific/Honolulu',
-  'Europe/London', 'Europe/Berlin', 'Asia/Shanghai', 'Asia/Hong_Kong', 'Asia/Taipei', 'Asia/Singapore', 'Asia/Tokyo', 'Australia/Sydney', 'UTC']
-
-export default function Settings({ onPrefs }: { onPrefs: (p: Record<string, any>) => void }) {
-  const { tab = 'profile' } = useParams()
-  const { t, setLang } = useI18n()
-  const { user, setUser } = useSession()
-  const [data, setData] = useState<SettingsData | null>(null)
-  const [saved, setSaved] = useState('')
-  const [err, setErr] = useState('')
+export default function Settings() {
+  const { section = 'profile' } = useParams()
+  const { t } = useI18n()
+  const { data, error, reload } = usePrefs()
   const navRef = useRef<HTMLElement>(null)
-  // On phones the tab strip scrolls sideways; keep the active tab in view.
+  const current: Section = (SECTIONS as readonly string[]).includes(section) ? (section as Section) : 'profile'
+  // On phones the section strip scrolls sideways; keep the active one in view.
+  const pageRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     navRef.current?.querySelector('.active')?.scrollIntoView({ block: 'nearest', inline: 'center' })
-  }, [tab, data])
-
-  const load = useCallback(() => {
-    api.get<SettingsData>('/api/settings').then((d) => { setData(d); onPrefs(d.preferences) }).catch((e) => setErr(e.message))
-  }, [onPrefs])
-  useEffect(load, [load])
-
-  const save = async (patch: { name?: string; preferences?: Record<string, any> }) => {
-    setErr('')
-    try {
-      const d = await api.put<SettingsData>('/api/settings', patch)
-      setData(d)
-      onPrefs(d.preferences)
-      if (patch.preferences?.language) setLang(patch.preferences.language as Lang)
-      if (patch.name !== undefined && user) setUser({ ...user, name: d.user.name })
-      setSaved(t.settings.saved)
-      setTimeout(() => setSaved(''), 1800)
-    } catch (e: any) {
-      setErr(e.message)
-    }
-  }
-
-  if (!data) return <div className="page"><p className="muted">{err || t.common.loading}</p></div>
-  const p = data.preferences
-  const current = (TABS as readonly string[]).includes(tab) ? (tab as Tab) : 'profile'
-  const tabs = TABS.filter((x) => x !== 'admin' || user?.admin)
+    pageRef.current?.scrollTo({ top: 0 })
+  }, [current])
+  const I = ICONS[current]
 
   return (
-    <div className="page settings">
-      <header className="page-head">
-        <h1>{t.settings.title}</h1>
-        {saved && <span className="saved-flag">✓ {saved}</span>}
-      </header>
+    <div className="page settings" ref={pageRef}>
+      <header className="page-head"><h1>{t.settings.title}</h1></header>
       <div className="settings-grid">
         <nav className="settings-nav" ref={navRef} aria-label={t.settings.title}>
-          {tabs.map((k) => (
-            <NavLink key={k} to={`/app/settings/${k}`} className={current === k ? 'active' : ''}>{t.settings.tabs[k]}</NavLink>
-          ))}
+          {SECTIONS.map((k) => {
+            const Ic = ICONS[k]
+            return <NavLink key={k} to={`/app/settings/${k}`} className={current === k ? 'active' : ''}><Ic size={17} /> <span>{t.settings.groups[k]}</span></NavLink>
+          })}
         </nav>
-        <div className="settings-body">
-          {err && <div className="alert alert-error">{err}</div>}
-          {current === 'profile' && <Profile data={data} save={save} />}
-          {current === 'prefs' && (
-            <Card>
-              <Row label={t.settings.language}>
-                <Seg value={p.language || 'en'} options={[['en', 'English'], ['zh', '中文']]} onChange={(v) => save({ preferences: { language: v } })} />
-              </Row>
-              <Row label={t.settings.tone}>
-                <Seg value={p.tone || 'warm'} options={Object.entries(t.settings.tones)} onChange={(v) => save({ preferences: { tone: v } })} />
-              </Row>
-              <Row label={t.settings.verbosity}>
-                <Seg value={p.verbosity || 'balanced'} options={Object.entries(t.settings.verbosities)} onChange={(v) => save({ preferences: { verbosity: v } })} />
-              </Row>
-              <Row label={t.settings.timezone}>
-                <select className="select" value={p.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone} onChange={(e) => save({ preferences: { timezone: e.target.value } })}>
-                  {Array.from(new Set([Intl.DateTimeFormat().resolvedOptions().timeZone, ...ZONES])).map((z) => <option key={z} value={z}>{z}</option>)}
-                </select>
-              </Row>
-              <TextPref label={t.settings.jurisdiction} hint={t.settings.jurisdictionHint} value={p.jurisdiction || ''} onSave={(v) => save({ preferences: { jurisdiction: v } })} />
-            </Card>
+        <div className="settings-body" key={current}>
+          <div className="sb-head">
+            <span className="sb-icon"><I size={20} /></span>
+            <div><h2>{t.settings.groups[current]}</h2><p>{t.settings.hints[current]}</p></div>
+          </div>
+          {!data && current !== 'security' && current !== 'usage' ? (
+            error ? (
+              <div className="banner banner-warn"><IconAlert size={16} /><span>{t.settings.offline}</span>
+                <button className="btn btn-soft btn-sm" onClick={reload}><IconRefresh size={14} /> {t.common.retry}</button></div>
+            ) : <div className="skel-block"><span className="shimmer" /></div>
+          ) : (
+            <>
+              {current === 'profile' && <Profile />}
+              {current === 'aoi' && <AoiPrefs />}
+              {current === 'table' && <TablePrefs />}
+              {current === 'agents' && <AgentPrefs />}
+              {current === 'studio' && <StudioPrefs />}
+              {current === 'notifications' && <NotifyPrefs />}
+              {current === 'appearance' && <Appearance />}
+              {current === 'privacy' && <Privacy />}
+              {current === 'security' && <Security />}
+              {current === 'usage' && <Usage />}
+            </>
           )}
-          {current === 'notify' && (
-            <Card>
-              <Toggle label={t.settings.notifyEmail} value={p.notify_email !== false} onChange={(v) => save({ preferences: { notify_email: v } })} />
-              <Toggle label={t.settings.notifyApprovals} value={p.notify_approvals !== false} onChange={(v) => save({ preferences: { notify_approvals: v } })} />
-            </Card>
-          )}
-          {current === 'privacy' && <Privacy prefs={p} save={save} />}
-          {current === 'security' && <Security />}
-          {current === 'limits' && <Limits prefs={p} save={save} />}
-          {current === 'pro' && <Pro data={data} reload={load} />}
-          {current === 'look' && (
-            <Card>
-              <Row label={t.settings.theme}>
-                <Seg value={p.theme || 'system'} options={Object.entries(t.settings.themes)} onChange={(v) => save({ preferences: { theme: v } })} />
-              </Row>
-              <Row label={t.settings.fontSize}>
-                <Seg value={p.font_size || 'medium'} options={Object.entries(t.settings.sizes)} onChange={(v) => save({ preferences: { font_size: v } })} />
-              </Row>
-              <Toggle label={t.settings.enterToSend} value={p.enter_to_send !== false} onChange={(v) => save({ preferences: { enter_to_send: v } })} />
-              <Toggle label={t.settings.reduceMotion} value={!!p.reduce_motion} onChange={(v) => save({ preferences: { reduce_motion: v } })} />
-            </Card>
-          )}
-          {current === 'admin' && user?.admin && <Admin />}
         </div>
       </div>
     </div>
   )
 }
 
+// ── building blocks ───────────────────────────────────────────────────────
 function Card({ children, title, danger }: { children: React.ReactNode; title?: string; danger?: boolean }) {
-  return <section className={`s-card ${danger ? 'danger' : ''}`}>{title && <h2>{title}</h2>}{children}</section>
+  return <section className={`s-card ${danger ? 'danger' : ''}`}>{title && <h3>{title}</h3>}{children}</section>
 }
-function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
-  return <div className="s-row"><div><strong>{label}</strong>{hint && <small>{hint}</small>}</div><div className="s-ctl">{children}</div></div>
+function Row({ label, hint, children, stack }: { label: string; hint?: string; children: React.ReactNode; stack?: boolean }) {
+  return <div className={`s-row ${stack ? 'stack' : ''}`}><div className="s-label"><strong>{label}</strong>{hint && <small>{hint}</small>}</div><div className="s-ctl">{children}</div></div>
 }
-function Seg({ value, options, onChange }: { value: string; options: [string, string][]; onChange: (v: string) => void }) {
+function Seg<T extends string | number>({ value, options, onChange, label }: { value: T; options: [T, string][]; onChange: (v: T) => void; label: string }) {
   return (
-    <div className="seg small">
-      {options.map(([k, label]) => <button key={k} className={value === k ? 'on' : ''} aria-pressed={value === k} onClick={() => onChange(k)}>{label}</button>)}
+    <div className="seg small" role="radiogroup" aria-label={label}>
+      {options.map(([k, l]) => <button key={String(k)} role="radio" className={value === k ? 'on' : ''} aria-checked={value === k} onClick={() => value !== k && onChange(k)}>{l}</button>)}
     </div>
   )
 }
-function Toggle({ label, hint, value, onChange }: { label: string; hint?: string; value: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <div className="s-row">
-      <div><strong>{label}</strong>{hint && <small>{hint}</small>}</div>
-      <button className={`switch ${value ? 'on' : ''}`} role="switch" aria-checked={value} aria-label={label} onClick={() => onChange(!value)}><i /></button>
-    </div>
-  )
+function Switch({ value, onChange, label }: { value: boolean; onChange: (v: boolean) => void; label: string }) {
+  return <button className={`switch ${value ? 'on' : ''}`} role="switch" aria-checked={value} aria-label={label} onClick={() => onChange(!value)}><i /></button>
 }
-function TextPref({ label, hint, value, onSave }: { label: string; hint?: string; value: string; onSave: (v: string) => void }) {
-  const { t } = useI18n()
+function Toggle({ k, label, hint, def = true }: { k: string; label: string; hint?: string; def?: boolean }) {
+  const { prefs, save } = usePrefs()
+  const v = prefs[k] === undefined ? def : !!prefs[k]
+  return <Row label={label} hint={hint}><Switch value={v} label={label} onChange={(x) => save({ preferences: { [k]: x } })} /></Row>
+}
+function Choice<T extends string | number>({ k, label, hint, options, def }: { k: string; label: string; hint?: string; options: [T, string][]; def: T }) {
+  const { prefs, save } = usePrefs()
+  const raw = prefs[k]
+  // Numbers may come back as strings (or the other way round); compare loosely.
+  const v = (options.find(([o]) => String(o) === String(raw))?.[0] ?? def) as T
+  return <Row label={label} hint={hint}><Seg value={v} options={options} label={label} onChange={(x) => save({ preferences: { [k]: x } })} /></Row>
+}
+function TextPref({ label, hint, value, placeholder, onSave, max = 40 }: { label: string; hint?: string; value: string; placeholder?: string; onSave: (v: string) => Promise<boolean> | void; max?: number }) {
   const [v, setV] = useState(value)
+  useEffect(() => setV(value), [value])
+  const commit = () => { if (v.trim() !== value) onSave(v.trim()) }
   return (
     <Row label={label} hint={hint}>
-      <div className="inline-form">
-        <input className="input" value={v} onChange={(e) => setV(e.target.value)} maxLength={80} />
-        <button className="btn btn-soft btn-sm" disabled={v === value} onClick={() => onSave(v.trim())}>{t.settings.save}</button>
-      </div>
+      <input className="input s-input" value={v} placeholder={placeholder} maxLength={max} onChange={(e) => setV(e.target.value)}
+        onBlur={commit} onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />
     </Row>
   )
 }
+const ent = <T extends Record<string, string>>(o: T) => Object.entries(o) as [keyof T & string, string][]
 
-function Profile({ data, save }: { data: SettingsData; save: (p: { name?: string }) => void }) {
+// ── sections ──────────────────────────────────────────────────────────────
+function Profile() {
   const { t, lang } = useI18n()
-  const [name, setName] = useState(data.user.name)
-  const role = { client: lang === 'zh' ? '客户' : 'Client', attorney: lang === 'zh' ? '律师' : 'Attorney', physician: lang === 'zh' ? '医生' : 'Physician', admin: lang === 'zh' ? '管理员' : 'Admin' }[data.user.role]
+  const { data, prefs, save } = usePrefs()
+  const u = data!.user
   return (
     <Card>
-      <div className="profile-head">
-        <span className="me-avatar lg">{(data.user.name || data.user.email).slice(0, 1).toUpperCase()}</span>
-        <div><strong>{data.user.name || data.user.email}</strong><small>{data.user.email}</small></div>
+      <div className="s-profile">
+        <span className="me-avatar lg">{(u.name || u.email || '?').slice(0, 1).toUpperCase()}</span>
+        <div><strong>{u.name || u.email}</strong><small>{u.email} {u.email_verified && <span className="ok-tag"><IconCheck size={12} /></span>}</small></div>
       </div>
-      <Row label={t.settings.name}>
-        <div className="inline-form">
-          <input className="input" value={name} onChange={(e) => setName(e.target.value)} maxLength={80} />
-          <button className="btn btn-ink btn-sm" disabled={name === data.user.name} onClick={() => save({ name })}>{t.settings.save}</button>
-        </div>
+      <TextPref label={t.settings.displayName} hint={t.settings.displayHint} value={u.name || ''} max={80} onSave={(v) => save({ name: v })} />
+      <Row label={t.settings.language}>
+        <Seg<Lang> value={(prefs.language || lang) as Lang} label={t.settings.language} options={[['en', 'English'], ['zh', '中文']]} onChange={(v) => save({ preferences: { language: v } })} />
       </Row>
-      <Row label={t.settings.email}><span>{data.user.email} {data.user.email_verified && <span className="ok-tag">✓</span>}</span></Row>
-      <Row label={t.settings.role}><span>{role}{data.user.licensed && <span className="ok-tag"> ✓ {t.settings.lic.verified}</span>}</span></Row>
-      <Row label={t.settings.joined}><span>{fmtTime(data.user.created_at, lang)}</span></Row>
+      <Row label={t.settings.joined}><span className="s-value">{new Date(u.created_at).toLocaleDateString(lang === 'zh' ? 'zh-CN' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</span></Row>
     </Card>
   )
 }
 
-function Privacy({ prefs, save }: { prefs: Record<string, any>; save: (p: { preferences: Record<string, any> }) => void }) {
+function AoiPrefs() {
+  const { t, lang } = useI18n()
+  const { prefs, save } = usePrefs()
+  const tone = prefs.aoi_tone || 'playful'
+  const zh = lang === 'zh'
+  const preview: Record<string, [string, any]> = {
+    playful: [zh ? '「加注？好大胆，我喜欢。」' : '“Ooh, a raise? Brave. I like brave.”', 'wink'],
+    calm: [zh ? '「慢慢来，底池不会跑。」' : '“Take your time. The pot will wait.”', 'neutral'],
+    competitive: [zh ? '「跟。亮出你的底牌吧。」' : '“Call. Show me what you’ve got.”', 'angry'],
+  }
+  return (
+    <>
+      <div className="aoi-preview">
+        <AoiFace mood={preview[tone]?.[1] || 'smile'} size={52} ring />
+        <p>{preview[tone]?.[0]}</p>
+      </div>
+      <Card>
+        <Choice k="aoi_tone" label={t.settings.aoiTone} def="playful" options={ent(t.settings.tones)} />
+        <Choice k="aoi_talk" label={t.settings.aoiTalk} def="normal" options={ent(t.settings.talks)} />
+        <Toggle k="aoi_coaching" label={t.settings.coaching} hint={t.settings.coachingHint} def={false} />
+        <TextPref label={t.settings.callMe} hint={t.settings.callMeHint} placeholder={t.settings.callMePh} value={prefs.call_me || ''} onSave={(v) => save({ preferences: { call_me: v } })} />
+        <Toggle k="memory_enabled" label={t.settings.memory} hint={t.settings.memoryHint} />
+      </Card>
+      <VoicePrefs />
+    </>
+  )
+}
+
+// Aoi's voice. Hidden entirely when the server has no voice configured.
+function VoicePrefs() {
+  const { t } = useI18n()
+  const { prefs, save } = usePrefs()
+  const voice = useVoice()
+  const saved = Number(prefs.voice_volume ?? 80)
+  const [vol, setVol] = useState(saved)
+  const timer = useRef(0)
+  useEffect(() => setVol(saved), [saved])
+  if (!voice.enabled) return null
+  const on = prefs.aoi_voice !== false
+  const sampling = voice.key === 'sample' && (voice.speaking || voice.loading)
+  const onVol = (v: number) => {
+    setVol(v)
+    setVoiceVolume(v) // hear it change right away; save once the hand stops
+    window.clearTimeout(timer.current)
+    timer.current = window.setTimeout(() => { if (v !== saved) save({ preferences: { voice_volume: v } }) }, 450)
+  }
+  return (
+    <Card title={t.settings.voice}>
+      <Toggle k="aoi_voice" label={t.settings.voiceOn} hint={t.settings.voiceHint} />
+      {on && (
+        <>
+          <Toggle k="voice_autoplay" label={t.settings.autoplay} hint={t.settings.autoplayHint} def={false} />
+          <Toggle k="table_voice" label={t.settings.tableVoice} hint={t.settings.tableVoiceHint} def={false} />
+          <Row label={t.settings.volume}>
+            <div className="vol">
+              <input type="range" min={0} max={100} step={5} value={vol} onChange={(e) => onVol(Number(e.target.value))} aria-label={t.settings.volume}
+                style={{ ['--v' as any]: `${vol}%` }} />
+              <span>{vol}</span>
+            </div>
+          </Row>
+          <div className="s-row">
+            <div className="s-label hear">
+              <AoiFace mood="smile" size={40} speaking={sampling && voice.speaking} />
+              <small>{t.settings.sample}</small>
+            </div>
+            <button className="btn btn-soft btn-sm" onClick={() => (sampling ? stopVoice() : speak(t.settings.sample, 'sample'))}>
+              {sampling ? <IconStop size={14} /> : <IconSpeaker size={15} />} {t.settings.hear}
+            </button>
+          </div>
+        </>
+      )}
+    </Card>
+  )
+}
+
+function Swatches({ k, def, options, kind }: { k: string; def: string; options: [string, string][]; kind: 'back' | 'felt' }) {
+  const { prefs, save } = usePrefs()
+  const v = prefs[k] || def
+  return (
+    <div className="swatches" role="radiogroup">
+      {options.map(([id, label]) => (
+        <button key={id} role="radio" aria-checked={v === id} className={`swatch ${v === id ? 'on' : ''}`} onClick={() => v !== id && save({ preferences: { [k]: id } })}>
+          <span className={kind === 'back' ? `cardback cb-${id}` : `sw-felt sw-felt-${id}`}>{kind === 'back' && id === 'aoi' && <i>葵</i>}</span>
+          <small>{label}</small>
+          {v === id && <span className="sw-check"><IconCheck size={11} /></span>}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function TablePrefs() {
+  const { t, f } = useI18n()
+  return (
+    <>
+      <Card>
+        <Choice<number> k="turn_seconds" label={t.settings.turnClock} hint={`${t.settings.turnHint} ${t.settings.noClockHint}`} def={30}
+          options={[[15, f(t.settings.secs, { n: 15 })], [30, f(t.settings.secs, { n: 30 })], [60, f(t.settings.secs, { n: 60 })], [0, t.settings.noClock]]} />
+        <Choice k="agent_speed" label={t.settings.agentSpeed} def="natural" options={ent(t.settings.speeds)} />
+        <Choice k="table_talk" label={t.settings.tableTalk} def="all" options={ent(t.settings.talkModes)} />
+      </Card>
+      <Card>
+        <Toggle k="four_color_deck" label={t.settings.fourColor} hint={t.settings.fourColorHint} def={false} />
+        <Toggle k="auto_muck" label={t.settings.autoMuck} />
+        <Toggle k="show_hand_strength" label={t.settings.handStrength} />
+        <Toggle k="sound" label={t.settings.sound} />
+        <Choice k="motion" label={t.settings.motion} def="full" options={ent(t.settings.motions)} />
+      </Card>
+      <Card>
+        <Row label={t.settings.cardBack} stack><Swatches k="card_back" def="aoi" kind="back" options={ent(t.settings.backs)} /></Row>
+        <Row label={t.settings.felt} stack><Swatches k="felt" def="navy" kind="felt" options={ent(t.settings.felts)} /></Row>
+      </Card>
+    </>
+  )
+}
+
+function AgentPrefs() {
+  const { t, lang } = useI18n()
+  const { prefs, save } = usePrefs()
+  const [agents, setAgents] = useState<Agent[]>(ROSTER)
+  useEffect(() => {
+    api.get<Agent[]>('/api/agents').then((a) => Array.isArray(a) && a.length && setAgents(a)).catch(() => {})
+  }, [])
+  const fav: string[] = Array.isArray(prefs.favorite_agents) ? prefs.favorite_agents : []
+  const flip = (id: string) => save({ preferences: { favorite_agents: fav.includes(id) ? fav.filter((x) => x !== id) : [...fav, id] } })
+  return (
+    <>
+      <Card>
+        <Choice k="agent_difficulty" label={t.settings.difficulty} def="regular" options={ent(t.settings.difficulties)} />
+        <Toggle k="fill_empty_seats" label={t.settings.fill} hint={t.settings.fillHint} />
+      </Card>
+      <Card title={t.settings.favourites}>
+        <p className="muted s-sub">{t.settings.favouritesHint}</p>
+        <div className="agent-grid">
+          {agents.map((a) => {
+            const on = fav.includes(a.id)
+            const name = lang === 'zh' ? a.name_zh || a.name : a.name
+            return (
+              <button key={a.id} className={`agent-pick ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => flip(a.id)}>
+                <AgentAvatar id={a.id} name={a.name} src={a.avatar} size={52} />
+                <span className="ap-text">
+                  <strong>{name}</strong>
+                  <small>{lang === 'zh' ? a.title_zh || a.title : a.title}</small>
+                </span>
+                <span className="ap-star"><IconStar size={16} /></span>
+              </button>
+            )
+          })}
+        </div>
+      </Card>
+    </>
+  )
+}
+
+function StudioPrefs() {
+  const { t } = useI18n()
+  return (
+    <Card>
+      <Choice k="studio_visibility" label={t.settings.studioVis} def="private" options={ent(t.studio.vis)} />
+      <Choice<number> k="playtest_games" label={t.settings.playtests} hint={t.settings.playtestHint} def={200} options={[[50, '50'], [200, '200'], [500, '500']]} />
+    </Card>
+  )
+}
+
+function NotifyPrefs() {
+  const { t } = useI18n()
+  return (
+    <Card>
+      <Toggle k="email_table_invites" label={t.settings.emailInvites} />
+      <Toggle k="email_your_turn" label={t.settings.emailTurn} />
+      <Toggle k="email_build_done" label={t.settings.emailBuild} />
+    </Card>
+  )
+}
+
+function Appearance() {
+  const { t } = useI18n()
+  const { prefs, save } = usePrefs()
+  const theme = prefs.theme || 'dark'
+  return (
+    <Card>
+      <Row label={t.settings.theme} stack>
+        <div className="theme-picks" role="radiogroup">
+          {(['dark', 'light', 'system'] as const).map((k) => (
+            <button key={k} role="radio" aria-checked={theme === k} className={`theme-pick tp-${k} ${theme === k ? 'on' : ''}`} onClick={() => theme !== k && save({ preferences: { theme: k } })}>
+              <span className="tp-art"><i /><i /><i /></span>
+              <small>{t.settings.themes[k]}</small>
+            </button>
+          ))}
+        </div>
+      </Row>
+      <Choice k="font_size" label={t.settings.fontSize} def="medium" options={ent(t.settings.sizes)} />
+    </Card>
+  )
+}
+
+function Privacy() {
   const { t } = useI18n()
   const nav = useNavigate()
-  const [mem, setMem] = useState<{ id: string; content: string; created_at: string }[]>([])
+  const toast = useToast()
+  const [mem, setMem] = useState<{ id: string; content: string; created_at: string }[] | null>(null)
   const [pw, setPw] = useState('')
   const [err, setErr] = useState('')
-  const load = () => api.get<typeof mem>('/api/memories').then(setMem).catch(() => {})
+  const load = () => api.get<typeof mem>('/api/memories').then((m) => setMem(m || [])).catch(() => setMem([]))
   useEffect(() => { load() }, [])
   const forget = async (id?: string) => {
-    if (!id && !confirm(t.settings.forgetAll + '?')) return
-    await api.del(id ? `/api/memories/${id}` : '/api/memories')
+    if (!id && !confirm(t.settings.confirmForgetAll)) return
+    try {
+      await api.del(id ? `/api/memories/${id}` : '/api/memories')
+      toast(t.settings.saved)
+    } catch (e: any) {
+      toast(e.message, 'error')
+    }
     load()
   }
   const del = async () => {
@@ -201,23 +360,21 @@ function Privacy({ prefs, save }: { prefs: Record<string, any>; save: (p: { pref
   }
   return (
     <>
-      <Card>
-        <Toggle label={t.settings.memory} hint={t.settings.memoryHint} value={prefs.memory_enabled !== false} onChange={(v) => save({ preferences: { memory_enabled: v } })} />
-      </Card>
+      <Card><Toggle k="memory_enabled" label={t.settings.memory} hint={t.settings.memoryHint} /></Card>
       <Card title={t.settings.memories}>
-        {mem.length === 0 ? <p className="muted">{t.settings.noMemories}</p> : (
+        {mem === null ? <p className="muted">{t.common.loading}</p> : mem.length === 0 ? <p className="muted">{t.settings.noMemories}</p> : (
           <ul className="mem-list">
             {mem.map((m) => <li key={m.id}><span>{m.content}</span><button className="btn btn-ghost btn-sm" onClick={() => forget(m.id)}>{t.settings.forget}</button></li>)}
           </ul>
         )}
-        {mem.length > 0 && <button className="btn btn-danger btn-sm" onClick={() => forget()}>{t.settings.forgetAll}</button>}
+        {mem && mem.length > 0 && <button className="btn btn-danger btn-sm" onClick={() => forget()}>{t.settings.forgetAll}</button>}
       </Card>
       <Card title={t.settings.export}>
-        <p className="muted">{t.settings.exportHint} <a href="/privacy" target="_blank" rel="noopener">{t.settings.policy}</a></p>
+        <p className="muted s-sub">{t.settings.exportHint} <a href="/privacy" target="_blank" rel="noopener">{t.settings.policy}</a></p>
         <a className="btn btn-soft btn-sm" href="/api/account/export" download>{t.settings.export}</a>
       </Card>
       <Card title={t.settings.deleteAccount} danger>
-        <p className="muted">{t.settings.deleteHint}</p>
+        <p className="muted s-sub">{t.settings.deleteHint}</p>
         {err && <div className="alert alert-error">{err}</div>}
         <div className="inline-form">
           <input className="input" type="password" placeholder={t.settings.deleteConfirm} value={pw} onChange={(e) => setPw(e.target.value)} autoComplete="current-password" />
@@ -230,11 +387,12 @@ function Privacy({ prefs, save }: { prefs: Record<string, any>; save: (p: { pref
 
 function Security() {
   const { t, lang } = useI18n()
+  const toast = useToast()
   const [cur, setCur] = useState('')
   const [next, setNext] = useState('')
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null)
-  const [sessions, setSessions] = useState<{ id: string; user_agent: string; ip: string; last_seen_at: string; current: boolean }[]>([])
-  const load = () => api.get<typeof sessions>('/api/account/sessions').then(setSessions).catch(() => {})
+  const [sessions, setSessions] = useState<{ id: string; user_agent: string; ip: string; last_seen_at: string; current: boolean }[] | null>(null)
+  const load = () => api.get<NonNullable<typeof sessions>>('/api/account/sessions').then((s) => setSessions(s || [])).catch(() => setSessions([]))
   useEffect(() => { load() }, [])
   const change = async () => {
     setMsg(null)
@@ -247,6 +405,16 @@ function Security() {
       setMsg({ ok: false, text: e.message })
     }
   }
+  const revoke = async (path: string, post?: boolean) => {
+    try {
+      if (post) await api.post(path)
+      else await api.del(path)
+      toast(t.settings.saved)
+    } catch (e: any) {
+      toast(e.message, 'error')
+    }
+    load()
+  }
   return (
     <>
       <Card title={t.settings.password}>
@@ -254,19 +422,21 @@ function Security() {
         <div className="stack">
           <PasswordInput label={t.settings.current} value={cur} onChange={setCur} autoComplete="current-password" />
           <PasswordInput label={t.settings.next} value={next} onChange={setNext} autoComplete="new-password" showMeter />
-          <button className="btn btn-ink btn-sm" style={{ justifySelf: 'start' }} disabled={!cur || [...next].length < 10} onClick={change}>{t.settings.updatePw}</button>
+          <button className="btn btn-primary btn-sm" style={{ justifySelf: 'start' }} disabled={!cur || [...next].length < 10} onClick={change}>{t.settings.updatePw}</button>
         </div>
       </Card>
       <Card title={t.settings.sessions}>
-        <ul className="sess-list">
-          {sessions.map((s) => (
-            <li key={s.id}>
-              <div><strong>{device(s.user_agent)}</strong><small>{s.ip} · {t.settings.lastSeen} {fmtTime(s.last_seen_at, lang)}</small></div>
-              {s.current ? <span className="ok-tag">{t.settings.thisDevice}</span> : <button className="btn btn-ghost btn-sm" onClick={async () => { await api.del(`/api/account/sessions/${s.id}`); load() }}>{t.settings.revoke}</button>}
-            </li>
-          ))}
-        </ul>
-        {sessions.length > 1 && <button className="btn btn-danger btn-sm" onClick={async () => { await api.post('/api/account/sessions/revoke-others'); load() }}>{t.settings.revokeOthers}</button>}
+        {sessions === null ? <p className="muted">{t.common.loading}</p> : (
+          <ul className="sess-list">
+            {sessions.map((s) => (
+              <li key={s.id}>
+                <div><strong>{device(s.user_agent)}</strong><small>{s.ip} · {t.settings.lastSeen} {fmtTime(s.last_seen_at, lang)}</small></div>
+                {s.current ? <span className="ok-tag">{t.settings.thisDevice}</span> : <button className="btn btn-ghost btn-sm" onClick={() => revoke(`/api/account/sessions/${s.id}`)}>{t.settings.revoke}</button>}
+              </li>
+            ))}
+          </ul>
+        )}
+        {sessions && sessions.length > 1 && <button className="btn btn-danger btn-sm" onClick={() => revoke('/api/account/sessions/revoke-others', true)}>{t.settings.revokeOthers}</button>}
       </Card>
     </>
   )
@@ -278,103 +448,57 @@ function device(ua: string) {
   return `${b}${o ? ' · ' + o : ''}`
 }
 
-function Limits({ prefs, save }: { prefs: Record<string, any>; save: (p: { preferences: Record<string, any> }) => void }) {
-  const { t } = useI18n()
-  const [u, setU] = useState<{ tokens_today: number; tokens_month: number } | null>(null)
-  const [cost, setCost] = useState(String(prefs.goal_max_cost_usd ?? 20))
-  const [days, setDays] = useState(String(prefs.goal_max_days ?? 30))
-  useEffect(() => { api.get<typeof u>('/api/account/usage').then(setU).catch(() => {}) }, [])
+function Usage() {
+  const { t, lang } = useI18n()
+  const { prefs, save } = usePrefs()
+  const [u, setU] = useState<{ tokens_today: number; tokens_month: number; goals?: { id: string; title: string; status: string; usage: any; limits: any }[] | null } | null>(null)
+  const [err, setErr] = useState(false)
+  useEffect(() => { api.get<NonNullable<typeof u>>('/api/account/usage').then(setU).catch(() => setErr(true)) }, [])
+  const fmt = (n: number) => (n || 0).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US')
   return (
     <>
       <Card>
-        <p className="muted">{t.settings.limitsHint}</p>
-        <Row label={t.settings.maxCost}>
-          <div className="inline-form"><input className="input narrow" type="number" min={1} max={200} value={cost} onChange={(e) => setCost(e.target.value)} />
-            <button className="btn btn-soft btn-sm" onClick={() => save({ preferences: { goal_max_cost_usd: Number(cost) } })}>{t.settings.save}</button></div>
-        </Row>
-        <Row label={t.settings.maxDays}>
-          <div className="inline-form"><input className="input narrow" type="number" min={1} max={180} value={days} onChange={(e) => setDays(e.target.value)} />
-            <button className="btn btn-soft btn-sm" onClick={() => save({ preferences: { goal_max_days: Number(days) } })}>{t.settings.save}</button></div>
-        </Row>
-      </Card>
-      {u && (
-        <Card>
-          <div className="usage big">
-            <span><b>{u.tokens_today.toLocaleString()}</b> {t.settings.tokens}<small>{t.settings.today}</small></span>
-            <span><b>{u.tokens_month.toLocaleString()}</b> {t.settings.tokens}<small>{t.settings.month}</small></span>
+        <p className="muted s-sub">{t.settings.usageHint}</p>
+        {u ? (
+          <div className="usage-tiles">
+            <div><small>{t.settings.today}</small><b>{fmt(u.tokens_today)}</b><span>{t.settings.tokens}</span></div>
+            <div><small>{t.settings.month}</small><b>{fmt(u.tokens_month)}</b><span>{t.settings.tokens}</span></div>
           </div>
-        </Card>
-      )}
-    </>
-  )
-}
-
-function Pro({ data, reload }: { data: SettingsData; reload: () => void }) {
-  const { t } = useI18n()
-  const [kind, setKind] = useState('bar')
-  const [number, setNumber] = useState('')
-  const [jur, setJur] = useState('')
-  const [err, setErr] = useState('')
-  const submit = async () => {
-    setErr('')
-    try {
-      await api.post('/api/account/license', { kind, number, jurisdiction: jur })
-      setNumber(''); setJur('')
-      reload()
-    } catch (e: any) {
-      setErr(e.message)
-    }
-  }
-  return (
-    <>
-      <Card title={t.settings.proTitle}>
-        <p className="muted">{t.settings.proSub}</p>
-        {err && <div className="alert alert-error">{err}</div>}
-        <div className="stack">
-          <label className="field"><span>{t.settings.kind}</span>
-            <select className="select" value={kind} onChange={(e) => setKind(e.target.value)}>
-              <option value="bar">{t.settings.bar}</option>
-              <option value="medical">{t.settings.medical}</option>
-            </select>
-          </label>
-          <label className="field"><span>{t.settings.number}</span><input className="input" value={number} onChange={(e) => setNumber(e.target.value)} /></label>
-          <label className="field"><span>{t.settings.jur}</span><input className="input" value={jur} onChange={(e) => setJur(e.target.value)} placeholder="CA / NY / 上海" /></label>
-          <button className="btn btn-ink btn-sm" style={{ justifySelf: 'start' }} disabled={!number || !jur} onClick={submit}>{t.settings.submit}</button>
-        </div>
+        ) : <p className="muted">{err ? t.settings.offline : t.common.loading}</p>}
       </Card>
-      {(data.licenses || []).length > 0 && (
-        <Card>
+      {u?.goals && u.goals.length > 0 && (
+        <Card title={t.settings.missions}>
           <ul className="sess-list">
-            {data.licenses!.map((l) => (
-              <li key={l.id}><div><strong>{l.kind === 'bar' ? t.settings.bar : t.settings.medical}</strong><small>{l.number} · {l.jurisdiction}</small></div>
-                <span className={`lic lic-${l.status}`}>{t.settings.lic[l.status]}</span></li>
+            {u.goals.slice(0, 8).map((g) => (
+              <li key={g.id}>
+                <div><strong>{g.title}</strong><small>{t.mission.status[g.status as keyof typeof t.mission.status] || g.status}</small></div>
+                <span className="s-value">${Number(g.usage?.cost_usd || 0).toFixed(2)}{g.limits?.max_cost_usd ? ` / $${g.limits.max_cost_usd}` : ''}</span>
+              </li>
             ))}
           </ul>
         </Card>
       )}
+      <Card>
+        <p className="muted s-sub">{t.settings.limitsHint}</p>
+        <NumPref label={t.settings.maxCost} value={prefs.goal_max_cost_usd ?? 20} min={1} max={200} onSave={(n) => save({ preferences: { goal_max_cost_usd: n } })} />
+        <NumPref label={t.settings.maxDays} value={prefs.goal_max_days ?? 30} min={1} max={180} onSave={(n) => save({ preferences: { goal_max_days: n } })} />
+      </Card>
     </>
   )
 }
 
-function Admin() {
-  const { t } = useI18n()
-  const [rows, setRows] = useState<{ id: string; kind: string; number: string; jurisdiction: string; status: 'pending' | 'verified' | 'rejected'; name: string; email: string }[]>([])
-  const load = () => api.get<typeof rows>('/api/admin/licenses').then(setRows).catch(() => {})
-  useEffect(() => { load() }, [])
-  const decide = async (id: string, verify: boolean) => { await api.post(`/api/admin/licenses/${id}`, { verify }); load() }
+function NumPref({ label, value, min, max, onSave }: { label: string; value: number; min: number; max: number; onSave: (n: number) => void }) {
+  const [v, setV] = useState(String(value))
+  useEffect(() => setV(String(value)), [value])
+  const commit = () => {
+    const n = Math.max(min, Math.min(max, Math.round(Number(v) || min)))
+    setV(String(n))
+    if (n !== value) onSave(n)
+  }
   return (
-    <Card title={t.settings.adminTitle}>
-      <ul className="sess-list">
-        {rows.map((r) => (
-          <li key={r.id}>
-            <div><strong>{r.name || r.email} · {r.kind === 'bar' ? t.settings.bar : t.settings.medical}</strong><small>{r.email} · {r.number} · {r.jurisdiction}</small></div>
-            {r.status === 'pending' ? (
-              <span className="inline-form"><button className="btn btn-ember btn-sm" onClick={() => decide(r.id, true)}>{t.settings.verify}</button>
-                <button className="btn btn-ghost btn-sm" onClick={() => decide(r.id, false)}>{t.settings.reject}</button></span>
-            ) : <span className={`lic lic-${r.status}`}>{t.settings.lic[r.status]}</span>}
-          </li>
-        ))}
-      </ul>
-    </Card>
+    <Row label={label}>
+      <input className="input s-input narrow" type="number" min={min} max={max} value={v} onChange={(e) => setV(e.target.value)} onBlur={commit}
+        onKeyDown={(e) => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />
+    </Row>
   )
 }

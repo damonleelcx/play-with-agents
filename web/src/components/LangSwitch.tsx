@@ -3,7 +3,7 @@ import { useI18n, type Lang } from '../lib/i18n'
 import { useSession } from '../lib/session'
 
 // EN / 中文 toggle. For a signed-in user the choice is also saved to their
-// preferences, so Vera's emails and replies follow it.
+// preferences, so Aoi's emails and replies follow it.
 export default function LangSwitch() {
   const { lang, setLang } = useI18n()
   const { user } = useSession()

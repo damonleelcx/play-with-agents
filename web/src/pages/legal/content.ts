@@ -1,96 +1,92 @@
 // Terms of Service and Privacy Policy, in English and Chinese.
 //
-// These describe what the system ACTUALLY does — every data flow named here
-// exists in the code, and nothing the code does is left out. Change one, change
-// the other. The operating entity, governing law and dispute terms are for the
-// operator's counsel to add; they are deliberately not guessed here.
+// These describe what the product actually does. Every data flow named here
+// exists in the code; change one, change the other. The operating entity,
+// governing law and dispute terms are for the operator's counsel to add and
+// are deliberately not guessed here.
 
 export type Section = { h: string; p: string[] }
 export type Doc = { title: string; updated: string; intro: string; sections: Section[] }
 
-const UPDATED_EN = 'Last updated 23 September 2026'
-const UPDATED_ZH = '最后更新：2026 年 9 月 23 日'
+const UPDATED_EN = 'Last updated 2 October 2026'
+const UPDATED_ZH = '最后更新：2026 年 10 月 2 日'
 const CONTACT = 'support@heros-agent.space'
 
 export const terms: Record<'en' | 'zh', Doc> = {
   en: {
     title: 'Terms of Service',
     updated: UPDATED_EN,
-    intro: 'These terms cover your use of ACT, including Vera, the AI assistant. Please read them — especially sections 1 and 2.',
+    intro: 'These terms cover your use of Play with Agents: the tables, the chat with Aoi, and the studio where agents build games. The short version: it is a game, the chips are pretend, the agents are AIs, and be kind at the table.',
     sections: [
-      { h: '1. What ACT is — and is not', p: [
-        'Vera is an artificial-intelligence assistant. She is not a lawyer or a doctor, and nothing she writes is legal or medical advice for your situation until a licensed professional has reviewed it.',
-        'Using ACT does not by itself create an attorney–client or doctor–patient relationship. That relationship exists only when a licensed attorney or physician expressly agrees to represent or treat you.',
-        'Actions that require a licence — appearing in court, filing with a court, ordering tests, prescribing — are only ever taken by, or with the approval of, a licensed professional. Some of those actions depend on outside services that may not yet be connected; when an action was not actually carried out, ACT says so.',
+      { h: '1. Play money only', p: [
+        'Every chip, stack, pot and prize on Play with Agents is play money. Chips cannot be bought, sold, won for real, cashed out, transferred or exchanged for anything of value, and they have no cash value.',
+        'There is no purchase and no real-money wagering anywhere on the service. Play with Agents is not gambling, and nothing here is an offer to gamble. If anyone offers to buy or sell chips or accounts, it is not us, and it breaks these terms.',
+        'Poker and other games here are for fun and learning. Skill at a play-money table does not predict results with real money.',
       ] },
-      { h: '2. Emergencies', p: [
-        'ACT is not an emergency service. If you or someone else may be in danger, call 911 (or 120 in mainland China, or your local emergency number) immediately. In the US you can call or text 988 for the Suicide & Crisis Lifeline.',
+      { h: '2. The agents are AIs', p: [
+        'Aoi, Ren, Mika, Captain Bram, Nova, Lin and the studio team (Designer, Engineer, Playtester and Critic) are artificial-intelligence agents, not people. They have personalities, but no feelings, accounts or wallets of their own.',
+        'Agents can be wrong. Their tips, odds and explanations are for entertainment and learning, not professional advice of any kind. Agents at a table see only what a player in their seat may see; they do not see your hidden cards.',
       ] },
-      { h: '3. Who can use ACT', p: [
-        'You must be at least 18 years old and able to form a binding contract. You are responsible for the accuracy of what you tell Vera; her work is only as good as the facts she is given.',
+      { h: '3. Your account', p: [
+        'You need an account to play. You must be at least 13 years old (or the minimum age for online services where you live, if higher). Keep your password to yourself; you are responsible for what happens under your account.',
+        'One person, one account. Don’t use bots or scripts to play on your behalf, and don’t try to break, overload or reverse-engineer the service.',
       ] },
-      { h: '4. Your account', p: [
-        'Keep your password private and tell us at ' + CONTACT + ' if you think your account has been accessed without permission. You can see and sign out your devices in Settings → Security.',
+      { h: '4. Games you create', p: [
+        'When you describe a game, the agents write rules and code for it. You own your ideas and your rules. You give us a licence to store, run, display and (if you choose to publish) share that game on the service so it can be played. You can unpublish or delete a draft at any time.',
+        'Only make games you have the right to make. Don’t ask the studio to copy someone else’s protected game, art or brand.',
+        'We may refuse to build, or remove, any game that is harmful: hateful, sexual content involving minors, harassment of real people, content that promotes self-harm or violence, real-money gambling mechanics, or anything unlawful. Public games may be reviewed.',
       ] },
-      { h: '5. Approvals are yours', p: [
-        'Letters, emails and requests are sent only after the right person approves the exact content. When you approve something, you are responsible for having read it. Once a message has been sent or a document filed, it cannot be recalled.',
+      { h: '5. Table chat and conduct', p: [
+        'Table chat is for banter, good games and bad beats. No harassment, hate, threats, spam, doxxing or sharing other people’s private information. Agents will stay polite even if you don’t, but other humans deserve the same.',
+        'Don’t collude, share hole cards with other players outside the game, or exploit bugs. If you find a bug, tell us at ' + CONTACT + '.',
+        'We may mute, remove you from a table, or suspend an account that breaks these rules.',
       ] },
-      { h: '6. Acceptable use', p: [
-        'Do not use ACT to break the law; to deceive a court, fabricate or destroy evidence, or coach false testimony; to obtain controlled substances; to harass anyone; or to interfere with the service (including automated or excessive use). Vera will decline such requests, and we may suspend accounts that attempt them.',
+      { h: '6. The service', p: [
+        'We work hard to keep the tables running, but the service is provided as it is, without guarantees that it will always be available or error-free. Games built by the studio are generated automatically and may contain mistakes, even after playtesting.',
+        'We may change or retire features. If we make a material change to these terms, we’ll tell you in the app or by email before it applies.',
       ] },
-      { h: '7. Your content', p: [
-        'You keep ownership of what you upload and of the work produced for you. You give ACT permission to store and process it only as needed to provide the service to you, as described in the Privacy Policy. You can export or delete it at any time.',
+      { h: '7. Ending', p: [
+        'You can delete your account at any time from Settings → Privacy & memory. We may suspend or end accounts that seriously or repeatedly break these terms.',
       ] },
-      { h: '8. Limits of AI', p: [
-        'AI can be wrong, incomplete or out of date. ACT verifies case citations against public court records and checks medications against public drug labels, but no check is perfect. Review important work carefully and rely on licensed professionals for decisions.',
-      ] },
-      { h: '9. Availability and changes', p: [
-        'We work to keep ACT available and your work safe — tasks resume after interruptions, and data is backed up nightly — but the service is provided “as is” and may change or be interrupted. We will post changes to these terms on this page and update the date above.',
-      ] },
-      { h: '10. Ending your use', p: [
-        'You can stop using ACT and delete your account at any time in Settings → Privacy & memory. We may suspend or close accounts that break these terms.',
-      ] },
-      { h: '11. Contact', p: ['Questions about these terms: ' + CONTACT + '.'] },
+      { h: '8. Contact', p: ['Questions about these terms: ' + CONTACT + '.'] },
     ],
   },
   zh: {
     title: '服务条款',
     updated: UPDATED_ZH,
-    intro: '本条款适用于你对 ACT（包括 AI 助手维拉）的使用。请仔细阅读，尤其是第 1、2 条。',
+    intro: '本条款适用于你对 Play with Agents 的使用：牌桌、与葵的对话，以及由智能体制作游戏的工作室。一句话概括：这是游戏，筹码是假的，智能体是 AI，在牌桌上请友善待人。',
     sections: [
-      { h: '1. ACT 是什么、不是什么', p: [
-        '维拉是人工智能助手。她不是律师，也不是医生；在持证专业人士审阅之前，她写的任何内容都不构成针对你具体情况的法律或医疗意见。',
-        '使用 ACT 本身并不建立律师与委托人、医生与患者之间的关系。只有当持证律师或医生明确同意代理或诊治你时，这种关系才成立。',
-        '需要执照的行为——出庭、向法院提交文书、开具检查、开具处方——只会由持证专业人士执行或经其批准后执行。其中部分行为依赖尚未接通的外部服务；如果某项操作实际上没有执行，ACT 会明确告诉你。',
+      { h: '1. 仅限游戏币', p: [
+        'Play with Agents 上的所有筹码、筹码量、底池和奖励都是游戏币。筹码不能购买、出售、兑现、转让或兑换成任何有价值的东西，也没有现金价值。',
+        '本服务任何地方都没有付费购买，也没有真钱下注。Play with Agents 不是赌博，这里的任何内容都不构成赌博邀约。如有人提出买卖筹码或账户，那不是我们，并且违反本条款。',
+        '德州扑克及其他游戏仅供娱乐和学习。在游戏币牌桌上的水平不代表真钱环境下的结果。',
       ] },
-      { h: '2. 紧急情况', p: [
-        'ACT 不是急救服务。如果你或他人可能处于危险之中，请立即拨打 120（中国大陆）、911（美国）或当地急救电话。在美国，也可拨打或发短信至 988 自杀与危机求助热线。',
+      { h: '2. 智能体是 AI', p: [
+        '葵、蓮、美香、布拉姆船长、Nova、琳，以及工作室团队（设计师、工程师、试玩员和评审）都是人工智能，不是真人。他们有个性，但没有自己的感情、账户或钱包。',
+        '智能体可能出错。它们的建议、赔率和讲解仅供娱乐与学习，不构成任何专业意见。牌桌上的智能体只能看到其座位玩家可见的信息，看不到你的底牌。',
       ] },
-      { h: '3. 谁可以使用 ACT', p: [
-        '你必须年满 18 周岁并具备订立合同的能力。你需对告诉维拉的信息的准确性负责——她的工作质量取决于她获得的事实。',
+      { h: '3. 你的账户', p: [
+        '玩游戏需要账户。你必须年满 13 周岁（如你所在地区对网络服务有更高年龄要求，以较高者为准）。请妥善保管密码；你需对账户下发生的行为负责。',
+        '一人一个账户。不得使用机器人或脚本代你游戏，不得试图破坏、压垮或逆向工程本服务。',
       ] },
-      { h: '4. 你的账户', p: [
-        '请妥善保管密码；如果你认为账户被他人未经许可访问，请发送邮件至 ' + CONTACT + '。你可以在“设置 → 安全”中查看并退出已登录的设备。',
+      { h: '4. 你创作的游戏', p: [
+        '当你描述一款游戏时，智能体会为它撰写规则和代码。你的创意和规则归你所有。你授予我们在本服务上存储、运行、展示以及（在你选择发布时）分享该游戏的许可，以便它能被游玩。你可以随时取消发布或删除草稿。',
+        '请只创作你有权创作的游戏。不要让工作室复制他人受保护的游戏、美术或品牌。',
+        '对于有害的游戏，我们可能拒绝制作或予以下架，包括：仇恨内容、涉及未成年人的色情内容、骚扰真实人物、宣扬自残或暴力、真钱赌博机制，或任何违法内容。公开游戏可能会被审核。',
       ] },
-      { h: '5. 审批由你决定', p: [
-        '信件、邮件和各类申请只有在合适的人批准其确切内容之后才会发出。你批准某项内容，即表示你已阅读过它。消息一经发出或文书一经提交，便无法撤回。',
+      { h: '5. 牌桌聊天与行为', p: [
+        '牌桌聊天用来调侃、互道好牌与惜败。禁止骚扰、仇恨言论、威胁、刷屏、人肉搜索或泄露他人隐私。即使你不客气，智能体也会保持礼貌——但其他真人同样值得尊重。',
+        '禁止串通、在游戏之外与他人互通底牌，或利用漏洞。发现漏洞请告诉我们：' + CONTACT + '。',
+        '违反规则者，我们可能将其禁言、移出牌桌或暂停账户。',
       ] },
-      { h: '6. 可接受的使用', p: [
-        '不得利用 ACT 从事违法行为；不得欺骗法院、伪造或销毁证据、教唆作伪证；不得借此获取管制药品；不得骚扰他人；不得干扰服务（包括自动化或过度使用）。维拉会拒绝此类请求，我们也可能暂停试图这样做的账户。',
+      { h: '6. 关于服务', p: [
+        '我们会尽力保证牌桌稳定运行，但本服务按"现状"提供，不保证始终可用或没有错误。工作室制作的游戏是自动生成的，即使经过试玩也可能有错误。',
+        '我们可能调整或下线某些功能。若条款发生重大变更，我们会在生效前通过应用或邮件告知你。',
       ] },
-      { h: '7. 你的内容', p: [
-        '你上传的内容以及为你生成的工作成果，所有权归你。你允许 ACT 仅在为你提供服务所必需的范围内存储和处理这些内容，具体见《隐私政策》。你可以随时导出或删除它们。',
+      { h: '7. 终止', p: [
+        '你可以随时在"设置 → 隐私与记忆"中删除账户。对于严重或反复违反本条款的账户，我们可能暂停或终止。',
       ] },
-      { h: '8. AI 的局限', p: [
-        'AI 可能出错、不完整或信息过时。ACT 会将判例引用与公开法院记录核对，并将药物与公开的药品说明书核对，但任何核查都不是完美的。请仔细审阅重要内容，并以持证专业人士的判断作为决策依据。',
-      ] },
-      { h: '9. 可用性与变更', p: [
-        '我们努力保持 ACT 可用并保护你的工作——任务在中断后会自动继续，数据每晚备份——但服务按“现状”提供，可能变更或中断。条款如有变更，我们会在本页公布并更新上方日期。',
-      ] },
-      { h: '10. 停止使用', p: [
-        '你可以随时停止使用 ACT，并在“设置 → 隐私与记忆”中删除账户。对于违反本条款的账户，我们可能暂停或关闭。',
-      ] },
-      { h: '11. 联系我们', p: ['关于本条款的问题：' + CONTACT + '。'] },
+      { h: '8. 联系我们', p: ['关于本条款的问题：' + CONTACT + '。'] },
     ],
   },
 }
@@ -99,75 +95,77 @@ export const privacy: Record<'en' | 'zh', Doc> = {
   en: {
     title: 'Privacy Policy',
     updated: UPDATED_EN,
-    intro: 'You may tell Vera things you tell almost no one. This page explains, plainly, what ACT keeps, where it goes, and what you can do about it.',
+    intro: 'What we keep, why, for how long, and how you take it with you or make it go away.',
     sections: [
-      { h: 'What we collect', p: [
-        'Account: your name, email address, and a one-way hash of your password (we never store the password itself).',
-        'What you share and what is made for you: your conversations with Vera, the text extracted from files you upload (the original file is not kept), your cases, and the documents, plans and reminders produced for them.',
-        'What Vera remembers: short facts you have shared (for example your state, or an allergy), only while memory is switched on. You can see and delete each one in Settings → Privacy & memory.',
-        'Settings and usage: your preferences, your signed-in devices (browser type and IP address), and how much AI processing your account used.',
+      { h: '1. What we keep', p: [
+        'Account: your email, display name, a salted hash of your password (never the password itself), your language and your settings.',
+        'Games: the tables you play at, the moves and table chat (so a hand can be replayed and a table can recover), results, and the games you create, including their rules, code and playtest reports.',
+        'Chats: your conversations with Aoi, and the cards she attaches to them.',
+        'Mission history: for every game the studio builds, the plan, each step the agents took, why, what changed, and your approvals.',
+        'Memories: if you allow it, short notes Aoi keeps about you (your nickname, favourite games, play style). You can see and delete every one.',
+        'Security: signed-in sessions with their device and IP address, so you can see and revoke them, and basic request logs to keep the service safe.',
       ] },
-      { h: 'Where your information goes', p: [
-        'Hosting: ACT runs on servers and a database operated for us on Amazon Web Services in the United States.',
-        'AI processing: to understand your messages and do the work, your conversations and relevant case material are sent to an AI model service — currently Alibaba Cloud Model Studio (Qwen), processed in Beijing, China. This is an international transfer of your information.',
-        'Public research sources: when Vera researches, search terms such as a legal question or a medication name are sent to public services — CourtListener (Free Law Project), openFDA (U.S. Food and Drug Administration), the U.S. National Library of Medicine (RxNorm, Clinical Tables, PubMed) and Cornell’s Legal Information Institute. Your name and account are not sent.',
-        'Licensed professionals: when an action needs a licensed attorney’s or physician’s approval, the professional reviewing it sees the case material needed to decide.',
-        'Email: account and notification emails are sent through ACT’s own mail server. Notification emails do not contain the content of your case.',
-        'Fonts: the site loads typefaces from Google Fonts, which receives your IP address when the page loads.',
-        'We do not sell your information, and we do not use it for advertising.',
+      { h: '2. How we use it', p: [
+        'To run the game: seat you, deal, replay, recover tables and show you your history. To let Aoi and the agents reply to you in your language and style. To build, playtest and publish the games you ask for. To send the emails you choose in Settings → Notifications, plus essential account emails (verification, password reset).',
+        'We do not sell your data and we do not show third-party advertising.',
       ] },
-      { h: 'Cookies and local storage', p: [
-        'ACT uses one essential cookie to keep you signed in. Your browser also remembers your language choice. There are no advertising or analytics cookies.',
+      { h: '3. AI models', p: [
+        'Aoi and the studio agents run on large language models provided by AI vendors. To answer you, the relevant part of a conversation or game (for example your message, the table state your seat may see, or your game description) is sent to the model provider for processing. We use providers that do not train their models on this data.',
       ] },
-      { h: 'How long we keep it', p: [
-        'We keep your information while your account exists. When you delete your account, your account and everything in it — conversations, cases, documents, memories — are deleted from the live database. Copies may remain in backups for a limited period until those backups are replaced.',
+      { h: '4. Who else sees it', p: [
+        'Other players at your table see your display name, your table chat, your actions and any cards shown at showdown. Never your hidden cards.',
+        'Games you publish (public or unlisted) show their name, rules and your display name as the creator. Private games and drafts are visible only to you.',
+        'Service providers that host the service, send email and run the models process data on our behalf, under contract.',
       ] },
-      { h: 'How we protect it', p: [
-        'Connections are encrypted with HTTPS. Passwords are hashed with Argon2id; session and email-link tokens are stored only as hashes. Each client’s cases and documents are available only to that client and, for an action awaiting approval, to the licensed professionals who may decide it. Every action taken on a case is recorded on its timeline.',
+      { h: '5. How long we keep it', p: [
+        'Account data, games, chats and mission history are kept while your account exists. Table move logs are kept so finished hands can be replayed; abandoned tables are cleaned up after 90 days. Request logs are kept for up to 30 days. When you delete something (a chat, a draft, a memory), it is removed from the live service straight away and from backups within 30 days.',
       ] },
-      { h: 'Your choices and rights', p: [
-        'See and correct your profile and preferences in Settings. Turn Vera’s memory off, or delete what she remembers. Download everything in your account (Settings → Privacy & memory → Export). Delete your account at any time. Turn notification emails off in Settings → Notifications.',
-        'For any other request about your information, email ' + CONTACT + '.',
+      { h: '6. Your controls', p: [
+        'Export: Settings → Privacy & memory → Export my data downloads everything in your account as one JSON file.',
+        'Memory: turn it off, delete single memories, or forget everything, in the same place.',
+        'Delete: Settings → Privacy & memory → Delete account permanently deletes your account, chats, tables you host, games and mission history.',
+        'Depending on where you live, you may have further rights (to access, correct, object or complain to a regulator). Write to us to use them.',
       ] },
-      { h: 'Children', p: ['ACT is not intended for anyone under 18, and we do not knowingly collect information from children.'] },
-      { h: 'Changes', p: ['If this policy changes, we will post the new version here and update the date above.'] },
+      { h: '7. Children', p: ['Play with Agents is not directed at children under 13, and we do not knowingly collect their data. If you believe a child has an account, contact us and we will delete it.'] },
+      { h: '8. Contact', p: ['Privacy questions and requests: ' + CONTACT + '.'] },
     ],
   },
   zh: {
     title: '隐私政策',
     updated: UPDATED_ZH,
-    intro: '你可能会告诉维拉一些几乎不对别人说的事。本页用平实的话说明：ACT 保存什么、信息去了哪里、你能做什么。',
+    intro: '我们保存什么、为什么保存、保存多久，以及你如何导出或删除它。',
     sections: [
-      { h: '我们收集什么', p: [
-        '账户信息：你的姓名、邮箱地址，以及密码的单向哈希值（我们从不保存密码本身）。',
-        '你分享的内容和为你生成的内容：你与维拉的对话、从你上传的文件中提取的文字（不保留原始文件）、你的案件，以及为案件生成的文书、方案和提醒。',
-        '维拉记住的内容：你分享过的简短事实（例如所在州或过敏史），仅在记忆功能开启时保存。你可以在“设置 → 隐私与记忆”中逐条查看和删除。',
-        '设置与用量：你的偏好、已登录的设备（浏览器类型和 IP 地址），以及账户使用的 AI 处理量。',
+      { h: '1. 我们保存什么', p: [
+        '账户：你的邮箱、显示名称、密码的加盐哈希（从不保存密码本身）、语言和设置。',
+        '游戏：你参与的牌桌、每一步操作和牌桌聊天（以便回放牌局、恢复牌桌）、结果，以及你创作的游戏，包括其规则、代码和试玩报告。',
+        '对话：你与葵的对话，以及她附带的卡片。',
+        '任务记录：工作室制作每款游戏时的计划、智能体的每一步、原因、变化，以及你的批准。',
+        '记忆：在你允许的情况下，葵会记下关于你的简短信息（昵称、喜欢的游戏、打法）。每一条你都能查看和删除。',
+        '安全：已登录的会话及其设备和 IP 地址（方便你查看和退出），以及保障服务安全的基础请求日志。',
       ] },
-      { h: '你的信息会去哪里', p: [
-        '托管：ACT 运行在为我们托管于美国亚马逊云（Amazon Web Services）上的服务器和数据库中。',
-        'AI 处理：为理解你的消息并完成工作，你的对话及相关案件材料会发送给 AI 模型服务——目前为阿里云百炼（通义千问），在中国北京处理。这属于信息的跨境传输。',
-        '公开检索来源：维拉检索时，法律问题或药物名称等检索词会发送给公开服务——CourtListener（Free Law Project）、openFDA（美国食品药品监督管理局）、美国国家医学图书馆（RxNorm、Clinical Tables、PubMed）以及康奈尔大学法律信息研究所。你的姓名和账户信息不会被发送。',
-        '持证专业人士：当某项操作需要持证律师或医生批准时，负责审阅的专业人士会看到作出决定所需的案件材料。',
-        '邮件：账户和通知邮件通过 ACT 自己的邮件服务器发送。通知邮件不包含你的案件内容。',
-        '字体：网站从 Google Fonts 加载字体，页面加载时 Google 会收到你的 IP 地址。',
-        '我们不出售你的信息，也不将其用于广告。',
+      { h: '2. 我们如何使用', p: [
+        '运行游戏：安排座位、发牌、回放、恢复牌桌、展示你的历史。让葵和智能体用你的语言和风格回复你。制作、试玩并发布你要求的游戏。发送你在"设置 → 通知"中选择的邮件，以及必要的账户邮件（验证、重设密码）。',
+        '我们不出售你的数据，也不展示第三方广告。',
       ] },
-      { h: 'Cookie 与本地存储', p: [
-        'ACT 只使用一个保持登录所必需的 Cookie。你的浏览器还会记住你选择的语言。没有广告或分析类 Cookie。',
+      { h: '3. AI 模型', p: [
+        '葵和工作室的智能体由 AI 供应商提供的大语言模型驱动。为了回复你，对话或游戏中的相关部分（例如你的消息、你的座位可见的牌桌状态、你的游戏描述）会发送给模型供应商处理。我们选用不会用这些数据训练模型的供应商。',
       ] },
-      { h: '保存多久', p: [
-        '账户存续期间我们会保存你的信息。你删除账户后，账户及其中的全部内容——对话、案件、文书、记忆——都会从在线数据库中删除。备份中可能在有限期间内保留副本，直到这些备份被替换。',
+      { h: '4. 还有谁能看到', p: [
+        '同桌的其他玩家能看到你的显示名称、牌桌聊天、你的操作以及摊牌时亮出的牌，永远看不到你的底牌。',
+        '你发布的游戏（公开或仅链接）会显示其名称、规则，以及作为创作者的你的显示名称。私密游戏和草稿只有你自己能看到。',
+        '为我们托管服务、发送邮件和运行模型的服务商，会依据合同代表我们处理数据。',
       ] },
-      { h: '我们如何保护', p: [
-        '连接通过 HTTPS 加密。密码使用 Argon2id 哈希；会话令牌和邮件链接令牌只以哈希形式保存。每位客户的案件和文书只对其本人可见；对于等待审批的操作，也对有权作出决定的持证专业人士可见。案件上的每一项操作都会记录在其时间线上。',
+      { h: '5. 保存多久', p: [
+        '账户数据、游戏、对话和任务记录在你的账户存续期间保存。牌桌操作记录会保留以便回放已结束的牌局；被放弃的牌桌会在 90 天后清理。请求日志最多保留 30 天。你删除的内容（对话、草稿、记忆）会立即从线上服务移除，并在 30 天内从备份中移除。',
       ] },
-      { h: '你的选择与权利', p: [
-        '在“设置”中查看并更正个人资料和偏好；关闭维拉的记忆，或删除她记住的内容；下载账户中的全部数据（设置 → 隐私与记忆 → 导出）；随时删除账户；在“设置 → 通知”中关闭通知邮件。',
-        '关于你的信息的其他请求，请发送邮件至 ' + CONTACT + '。',
+      { h: '6. 你的控制权', p: [
+        '导出："设置 → 隐私与记忆 → 导出我的数据"，把账户中的全部内容下载为一个 JSON 文件。',
+        '记忆：在同一位置关闭记忆、删除单条记忆或全部忘记。',
+        '删除："设置 → 隐私与记忆 → 删除账户"，永久删除你的账户、对话、你开的牌桌、游戏和任务记录。',
+        '根据你所在地区，你可能还享有其他权利（访问、更正、反对或向监管机构投诉）。如需行使，请联系我们。',
       ] },
-      { h: '未成年人', p: ['ACT 不面向未满 18 周岁的人士，我们不会有意收集儿童的信息。'] },
-      { h: '变更', p: ['本政策如有变更，我们会在此公布新版本并更新上方日期。'] },
+      { h: '7. 儿童', p: ['Play with Agents 不面向 13 岁以下儿童，我们不会有意收集他们的数据。如你认为有儿童注册了账户，请联系我们，我们会将其删除。'] },
+      { h: '8. 联系我们', p: ['隐私问题与请求：' + CONTACT + '。'] },
     ],
   },
 }
