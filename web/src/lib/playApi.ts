@@ -71,6 +71,8 @@ export type SeatInfo = {
   avatar: string
   agent_id?: string
   is_me?: boolean
+  // missed the clock repeatedly: turns resolve with the default move after a short grace
+  away?: boolean
 }
 
 export type LogEntry = { seq: number; type: string; seat: number; text: string; at: string }
@@ -96,6 +98,8 @@ export type TableView = {
   log: LogEntry[]
   chat: ChatLine[]
   outcome: Outcome | null
+  // nobody attending (everyone away or idle): status stays playing, nothing runs until /back or a move
+  paused?: boolean
 }
 
 // ── Hold'em view data ─────────────────────────────────────────────────────
@@ -176,6 +180,7 @@ export const playApi = {
   chat: (id: string, text: string) =>
     api.post<{ ok: boolean }>(`/api/tables/${encodeURIComponent(id)}/chat`, { text, client_msg_id: uid() }),
   leave: (id: string) => api.post<{ ok: boolean }>(`/api/tables/${encodeURIComponent(id)}/leave`),
+  back: (id: string) => api.post<TableView>(`/api/tables/${encodeURIComponent(id)}/back`),
   rematch: (id: string) => api.post<TableView>(`/api/tables/${encodeURIComponent(id)}/rematch`),
   streamURL: (id: string) => `/api/tables/${encodeURIComponent(id)}/stream`,
 }
