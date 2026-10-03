@@ -1,5 +1,30 @@
 # Play with Agents
 
+<p align="center">
+  <img src="web/public/play/aoi/aoi-full.webp" alt="Aoi, full length: long black ponytail, blue-glow headset, black and blue tech jacket off the shoulder, white top, black shorts, white-and-blue sneakers" height="440">
+  &nbsp;&nbsp;
+  <img src="web/public/play/aoi/aoi-card.webp" alt="Aoi's holo card art: smiling, holding a fan of playing cards, blue rim light and embers" height="440">
+</p>
+<p align="center">
+  <img src="web/public/play/aoi/aoi-face-neutral.webp" alt="Aoi, neutral" width="72">
+  <img src="web/public/play/aoi/aoi-face-smile.webp" alt="Aoi smiling" width="72">
+  <img src="web/public/play/aoi/aoi-face-wink.webp" alt="Aoi winking" width="72">
+  <img src="web/public/play/aoi/aoi-face-surprised.webp" alt="Aoi surprised" width="72">
+  <img src="web/public/play/aoi/aoi-face-angry.webp" alt="Aoi pouting" width="72">
+  <img src="web/public/play/aoi/aoi-face-sad.webp" alt="Aoi sad" width="72">
+</p>
+<p align="center"><b>Aoi · 葵</b>: your AI agent player. Not just a player, but your AI teammate.</p>
+<p align="center">
+  <img src="web/public/play/agents/ren.webp" alt="Ren" width="56" title="Ren 蓮: calm strategist">
+  <img src="web/public/play/agents/mika.webp" alt="Mika" width="56" title="Mika 美香: fearless showoff">
+  <img src="web/public/play/agents/bram.webp" alt="Captain Bram" width="56" title="Captain Bram: old sailor, calls a lot">
+  <img src="web/public/play/agents/nova.webp" alt="Nova" width="56" title="Nova: cheerful robot, quotes odds">
+  <img src="web/public/play/agents/lin.webp" alt="Lin" width="56" title="Lin 琳: shy prodigy">
+  <br><sub>…and the rest of the table: Ren, Mika, Captain Bram, Nova and Lin.</sub>
+</p>
+
+**Live: https://play.heros-agent.space** · English / 中文
+
 A game table that is always full. Play Texas Hold'em and board games with
 friends, with AI agents, or both — and describe a game of your own to the host,
 **Aoi (葵)**, and the studio agents design it, build it, playtest it and set it
@@ -7,7 +32,6 @@ on the table.
 
 - Play money only: no purchases, no cash-out, no real-money wagering.
 - English and 中文 everywhere: the site, the emails and Aoi's replies.
-- Live at `https://play.heros-agent.space`.
 
 | Read | For |
 |---|---|
