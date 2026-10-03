@@ -248,7 +248,7 @@ function ConnBadge({ conn, mock }: { conn: TableClient['conn']; mock: boolean })
 
 // ── lobby: seats, invite, start ───────────────────────────────────────────
 function LobbyStage({ table, client }: { table: TableView; client: TableClient }) {
-  const { s, lang } = usePlayT()
+  const { s, agentText } = usePlayT()
   const agents = useAgents()
   const [copied, setCopied] = useState(false)
   const [picker, setPicker] = useState<number | null>(null)
@@ -301,11 +301,11 @@ function LobbyStage({ table, client }: { table: TableView; client: TableClient }
                 <Avatar name={st.name} src={st.avatar} seat={st.seat} size={64} agent={st.kind === 'agent'} />
               )}
               <b>
-                {st.kind === 'open' ? s.room.openSeat : lang === 'zh' && ag ? ag.name_zh : st.name}
+                {st.kind === 'open' ? s.room.openSeat : ag ? agentText(ag, 'name') : st.name}
                 {st.kind === 'agent' && <em className="pw-ai">AI</em>}
               </b>
               <small>
-                {st.is_me ? s.room.you : st.kind === 'agent' ? (lang === 'zh' ? ag?.title_zh : ag?.title) || '' : st.kind === 'open' ? s.newTable.openHint : ''}
+                {st.is_me ? s.room.you : st.kind === 'agent' ? agentText(ag, 'title') : st.kind === 'open' ? s.newTable.openHint : ''}
                 {st.is_me && table.is_host ? ` · ${s.room.host}` : ''}
               </small>
               {canEdit && (
@@ -332,7 +332,7 @@ function LobbyStage({ table, client }: { table: TableView; client: TableClient }
                       }}
                     >
                       <Avatar name={a.name} src={a.avatar || `/play/agents/${a.id}.webp`} seat={st.seat} size={28} agent />
-                      <span>{lang === 'zh' ? a.name_zh : a.name}</span>
+                      <span>{agentText(a, 'name')}</span>
                     </button>
                   ))}
                 </div>

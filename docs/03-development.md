@@ -92,6 +92,9 @@ values are in `deploy/k8s/20-config.yaml`, secrets in AWS Secrets Manager
 | `PLAY_TABLE_WORKERS`, `PLAY_TABLE_LEASE` | 4, `15s` | table workers |
 | `PLAY_ACCOUNT_DAILY_TOKENS`, `PLAY_DEPLOYMENT_DAILY_TOKENS` | 1.5M, 40M | spending ceilings per UTC day |
 | `PLAY_TTS_API_KEY`, `PLAY_TTS_VOICE_ID`, `PLAY_TTS_MODEL` | —, —, `s2.1-pro-free` | Aoi's voice (Fish Audio); no key or voice id = no voice |
+| `PLAY_IMAGE_API_KEY`, `PLAY_IMAGE_MODEL` | —, `wan2.5-t2i-preview` | game covers (DashScope text-to-image, falls back to `wan2.2-t2i-flash`); no key = procedural covers |
+
+`play covers backfill [--dry-run]` gives every draft or published studio game without a cover one (at most 2 image calls each; the seeded examples ship static covers).
 
 ## Deploy
 

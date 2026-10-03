@@ -2,6 +2,7 @@ import { useEffect, useState, type CSSProperties } from 'react'
 import { PLAYER_COLORS } from '../../lib/playApi'
 import '../../styles/play.css'
 import { parseCard } from './poker'
+import { usePlayT } from './strings'
 
 // ── Avatar: agent art, or initials on a seat colour for humans ────────────
 export function initials(name: string) {
@@ -197,8 +198,9 @@ export function Spinner() {
 
 // Sound-wave indicator shown on Aoi's seat while her line is read aloud.
 export function VoiceWave({ inline = false }: { inline?: boolean }) {
+  const { s } = usePlayT()
   return (
-    <span className={`pw-voice ${inline ? 'is-inline' : ''}`} role="img" aria-label="speaking">
+    <span className={`pw-voice ${inline ? 'is-inline' : ''}`} role="img" aria-label={s.room.speaking}>
       {[0, 1, 2, 3, 4].map((i) => (
         <i key={i} style={{ '--i': i } as CSSProperties} />
       ))}

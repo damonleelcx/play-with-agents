@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState, type CSSProperties } from 'react'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
 import { playApi, type GameCard, type GamesList, type TableSummary } from '../../lib/playApi'
 import { MOCK_GAMES, ROSTER } from './fixtures'
+import { Img } from '../../components/Aoi'
+import { uiLocale } from '../../lib/i18n'
 import NewTableDialog from './NewTableDialog'
 import { Avatar, PlayingCard } from './parts'
 import { usePlayT } from './strings'
@@ -11,7 +13,7 @@ import { usePlayPrefs } from './usePrefs'
 const HOLDEM_FALLBACK: GameCard = MOCK_GAMES.builtin[0] as unknown as GameCard
 
 export default function Lobby() {
-  const { s, lang } = usePlayT()
+  const { s, agentText } = usePlayT()
   const prefs = usePlayPrefs()
   const nav = useNavigate()
   const [sp] = useSearchParams()
@@ -23,6 +25,8 @@ export default function Lobby() {
   const [err, setErr] = useState(false)
   const [dialog, setDialog] = useState<string | null>(null)
   const [code, setCode] = useState('')
+  // The hero's cover art: shown once it has loaded, dropped for the felt art if it fails.
+  const [heroArt, setHeroArt] = useState<{ ok?: string; bad?: string }>({})
 
   const load = useCallback(() => {
     setErr(false)
@@ -97,7 +101,11 @@ export default function Lobby() {
 
       {/* hero: Texas Hold'em */}
       <section className="pw-hero">
-        <div className="pw-hero-felt">
+        <div className={`pw-hero-felt${holdem.cover && heroArt.ok === holdem.cover ? ' has-art' : ''}`}>
+          {holdem.cover && heroArt.bad !== holdem.cover && (
+            <img className="pw-hero-art" src={holdem.cover} alt="" decoding="async" draggable={false}
+              onLoad={() => setHeroArt({ ok: holdem.cover })} onError={() => setHeroArt({ bad: holdem.cover })} />
+          )}
           <div className="pw-felt-light" />
           <div className="pw-hero-cards" aria-hidden>
             <PlayingCard card="As" size="lg" fourColor={prefs.four_color_deck} />
@@ -116,12 +124,12 @@ export default function Lobby() {
           <p>{s.lobby.holdemSummary}</p>
           <div className="pw-hero-agents">
             {(agents.length ? agents : ROSTER).slice(0, 6).map((a, i) => (
-              <span key={a.id} className="pw-hero-agent" style={{ '--i': i } as CSSProperties} title={lang === 'zh' ? a.name_zh : a.name}>
+              <span key={a.id} className="pw-hero-agent" style={{ '--i': i } as CSSProperties} title={agentText(a, 'name')}>
                 <Avatar name={a.name} src={a.avatar || `/play/agents/${a.id}.webp`} seat={i} size={40} agent />
               </span>
             ))}
             <small>
-              {holdem.min_seats}–{holdem.max_seats} {s.lobby.seats} · {holdem.plays.toLocaleString()} {s.lobby.plays}
+              {holdem.min_seats}–{holdem.max_seats} {s.lobby.seats} · {holdem.plays.toLocaleString(uiLocale())} {s.lobby.plays}
             </small>
           </div>
           <div className="pw-hero-actions">
@@ -141,7 +149,7 @@ export default function Lobby() {
         <TableList title={s.lobby.openTables} items={openTables} action={s.lobby.join} onOpen={(t) => nav(`/app/join/${t.code}`)} />
       </div>
 
-      {otherBuiltins.length > 0 && <GameGrid title="Classics" games={otherBuiltins} empty="" onPlay={setDialog} />}
+      {otherBuiltins.length > 0 && <GameGrid title={s.lobby.classics} games={otherBuiltins} empty="" onPlay={setDialog} />}
       <GameGrid title={s.lobby.myGames} games={games?.mine || []} empty={s.lobby.noGames} onPlay={setDialog} />
       <GameGrid title={s.lobby.community} games={games?.community || []} empty={s.lobby.noCommunity} onPlay={setDialog} />
 
@@ -197,7 +205,7 @@ function GameGrid({ title, games, empty, onPlay }: { title: string; games: GameC
           {games.map((g, i) => (
             <article key={g.id} className="pw-game" style={{ '--hue': (i * 57 + g.name.length * 23) % 360 } as CSSProperties}>
               <Link to={`/app/games/${g.id}`} className="pw-game-cover">
-                {g.cover ? <img src={g.cover} alt="" /> : <span className="pw-game-mono">{g.name.slice(0, 2)}</span>}
+                <Img srcs={g.cover ? [g.cover] : []} alt="" lazy fallback={<span className="pw-game-mono">{g.name.slice(0, 2)}</span>} />
                 {g.status !== 'published' && <span className={`pw-pill st-${g.status}`}>{s.lobby.status[g.status]}</span>}
               </Link>
               <div className="pw-game-body">

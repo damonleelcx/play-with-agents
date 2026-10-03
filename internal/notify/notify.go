@@ -121,19 +121,20 @@ func Deliver(ctx context.Context, pool *pgxpool.Pool, m mail.Mailer, origin stri
 // toolNames are the player-facing names of actions that can wait for
 // approval. An unknown tool falls back to a generic phrase rather than its
 // internal name.
-var toolNames = map[string][2]string{
-	"publish_game": {"publish your game", "发布你的游戏"},
+var toolNames = map[string]map[string]string{
+	"publish_game": {"en": "publish your game", "zh": "发布你的游戏", "ko": "게임 공개하기", "ja": "ゲームを公開する"},
+	"":             {"en": "a step in your mission", "zh": "任务中的一个步骤", "ko": "미션의 한 단계", "ja": "ミッションの一ステップ"},
 }
 
 func toolName(tool, lang string) string {
 	n, ok := toolNames[tool]
 	if !ok {
-		n = [2]string{"a step in your mission", "任务中的一个步骤"}
+		n = toolNames[""]
 	}
-	if lang == "zh" {
-		return n[1]
+	if s, ok := n[lang]; ok {
+		return s
 	}
-	return n[0]
+	return n["en"]
 }
 
 func str(m map[string]any, k string) string {
@@ -143,7 +144,7 @@ func str(m map[string]any, k string) string {
 	return ""
 }
 
-// Render builds the bilingual message for an outbox row. Only the mission
+// Render builds the message, in en | zh | ko | ja, for an outbox row. Only the mission
 // title travels in params; nothing a game contains is ever rendered here.
 func Render(kind, lang string, p map[string]any, origin string) (mail.Message, error) {
 	title := str(p, "goal_title")
@@ -151,6 +152,18 @@ func Render(kind, lang string, p map[string]any, origin string) (mail.Message, e
 	switch kind {
 	case KindBuildReady:
 		link := origin + "/app/studio/" + str(p, "goal_id")
+		switch lang {
+		case "ja":
+			lead := fmt.Sprintf("いい知らせだよ！「%s」が完成しました。ルールを書いて、ゲームを組み立てて、エージェントたちとテストプレイも済ませたよ。公開はあなたが OK を出してから。その前に、いつでも自分で遊んでみてね。", title)
+			return mail.Message{Subject: "ゲームが完成、公開を待っています · Play with Agents",
+				Text: lead + "\n\n確認して公開する：" + link + "\n\n" + sig,
+				HTML: mail.Page(lang, "ゲームが完成したよ", lead, "確認して公開する", link, "このメールは 設定 → 通知 でオフにできます。")}, nil
+		case "ko":
+			lead := fmt.Sprintf("좋은 소식이에요! “%s” 완성됐어요. 규칙도 쓰고, 게임도 만들고, 에이전트들이랑 테스트 플레이까지 끝냈어요. 공개는 직접 OK해 주셔야 진행돼요 — 그 전에 언제든 먼저 직접 플레이해 보세요.", title)
+			return mail.Message{Subject: "게임이 완성됐어요, 공개를 기다리고 있어요 · Play with Agents",
+				Text: lead + "\n\n확인하고 공개하기: " + link + "\n\n" + sig,
+				HTML: mail.Page(lang, "게임이 완성됐어요", lead, "확인하고 공개하기", link, "이 메일은 설정 → 알림에서 끌 수 있어요.")}, nil
+		}
 		if lang == "zh" {
 			lead := fmt.Sprintf("好消息！「%s」已经做好了：规则写完、代码搭好、模拟对局也跑过了。你同意之后它才会发布；在那之前你随时可以先自己玩一局。", title)
 			return mail.Message{Subject: "你的游戏做好了，等你发布 · Play with Agents",
@@ -164,6 +177,18 @@ func Render(kind, lang string, p map[string]any, origin string) (mail.Message, e
 	case KindApprovalRequested:
 		link := origin + "/app/approvals"
 		action := toolName(str(p, "tool"), lang)
+		switch lang {
+		case "ja":
+			lead := fmt.Sprintf("「%s」で、あなたの OK が必要なステップがあるよ：%s。あなたが決めるまで、何も起きません。", title, action)
+			return mail.Message{Subject: "あなたの確認を待っているステップがあります · Play with Agents",
+				Text: lead + "\n\n確認して決める：" + link + "\n\n" + sig,
+				HTML: mail.Page(lang, "あなたの確認待ち", lead, "確認して決める", link, "このメールは 設定 → 通知 でオフにできます。")}, nil
+		case "ko":
+			lead := fmt.Sprintf("“%s”에서 확인이 필요한 단계가 있어요: %s. 결정해 주시기 전까지는 아무 일도 일어나지 않아요.", title, action)
+			return mail.Message{Subject: "확인을 기다리는 단계가 있어요 · Play with Agents",
+				Text: lead + "\n\n확인하고 결정하기: " + link + "\n\n" + sig,
+				HTML: mail.Page(lang, "확인을 기다리고 있어요", lead, "확인하고 결정하기", link, "이 메일은 설정 → 알림에서 끌 수 있어요.")}, nil
+		}
 		if lang == "zh" {
 			lead := fmt.Sprintf("「%s」里有一步需要你点头：%s。你确认之前，什么都不会发生。", title, action)
 			return mail.Message{Subject: "有一步等你确认 · Play with Agents",

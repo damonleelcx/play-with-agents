@@ -677,6 +677,9 @@ select.pw-input option { background: var(--navy-800, #111b33); }
 .pw-hero { position: relative; display: grid; grid-template-columns: 1.15fr 1fr; min-height: 340px; border-radius: 28px; overflow: hidden; border: 1px solid rgba(143,182,255,.16); background: linear-gradient(120deg, #0d1730, #0a1020 70%); box-shadow: 0 30px 80px rgba(0,0,0,.45); }
 .pw-hero-felt { position: relative; overflow: hidden; background: radial-gradient(ellipse 80% 70% at 55% 55%, var(--felt-1), var(--felt-2) 60%, var(--felt-3)); border-right: 1px solid rgba(255,255,255,.06); }
 .pw-hero-felt::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent 70%, rgba(10,16,32,.9)); }
+.pw-hero-art { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; transition: opacity .5s var(--pw-ease); }
+.pw-hero-felt.has-art .pw-hero-art { opacity: 1; }
+.pw-hero-felt.has-art .pw-hero-cards, .pw-hero-felt.has-art .pw-hero-chips, .pw-hero-felt.has-art .pw-felt-light { display: none; }
 .pw-hero-cards { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -54%); display: flex; z-index: 1; }
 .pw-hero-cards .pw-card { --cw: 104px; --ch: 146px; animation: pw-rise .6s var(--pw-ease) both; }
 .pw-hero-cards .pw-card:nth-child(1) { transform: rotate(-14deg) translateY(12px); animation-delay: .05s; }
@@ -712,8 +715,8 @@ select.pw-input option { background: var(--navy-800, #111b33); }
 .pw-games { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; }
 .pw-game { --hue: 220; display: flex; flex-direction: column; border-radius: 20px; overflow: hidden; background: rgba(13,21,40,.75); border: 1px solid var(--line); transition: transform .25s var(--pw-ease), border-color .25s, box-shadow .25s; }
 .pw-game:hover { transform: translateY(-3px); border-color: var(--line-strong); box-shadow: 0 20px 40px rgba(0,0,0,.35); }
-.pw-game-cover { position: relative; display: grid; place-items: center; height: 120px; text-decoration: none; background: radial-gradient(circle at 30% 20%, hsl(var(--hue) 70% 55% / .55), transparent 60%), linear-gradient(135deg, hsl(var(--hue) 55% 22%), hsl(calc(var(--hue) + 40) 60% 12%)); overflow: hidden; }
-.pw-game-cover img { width: 100%; height: 100%; object-fit: cover; }
+.pw-game-cover { position: relative; display: grid; place-items: center; aspect-ratio: 16 / 9; text-decoration: none; background: radial-gradient(circle at 30% 20%, hsl(var(--hue) 70% 55% / .55), transparent 60%), linear-gradient(135deg, hsl(var(--hue) 55% 22%), hsl(calc(var(--hue) + 40) 60% 12%)); overflow: hidden; }
+.pw-game-cover img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
 .pw-game-cover .pw-pill { position: absolute; top: 10px; right: 10px; }
 .pw-game-mono { font: 400 52px var(--font-display); text-transform: uppercase; color: rgba(255,255,255,.85); letter-spacing: .04em; text-shadow: 0 6px 24px rgba(0,0,0,.4); }
 .pw-game-body { padding: 14px 16px 16px; display: grid; gap: 6px; flex: 1; }
@@ -755,11 +758,11 @@ select.pw-input option { background: var(--navy-800, #111b33); }
 .pw-fieldset legend { padding: 0 6px; font: 600 11px var(--font-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--text-3); }
 
 /* detail */
-.pw-detail-head { display: grid; grid-template-columns: 220px 1fr; gap: 26px; align-items: center; }
+.pw-detail-head { display: grid; grid-template-columns: minmax(0, 360px) 1fr; gap: 26px; align-items: center; }
 .pw-detail-head h1 { margin: 6px 0; font: 400 clamp(36px, 5vw, 56px) var(--font-display); text-transform: uppercase; line-height: 1; }
 .pw-detail-head p { margin: 0 0 12px; }
 .pw-detail-head .pw-btn { margin-top: 14px; }
-.pw-game-cover.is-big { height: 220px; border-radius: 24px; --hue: 220; }
+.pw-game-cover.is-big { width: 100%; border-radius: 24px; --hue: 220; box-shadow: 0 18px 50px rgba(0,0,0,.35); }
 .pw-chips-row { display: flex; flex-wrap: wrap; gap: 6px; }
 .pw-detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; align-items: start; }
 .pw-detail-side { display: grid; gap: 16px; }
@@ -814,7 +817,7 @@ select.pw-input option { background: var(--navy-800, #111b33); }
   .pw-grid3 { grid-template-columns: 1fr 1fr; }
   .pw-agent-blurb { grid-template-columns: 1fr; }
   .pw-detail-head { grid-template-columns: 1fr; }
-  .pw-game-cover.is-big { height: 140px; }
+  .pw-game-cover.is-big { max-width: 480px; }
   .pw-lobby-cta { width: 100%; }
   .pw-joinform { flex: 1; }
   .pw-joinform .pw-input { flex: 1; width: auto; }
@@ -873,3 +876,9 @@ select.pw-input option { background: var(--navy-800, #111b33); }
 .pw-lobby-seat:has(.pw-agent-pop) { z-index: 20; }
 
 .pw-voice-unlock { position: absolute; left: 50%; top: 68px; transform: translateX(-50%); z-index: 30; display: inline-flex; align-items: center; gap: 10px; height: 36px; padding: 0 16px 0 10px; border-radius: 999px; border: 1px solid rgba(79,214,255,.5); background: rgba(13,21,40,.95); color: var(--text); font: 600 13px var(--font-head); cursor: pointer; box-shadow: 0 10px 30px rgba(0,0,0,.4), 0 0 20px rgba(79,214,255,.25); animation: pw-rise .25s var(--pw-ease); }
+
+/* Korean / Japanese: katakana and hangul action words (オールイン, 폴드) run
+   wider than the English ones; tighten the compact action bar so four buttons
+   still fit a 360px phone. */
+:lang(ja) .pw-holdem.is-compact .pw-act-btn, :lang(ko) .pw-holdem.is-compact .pw-act-btn { padding: 0 5px; gap: 5px; font-size: 13px; letter-spacing: -0.02em; }
+:lang(ja) .pw-holdem.is-compact .pw-act-btn.is-allin, :lang(ja) .pw-holdem.is-compact .pw-act-btn.is-fold { flex: 1.1; }

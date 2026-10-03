@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import type { Lang } from './i18n'
 
 // Aoi's own voice (Fish Audio, via POST /api/speech). There is deliberately
 // no speechSynthesis fallback: if her voice isn't available, she is silent
@@ -10,7 +11,7 @@ import { useEffect, useState } from 'react'
 //   voiceEnabled()                    → Promise<boolean> (GET /api/speech, asked once)
 //   speakMessage(id, key?)            → one of her chat replies (a saved message id)
 //   speakTableLine(tableId, chatId, key?) → one of her table-talk lines
-//   speakSample(lang, key?)           → the fixed "Hear Aoi" sample ('en' | 'zh')
+//   speakSample(lang, key?)           → the fixed "Hear Aoi" sample, in the UI language
 //   Each plays on one shared <audio>, stopping whatever was playing, and
 //   resolves 'played' | 'blocked' | 'off' | 'error'.
 //   stop()                            → stops the current utterance
@@ -73,7 +74,7 @@ export function stop() {
   set({ speaking: false, loading: false, key: null })
 }
 
-type SpeechRequest = { message_id: number } | { table_id: string; chat_id: number } | { sample: 'en' | 'zh' }
+type SpeechRequest = { message_id: number } | { table_id: string; chat_id: number } | { sample: Lang }
 
 // lineId names a line for the local cache: the same line always sounds the same.
 function lineId(req: SpeechRequest) {
@@ -165,8 +166,8 @@ export function speakTableLine(tableId: string, chatId: number, key?: string): P
 }
 
 // The fixed "Hear Aoi" sample of the settings page.
-export function speakSample(lang: 'en' | 'zh', key?: string): Promise<SpeakResult> {
-  return say({ sample: lang === 'zh' ? 'zh' : 'en' }, key)
+export function speakSample(lang: Lang, key?: string): Promise<SpeakResult> {
+  return say({ sample: lang }, key)
 }
 
 // Called from a user gesture (the "tap to enable" chip): plays what was held back.

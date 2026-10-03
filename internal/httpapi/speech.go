@@ -6,7 +6,7 @@ package httpapi
 // POST /api/speech → audio/mpeg, for exactly one of:
 //   { message_id }          one of Aoi's replies in a conversation the caller owns
 //   { table_id, chat_id }   one of Aoi's table-talk lines at a table the caller may watch
-//   { sample: "en"|"zh" }   the fixed "Hear Aoi" line of the settings page
+//   { sample: "en"|"zh"|"ko"|"ja" } the fixed "Hear Aoi" line of the settings page
 // The endpoint only ever speaks text the server already holds as Aoi's: it is
 // not a general text-to-speech service. Signed in and verified, 20 requests a
 // minute and a daily character allowance per account (PLAY_TTS_DAILY_CHARS,
@@ -40,6 +40,8 @@ const DefaultSpeechDailyChars = 20000
 var speechSamples = map[string]string{
 	"en": "Hi, I’m Aoi! Pull up a chair — the cards are about to be dealt. 你好，我是葵！",
 	"zh": "你好，我是葵！快坐下，马上就要发牌啦。Nice to meet you!",
+	"ko": "안녕하세요, 아오이예요! 어서 앉아요, 곧 카드를 돌릴 거예요. 잘 부탁해요!",
+	"ja": "こんにちは、葵です！さあ座って、もうすぐカードを配るよ。よろしくね！",
 }
 
 var errSpeechCap = errors.New("today's voice allowance is used up; it resets at 00:00 UTC")
@@ -82,7 +84,7 @@ func (s *Server) speechText(ctx context.Context, u *auth.User, in speechRequest)
 	case in.Sample != "":
 		text, ok := speechSamples[in.Sample]
 		if !ok {
-			return "", 400, "sample must be en or zh"
+			return "", 400, "sample must be en, zh, ko or ja"
 		}
 		return text, 0, ""
 	case in.MessageID != 0:

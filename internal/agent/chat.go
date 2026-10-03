@@ -140,11 +140,15 @@ func (a *Agent) Turn(ctx context.Context, u User, convID, text, clientMsgID stri
 		var budget *engine.ErrBudget
 		fallback := map[string]string{
 			"en": "Ah — I can't reach my thinking right now. Your message is saved, and anything already started keeps going in the background. Try me again in a minute?",
-			"zh": "啊，我这边暂时连不上思考服务。你的消息已经保存，已经开始的事情会在后台继续。过一分钟再叫我好吗？"}[lang]
+			"zh": "啊，我这边暂时连不上思考服务。你的消息已经保存，已经开始的事情会在后台继续。过一分钟再叫我好吗？",
+			"ko": "앗, 지금은 생각하는 쪽에 연결이 안 되네요. 메시지는 저장됐고, 이미 시작한 일은 뒤에서 계속 진행돼요. 1분 뒤에 다시 불러 줄래요?",
+			"ja": "あっ、今ちょっと考える回路につながらないみたい。メッセージは保存したし、始まってることは裏でちゃんと進んでるよ。1分くらいしたら、また呼んでくれる？"}[lang]
 		if errors.As(err, &budget) {
 			fallback = map[string]string{
 				"en": "We've hit today's limit for your account (" + budget.Reason + "). Your message is saved — the tables still work, I just can't chat until it resets.",
-				"zh": "你的账户今天的用量到上限了（" + budget.Reason + "）。消息已保存——牌桌照常可以玩，只是我要等重置后才能聊天。"}[lang]
+				"zh": "你的账户今天的用量到上限了（" + budget.Reason + "）。消息已保存——牌桌照常可以玩，只是我要等重置后才能聊天。",
+				"ko": "오늘 계정 사용 한도에 도달했어요 (" + budget.Reason + "). 메시지는 저장됐어요 — 테이블은 그대로 플레이할 수 있고, 저는 초기화된 뒤에 다시 이야기할 수 있어요.",
+				"ja": "今日のアカウントの利用上限に達しちゃった（" + budget.Reason + "）。メッセージは保存してあるよ。テーブルはそのまま遊べるけど、私とのおしゃべりはリセットまでお休みね。"}[lang]
 		}
 		slog.Error("chat stream", "err", err)
 		if reply.Len() > 0 {
@@ -224,7 +228,7 @@ func terminal(status string) bool {
 func (a *Agent) route(ctx context.Context, u User, convID, text, lang string, games []GameInfo, open []*engine.Goal) Route {
 	var roster strings.Builder
 	for _, r := range Roster {
-		fmt.Fprintf(&roster, "- %s: %s / %s (%s)\n", r.ID, r.Name, r.NameZH, r.Style)
+		fmt.Fprintf(&roster, "- %s: %s / %s / %s / %s (%s)\n", r.ID, r.Name, r.NameZH, r.NameKO, r.NameJA, r.Style)
 	}
 	var catalog strings.Builder
 	for i, g := range games {
@@ -247,17 +251,17 @@ func (a *Agent) route(ctx context.Context, u User, convID, text, lang string, ga
 	prompt := fmt.Sprintf(`You route messages for Aoi, the AI host of "Play with Agents": play-money Texas Hold'em and custom board games with friends and AI agents. Players can also describe a new game and the studio agents build it.
 
 Classify the player's LATEST MESSAGE into exactly one intent:
-- play: they want to sit down and play now, start a table, be dealt in ("deal me in", "let's play hold'em with Mika", "开一桌"). Fill game_id, agent_ids, seats, options.
+- play: they want to sit down and play now, start a table, be dealt in ("deal me in", "let's play hold'em with Mika", "开一桌", "홀덤 한 판 하자", "ポーカーやろう"). Fill game_id, agent_ids, seats, options.
 - build_game: they describe a NEW game they want made, or ask for one to be made ("let's make a game where…", "can you build a chess variant…"). Fill prompt with the whole idea in their words, and base_game_id only if they want to start from an existing game.
-- revise_game: they want to change a game that is being built or that they own ("change the build to 3 players", "make the board bigger", "把刚才那个游戏改成…"). Fill goal_id (the open mission it refers to) or game_id (their game), and prompt with the change.
+- revise_game: they want to change a game that is being built or that they own ("change the build to 3 players", "make the board bigger", "把刚才那个游戏改成…", "만들던 게임 3인용으로 바꿔 줘", "さっきのゲームを3人用にして"). Fill goal_id (the open mission it refers to) or game_id (their game), and prompt with the change.
 - rules: a question about how a game is played, its terms or strategy ("how do side pots work?", "what beats a flush?"). Fill game_id when it is about a game in the catalog.
 - control: pause, resume, cancel or check on a running build ("stop the build", "how is my game coming along?"). action = pause|resume|cancel|status; goal_id.
-- preference: they ask to change a setting or how Aoi treats them ("call me Captain", "be quieter", "speak Chinese", "turn the sound off"). preference.key/value from: %s.
+- preference: they ask to change a setting or how Aoi treats them ("call me Captain", "be quieter", "speak Chinese", "日本語で話して", "한국어로 해 줘", "turn the sound off"). preference.key/value from: %s.
 - chat: anything else — greetings, banter, questions about Aoi, talk about a hand they played, questions about real-money gambling (Aoi steers those back to play money).
 
 Notes:
 - "Deal me in" or "play" with no game named means holdem.
-- agent_ids only from ROSTER ids; map names in any language (Mika/美香 → mika). seats = total seats including the player, 0 if not stated.
+- agent_ids only from ROSTER ids; map names in any language (Mika/美香/미카/ミカ → mika). seats = total seats including the player, 0 if not stated.
 - options: only what they state, as numbers (hold'em: starting_stack, small_blind, big_blind, blinds_double_every, max_hands).
 - If they say "the build", "my game" or "it" and there is one OPEN MISSION, use its goal_id.
 - mood is the face Aoi shows with her reply: neutral | smile | wink | surprised | angry | sad ("angry" only for playful mock outrage at a tease; "sad" for a disappointment).
@@ -652,28 +656,50 @@ func (a *Agent) afterTurn(ctx context.Context, u User, p persona.Prefs, convID, 
 	}
 }
 
-// DetectLang picks the reply language for a message: Chinese when it has Han
-// characters, English when it has real English text, and the player's chosen
-// language (pref) when the message is too short to tell — "ok", "👍", "100".
+// DetectLang picks the reply language for a message from its script:
+// Korean when it has Hangul, Japanese when it has kana (hiragana or
+// katakana), Chinese when it has Han characters only, English when it has
+// real English text, and the player's chosen language (pref) when the
+// message is too short to tell — "ok", "👍", "100".
+//
+// Han-only text is ambiguous: "了解" or "麻雀最高" is also Japanese written
+// in kanji alone. It is Chinese unless the player chose Japanese, in which
+// case a kanji-only message stays Japanese. (Kana or Hangul in a message
+// always win, whatever the preference.)
 func DetectLang(text, pref string) string {
-	han, latin := 0, 0
+	han, kana, hangul, latin := 0, 0, 0, 0
 	for _, r := range text {
 		switch {
+		case unicode.Is(unicode.Hangul, r):
+			hangul++
+		case unicode.Is(unicode.Hiragana, r), unicode.Is(unicode.Katakana, r), r == 'ー':
+			kana++
 		case unicode.Is(unicode.Han, r):
 			han++
 		case r < 128 && unicode.IsLetter(r):
 			latin++
 		}
 	}
+	pref = strings.TrimSpace(pref)
+	if pref != "" {
+		pref = persona.Normalize(pref)
+	}
+	cjk := han + kana + hangul
 	switch {
-	case han > 0 && han*3 >= latin/4:
+	case cjk > 0 && cjk*3 >= latin/4:
+		switch {
+		case hangul > 0 && hangul >= kana:
+			return "ko"
+		case kana > 0:
+			return "ja"
+		case pref == "ja":
+			return "ja"
+		}
 		return "zh"
 	case latin >= 4:
 		return "en"
 	case pref != "":
-		return persona.Normalize(pref)
-	case latin > 0:
-		return "en"
+		return pref
 	}
 	return "en"
 }

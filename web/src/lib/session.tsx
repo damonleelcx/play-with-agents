@@ -17,12 +17,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true)
   const userRef = useRef<User | null>(null)
   userRef.current = user
-  const { setLang } = useI18n()
+  const { adoptLang } = useI18n()
 
   const setUser = useCallback(
     (u: User | null) => {
       setUserState(u)
-      if (u?.language) setLang(u.language)
+      if (u?.language) adoptLang(u.language)
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],

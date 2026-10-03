@@ -352,9 +352,15 @@ func oneOf(v, def string, allowed ...string) string {
 	return def
 }
 
+// normLang maps the host's language preference onto a table language:
+// en | zh | ko | ja. It decides the agents' display names, the language of
+// their table talk and of the canned fallback lines.
 func normLang(l string) string {
-	if strings.HasPrefix(strings.ToLower(l), "zh") {
-		return "zh"
+	l = strings.ToLower(strings.TrimSpace(l))
+	for _, code := range []string{"zh", "ko", "ja"} {
+		if strings.HasPrefix(l, code) {
+			return code
+		}
 	}
 	return "en"
 }

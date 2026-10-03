@@ -103,13 +103,13 @@ export default function Landing() {
   return (
     <div className={`lp lang-${lang}`}>
       <a className="lp-skip" href="#main">
-        {lang === 'zh' ? '跳到正文' : 'Skip to content'}
+        {t.a11y.skip}
       </a>
 
       {/* ───────────── 1 · HERO ───────────── */}
       <header className="hero" id="top" ref={heroRef}>
         <div className="hero-panel">
-          <nav className="hero-nav" aria-label={lang === 'zh' ? '主导航' : 'Primary'}>
+          <nav className="hero-nav" aria-label={t.a11y.primary}>
             <a href="#top" className="lp-logo" aria-label={t.nav.home}>
               <Logo className="lp-logo-mark" />
               <span className="lp-logo-word">
@@ -181,7 +181,7 @@ export default function Landing() {
           <div className="hero-foot">
             <div className="hero-foot-l">
               <p className="mono">{t.hero.bottom}</p>
-              <ul className="chips" aria-label={lang === 'zh' ? '亮点' : 'Highlights'}>
+              <ul className="chips" aria-label={t.a11y.highlights}>
                 {t.hero.chips.map((c) => (
                   <li key={c}>{c}</li>
                 ))}
@@ -221,7 +221,7 @@ export default function Landing() {
                   </div>
                 }
               />
-              <ul className="meet-verbs" aria-label={lang === 'zh' ? '她会做的事' : 'What she does'}>
+              <ul className="meet-verbs" aria-label={t.a11y.verbs}>
                 {t.meet.verbs.map((v, i) => (
                   <li key={v} style={{ '--i': i } as CSSProperties}>{v}</li>
                 ))}
@@ -541,7 +541,7 @@ export default function Landing() {
             </span>
           </a>
           <p className="lp-foot-note">{t.footer.note}</p>
-          <nav className="lp-foot-links" aria-label={lang === 'zh' ? '页脚' : 'Footer'}>
+          <nav className="lp-foot-links" aria-label={t.a11y.footer}>
             <Link to="/terms">{t.footer.terms}</Link>
             <Link to="/privacy">{t.footer.privacy}</Link>
             <a href="https://heros-agent.space" rel="noopener">

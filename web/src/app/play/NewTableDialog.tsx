@@ -18,7 +18,7 @@ export default function NewTableDialog({
   initialGameId?: string
   onClose: () => void
 }) {
-  const { s, f, lang } = usePlayT()
+  const { s, f, agentText } = usePlayT()
   const prefs = usePlayPrefs()
   const nav = useNavigate()
   const [gameId, setGameId] = useState(initialGameId)
@@ -70,7 +70,7 @@ export default function NewTableDialog({
         return x
       }),
     )
-  const agentName = (a?: Agent) => (a ? (lang === 'zh' ? a.name_zh || a.name : a.name) : '')
+  const agentName = (a?: Agent) => agentText(a, 'name')
   const cur = seats[active]
   const curAgent = cur?.kind === 'agent' ? agents.find((a) => a.id === cur.agent_id) : undefined
 
@@ -196,13 +196,13 @@ export default function NewTableDialog({
                       >
                         <Avatar name={a.name} src={a.avatar || `/play/agents/${a.id}.webp`} seat={active} size={52} agent />
                         <b>{agentName(a)}</b>
-                        <small>{lang === 'zh' ? a.title_zh : a.title}</small>
+                        <small>{agentText(a, 'title')}</small>
                       </button>
                     ))}
                   </div>
                   {curAgent && (
                     <div className="pw-agent-blurb">
-                      <p>{lang === 'zh' ? curAgent.bio_zh : curAgent.bio}</p>
+                      <p>{agentText(curAgent, 'bio')}</p>
                       <div className="pw-style-bars">
                         {(
                           [

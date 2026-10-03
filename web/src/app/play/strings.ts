@@ -1,6 +1,10 @@
 import { useI18n } from '../../lib/i18n'
 
-// Every user-facing string of the play surfaces, in both languages.
+// Every user-facing string of the play surfaces, in all four languages.
+// `en` defines the shape; the others are typed against it so a missing key is
+// a compile error.
+type PlayLang = 'en' | 'zh' | 'ko' | 'ja'
+
 const en = {
   lobby: {
     eyebrow: 'Game room',
@@ -27,6 +31,7 @@ const en = {
     loadError: 'Could not load the lobby. Retrying when you come back.',
     retry: 'Retry',
     status: { building: 'Building', draft: 'Draft', published: 'Published' },
+    classics: 'Classics',
   },
   newTable: {
     title: 'New table',
@@ -79,6 +84,7 @@ const en = {
     seatWins: 'seat wins',
     noRules: 'No rules written yet.',
     back: 'All games',
+    builtin: 'Built-in',
   },
   room: {
     loading: 'Taking a seat…',
@@ -131,6 +137,7 @@ const en = {
     faultNoteHost: 'This game hit a problem and was paused. Resume to try again.',
     resume: 'Resume',
     playersChat: 'Players & chat',
+    speaking: 'speaking',
   },
   holdem: {
     pot: 'Pot',
@@ -156,9 +163,26 @@ const en = {
     split: 'Split pot',
     out: 'Out',
     folded: 'Folded',
+    dealer: 'Dealer',
     keys: 'F fold · C check/call · R raise · A all-in',
     actions: { check: 'Check', call: 'Call', bet: 'Bet', raise: 'Raise', fold: 'Fold', allin: 'All-in', sb: 'SB', bb: 'BB' } as Record<string, string>,
     streets: { preflop: 'Pre-flop', flop: 'Flop', turn: 'Turn', river: 'River', showdown: 'Showdown', over: 'Hand over' } as Record<string, string>,
+    // Hand names arrive from the server in English ("Full House, Kings full of
+    // Twos"); handName() below re-renders them with these templates.
+    hands: {
+      royal: 'Royal Flush',
+      sf: 'Straight Flush, {a} high',
+      quads: 'Four of a Kind, {a}',
+      fh: 'Full House, {a} full of {b}',
+      flush: 'Flush, {a} high',
+      straight: 'Straight, {a} high',
+      trips: 'Three of a Kind, {a}',
+      twoPair: 'Two Pair, {a} and {b}',
+      pair: 'Pair of {a}',
+      high: 'High Card, {a}',
+    },
+    // rank labels, Two .. Ace
+    ranks: ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'],
   },
   board: {
     cancel: 'Esc to cancel',
@@ -201,6 +225,7 @@ const zh: Dict = {
     loadError: '游戏厅加载失败，稍后自动重试。',
     retry: '重试',
     status: { building: '制作中', draft: '草稿', published: '已发布' },
+    classics: '经典游戏',
   },
   newTable: {
     title: '开新桌',
@@ -253,6 +278,7 @@ const zh: Dict = {
     seatWins: '各座胜率',
     noRules: '规则尚未写好。',
     back: '全部游戏',
+    builtin: '内置',
   },
   room: {
     loading: '正在入座…',
@@ -305,6 +331,7 @@ const zh: Dict = {
     faultNoteHost: '这局游戏出了点问题，已暂停。点继续再试一次。',
     resume: '继续',
     playersChat: '玩家与聊天',
+    speaking: '正在说话',
   },
   holdem: {
     pot: '底池',
@@ -330,9 +357,23 @@ const zh: Dict = {
     split: '平分底池',
     out: '出局',
     folded: '已弃牌',
+    dealer: '庄家按钮',
     keys: 'F 弃牌 · C 过牌/跟注 · R 加注 · A 全下',
     actions: { check: '过牌', call: '跟注', bet: '下注', raise: '加注', fold: '弃牌', allin: '全下', sb: '小盲', bb: '大盲' },
     streets: { preflop: '翻牌前', flop: '翻牌', turn: '转牌', river: '河牌', showdown: '摊牌', over: '本手结束' },
+    hands: {
+      royal: '皇家同花顺',
+      sf: '同花顺（{a} 高）',
+      quads: '四条 {a}',
+      fh: '葫芦（{a} 带 {b}）',
+      flush: '同花（{a} 高）',
+      straight: '顺子（{a} 高）',
+      trips: '三条 {a}',
+      twoPair: '两对（{a} 和 {b}）',
+      pair: '一对 {a}',
+      high: '高牌 {a}',
+    },
+    ranks: ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'],
   },
   board: {
     cancel: '按 Esc 取消',
@@ -347,11 +388,475 @@ const zh: Dict = {
   },
 }
 
+const ko: Dict = {
+  lobby: {
+    eyebrow: '게임룸',
+    title: '테이블을 골라 보세요',
+    sub: '친구와, 에이전트와, 아니면 다 같이. 칩은 언제나 게임 머니예요. 현금 가치는 없어요.',
+    featured: '추천',
+    holdemName: '텍사스 홀덤',
+    holdemSummary: '2~9인 노리밋 포커. 딜러는 아오이, 에이전트들은 저마다의 스타일로 승부해요.',
+    playNow: '바로 플레이',
+    newTable: '새 테이블',
+    joinCode: '코드로 참가',
+    myGames: '내 게임',
+    community: '커뮤니티',
+    openTables: '참가 가능한 테이블',
+    myTables: '내 테이블',
+    noGames: '아직 비어 있어요. 채팅에서 아오이에게 게임을 설명하면 에이전트들이 만들어 줘요.',
+    noCommunity: '아직 커뮤니티 게임이 없어요.',
+    noTables: '지금은 열린 테이블이 없어요.',
+    seats: '인',
+    plays: '회 플레이',
+    by: '만든 이',
+    open: '열기',
+    join: '참가',
+    loadError: '로비를 불러오지 못했어요. 다시 돌아오면 재시도할게요.',
+    retry: '다시 시도',
+    status: { building: '제작 중', draft: '초안', published: '공개됨' },
+    classics: '클래식',
+  },
+  newTable: {
+    title: '새 테이블',
+    game: '게임',
+    name: '테이블 이름',
+    namePh: '금요일 밤 홀덤',
+    seats: '좌석',
+    seatN: '{n}번 자리',
+    me: '나',
+    agent: '에이전트',
+    open: '빈자리',
+    openHint: '친구 자리',
+    pickAgent: '에이전트 선택',
+    options: '홀덤 옵션',
+    stack: '시작 칩',
+    sb: '스몰 블라인드',
+    bb: '빅 블라인드',
+    double: '블라인드 2배 간격',
+    doubleUnit: '핸드 (0 = 안 함)',
+    maxHands: '최대 핸드 수',
+    maxHandsHint: '0 = 한 명이 모든 칩을 가질 때까지',
+    clock: '턴 타이머',
+    noClock: '타이머 없음',
+    create: '테이블 만들기',
+    creating: '만드는 중…',
+    cancel: '취소',
+    tight: '타이트',
+    aggr: '공격성',
+    bluff: '블러프',
+    talk: '수다',
+  },
+  join: {
+    title: '코드로 참가',
+    ph: 'ABC123',
+    go: '참가',
+    joining: '테이블에 참가하는 중…',
+    failed: '이 코드는 사용할 수 없어요.',
+    back: '게임 목록으로',
+  },
+  detail: {
+    rules: '규칙',
+    versions: '버전',
+    playtest: '플레이테스트',
+    play: '플레이',
+    seats: '{min}–{max}인',
+    hidden: '숨겨진 정보 있음',
+    perfect: '완전 정보',
+    games: '게임',
+    avgTurns: '평균 턴',
+    seatWins: '자리별 승리',
+    noRules: '아직 규칙이 없어요.',
+    back: '전체 게임',
+    builtin: '기본 제공',
+  },
+  room: {
+    loading: '자리에 앉는 중…',
+    notFound: '테이블을 찾을 수 없어요.',
+    back: '게임',
+    leave: '나가기',
+    leaveConfirm: '테이블에서 나갈까요? 내 자리는 에이전트가 이어받아요.',
+    leaveYes: '테이블 나가기',
+    stay: '계속 있기',
+    spectating: '관전 중',
+    reconnecting: '다시 연결하는 중…',
+    offline: '오프라인이에요. 다시 시도하는 중…',
+    live: '라이브',
+    lobbyTitle: '플레이어를 기다리는 중',
+    invite: '초대 코드',
+    copyLink: '초대 링크 복사',
+    copied: '복사됨',
+    start: '게임 시작',
+    starting: '시작하는 중…',
+    waitHost: '호스트가 시작하기를 기다리고 있어요.',
+    openSeat: '빈자리',
+    makeOpen: '빈자리로',
+    makeAgent: '에이전트 앉히기',
+    host: '호스트',
+    you: '나',
+    finished: '게임 종료',
+    rematch: '한 판 더',
+    backToLobby: '게임 목록으로',
+    abandoned: '이 테이블은 닫혔어요.',
+    chat: '채팅',
+    log: '기록',
+    players: '플레이어',
+    say: '한마디 하기…',
+    send: '보내기',
+    noChat: '아직 메시지가 없어요. 먼저 인사해 보세요!',
+    noLog: '아직 아무 일도 없었어요.',
+    agentBadge: 'AI',
+    panel: '테이블 채팅',
+    close: '닫기',
+    moveFailed: '할 수 없는 동작이에요',
+    stale: '테이블이 진행됐어요. 최신 상태로 보여 드려요.',
+    rank: ['1위', '2위', '3위', '4위', '5위', '6위', '7위', '8위', '9위'],
+    score: '점수',
+    tapVoice: '탭해서 아오이 목소리 듣기',
+    away: '자리 비움',
+    awayNote: '자리 비움 중: 내 차례는 자동으로 진행돼요.',
+    imBack: '돌아왔어요',
+    pausedNote: '한동안 아무도 없어서 테이블을 일시정지했어요.',
+    faultNote: '문제가 생겨 게임을 일시정지했어요. 호스트가 재개할 수 있어요.',
+    faultNoteHost: '문제가 생겨 게임을 일시정지했어요. 재개해서 다시 시도해 보세요.',
+    resume: '재개',
+    playersChat: '플레이어 & 채팅',
+    speaking: '말하는 중',
+  },
+  holdem: {
+    pot: '팟',
+    side: '사이드 팟',
+    hand: '핸드 #{n}',
+    handsLeft: '{n}핸드 남음',
+    blinds: '블라인드 {sb}/{bb}',
+    fold: '폴드',
+    check: '체크',
+    call: '콜',
+    bet: '벳',
+    raiseTo: '레이즈',
+    allin: '올인',
+    min: '최소',
+    half: '½ 팟',
+    threeq: '¾ 팟',
+    potBtn: '팟',
+    max: '올인',
+    yourTurn: '내 차례',
+    waiting: '{name} 차례',
+    // no subject particle: 이/가 would depend on the name's last syllable
+    wins: '{name}, {amount} 획득',
+    youWin: '{amount} 획득!',
+    split: '팟 나눠 갖기',
+    out: '탈락',
+    folded: '폴드',
+    dealer: '딜러 버튼',
+    keys: 'F 폴드 · C 체크/콜 · R 레이즈 · A 올인',
+    actions: { check: '체크', call: '콜', bet: '벳', raise: '레이즈', fold: '폴드', allin: '올인', sb: 'SB', bb: 'BB' },
+    streets: { preflop: '프리플롭', flop: '플롭', turn: '턴', river: '리버', showdown: '쇼다운', over: '핸드 종료' },
+    hands: {
+      royal: '로열 플러시',
+      sf: '스트레이트 플러시 ({a} 하이)',
+      quads: '포카드 ({a})',
+      fh: '풀 하우스 ({a}·{b})',
+      flush: '플러시 ({a} 하이)',
+      straight: '스트레이트 ({a} 하이)',
+      trips: '트리플 ({a})',
+      twoPair: '투 페어 ({a}·{b})',
+      pair: '원 페어 ({a})',
+      high: '하이 카드 ({a})',
+    },
+    ranks: ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'],
+  },
+  board: {
+    cancel: 'Esc로 취소',
+    pickTarget: '이동할 칸을 고르세요',
+    yourMove: '내 차례',
+  },
+  card: {
+    status: { lobby: '대기 중', playing: '진행 중', finished: '종료', abandoned: '닫힘' },
+    open: '테이블 열기',
+    loading: '테이블 불러오는 중…',
+    missing: '테이블을 사용할 수 없어요',
+  },
+}
+
+const ja: Dict = {
+  lobby: {
+    eyebrow: 'ゲームルーム',
+    title: 'テーブルを選ぼう',
+    sub: '友だちと、エージェントと、もちろん両方とも。チップはいつでもプレイマネー。換金はできません。',
+    featured: 'おすすめ',
+    holdemName: 'テキサスホールデム',
+    holdemSummary: '2〜9人で遊ぶノーリミット・ポーカー。ディーラーは葵、エージェントたちはそれぞれのスタイルで勝負します。',
+    playNow: '今すぐプレイ',
+    newTable: '新しいテーブル',
+    joinCode: 'コードで参加',
+    myGames: 'マイゲーム',
+    community: 'コミュニティ',
+    openTables: '参加できるテーブル',
+    myTables: 'マイテーブル',
+    noGames: 'まだ何もありません。チャットで葵にゲームを話せば、エージェントたちが作ってくれます。',
+    noCommunity: 'コミュニティのゲームはまだありません。',
+    noTables: 'いま開いているテーブルはありません。',
+    seats: '人',
+    plays: 'プレイ',
+    by: '作者',
+    open: '開く',
+    join: '参加',
+    loadError: 'ロビーを読み込めませんでした。戻ってきたときに再試行します。',
+    retry: '再試行',
+    status: { building: '制作中', draft: '下書き', published: '公開中' },
+    classics: 'クラシック',
+  },
+  newTable: {
+    title: '新しいテーブル',
+    game: 'ゲーム',
+    name: 'テーブル名',
+    namePh: '金曜夜のホールデム',
+    seats: '席',
+    seatN: '{n}番席',
+    me: '自分',
+    agent: 'エージェント',
+    open: '空席',
+    openHint: '友だち用',
+    pickAgent: 'エージェントを選ぶ',
+    options: 'ホールデム設定',
+    stack: '初期チップ',
+    sb: 'スモールブラインド',
+    bb: 'ビッグブラインド',
+    double: 'ブラインド倍増の間隔',
+    doubleUnit: 'ハンド（0 = 倍増なし）',
+    maxHands: '最大ハンド数',
+    maxHandsHint: '0 = 1人が全チップを手にするまで',
+    clock: 'ターンタイマー',
+    noClock: 'タイマーなし',
+    create: 'テーブルを作成',
+    creating: '作成中…',
+    cancel: 'キャンセル',
+    tight: 'タイトさ',
+    aggr: '攻撃性',
+    bluff: 'ブラフ',
+    talk: 'おしゃべり',
+  },
+  join: {
+    title: 'コードで参加',
+    ph: 'ABC123',
+    go: '参加',
+    joining: 'テーブルに参加中…',
+    failed: 'このコードは使えませんでした。',
+    back: 'ゲーム一覧へ戻る',
+  },
+  detail: {
+    rules: 'ルール',
+    versions: 'バージョン',
+    playtest: 'テストプレイ',
+    play: 'プレイ',
+    seats: '{min}〜{max}人',
+    hidden: '非公開情報あり',
+    perfect: '完全情報',
+    games: 'ゲーム',
+    avgTurns: '平均ターン',
+    seatWins: '席別の勝利',
+    noRules: 'ルールはまだありません。',
+    back: 'すべてのゲーム',
+    builtin: '公式',
+  },
+  room: {
+    loading: '席についています…',
+    notFound: 'このテーブルは見つかりませんでした。',
+    back: 'ゲーム',
+    leave: '退出',
+    leaveConfirm: 'このテーブルを離れますか？ あなたの席はエージェントが引き継ぎます。',
+    leaveYes: '退出する',
+    stay: '残る',
+    spectating: '観戦中',
+    reconnecting: '再接続中…',
+    offline: 'オフラインです。再試行中…',
+    live: 'ライブ',
+    lobbyTitle: 'プレイヤー待ち',
+    invite: '招待コード',
+    copyLink: '招待リンクをコピー',
+    copied: 'コピーしました',
+    start: 'ゲーム開始',
+    starting: '開始中…',
+    waitHost: 'ホストの開始を待っています。',
+    openSeat: '空席',
+    makeOpen: '空席にする',
+    makeAgent: 'エージェントを座らせる',
+    host: 'ホスト',
+    you: 'あなた',
+    finished: 'ゲーム終了',
+    rematch: 'もう一戦',
+    backToLobby: 'ゲーム一覧へ',
+    abandoned: 'このテーブルは閉じられました。',
+    chat: 'チャット',
+    log: 'ログ',
+    players: 'プレイヤー',
+    say: 'ひとことどうぞ…',
+    send: '送信',
+    noChat: 'まだメッセージはありません。あいさつしてみよう！',
+    noLog: 'まだ何も起きていません。',
+    agentBadge: 'AI',
+    panel: 'テーブルチャット',
+    close: '閉じる',
+    moveFailed: 'その操作はできません',
+    stale: 'テーブルが進みました。最新の状態です。',
+    rank: ['1位', '2位', '3位', '4位', '5位', '6位', '7位', '8位', '9位'],
+    score: 'スコア',
+    tapVoice: 'タップで葵の声を聞く',
+    away: '離席中',
+    awayNote: '離席中：あなたの番は自動でプレイされます。',
+    imBack: 'ただいま',
+    pausedNote: 'しばらく誰もいなかったので、テーブルを一時停止しました。',
+    faultNote: '問題が起きたため、ゲームを一時停止しました。ホストが再開できます。',
+    faultNoteHost: '問題が起きたため、ゲームを一時停止しました。再開してもう一度お試しください。',
+    resume: '再開',
+    playersChat: 'プレイヤーとチャット',
+    speaking: '話しています',
+  },
+  holdem: {
+    pot: 'ポット',
+    side: 'サイドポット',
+    hand: 'ハンド #{n}',
+    handsLeft: '残り{n}',
+    blinds: 'ブラインド {sb}/{bb}',
+    fold: 'フォールド',
+    check: 'チェック',
+    call: 'コール',
+    bet: 'ベット',
+    raiseTo: 'レイズ',
+    allin: 'オールイン',
+    min: '最小',
+    half: '½ポット',
+    threeq: '¾ポット',
+    potBtn: 'ポット',
+    max: 'オールイン',
+    yourTurn: 'あなたの番',
+    waiting: '{name}の番',
+    wins: '{name}が{amount}獲得',
+    youWin: 'あなたが{amount}獲得！',
+    split: 'ポットを山分け',
+    out: '脱落',
+    folded: 'フォールド',
+    dealer: 'ディーラーボタン',
+    keys: 'F フォールド · C チェック/コール · R レイズ · A オールイン',
+    actions: { check: 'チェック', call: 'コール', bet: 'ベット', raise: 'レイズ', fold: 'フォールド', allin: 'オールイン', sb: 'SB', bb: 'BB' },
+    streets: { preflop: 'プリフロップ', flop: 'フロップ', turn: 'ターン', river: 'リバー', showdown: 'ショーダウン', over: 'ハンド終了' },
+    hands: {
+      royal: 'ロイヤルフラッシュ',
+      sf: 'ストレートフラッシュ（{a}ハイ）',
+      quads: 'フォーカード（{a}）',
+      fh: 'フルハウス（{a}・{b}）',
+      flush: 'フラッシュ（{a}ハイ）',
+      straight: 'ストレート（{a}ハイ）',
+      trips: 'スリーカード（{a}）',
+      twoPair: 'ツーペア（{a}・{b}）',
+      pair: 'ワンペア（{a}）',
+      high: 'ハイカード（{a}）',
+    },
+    ranks: ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A'],
+  },
+  board: {
+    cancel: 'Escでキャンセル',
+    pickTarget: '移動先を選んでください',
+    yourMove: 'あなたの番',
+  },
+  card: {
+    status: { lobby: '待機中', playing: 'プレイ中', finished: '終了', abandoned: '終了済み' },
+    open: 'テーブルを開く',
+    loading: 'テーブルを読み込み中…',
+    missing: 'テーブルを利用できません',
+  },
+}
+
+const dicts: Record<PlayLang, Dict> = { en, zh, ko, ja }
+
 export type PlayStrings = Dict
+
+// Agent names, titles and bios come from the server in English and Chinese.
+// Korean and Japanese live here, keyed by agent id; unknown ids fall back to
+// English.
+type AgentText = { name: string; title: string; bio: string }
+const AGENTS: Partial<Record<PlayLang, Record<string, AgentText>>> = {
+  ko: {
+    aoi: { name: '아오이', title: '호스트', bio: '밸런스형, 상황에 따라 유연하게. 다정하고 장난기 많고, 승부욕이 엄청나요.' },
+    ren: { name: '렌', title: '전략가', bio: '타이트 어그레시브. 침착하고 말수 적고, 유머는 건조하게.' },
+    mika: { name: '미카', title: '쇼맨', bio: '루스 어그레시브, 올인을 사랑해요. 시끌벅적하고 겁이 없어요.' },
+    bram: { name: '브램 선장', title: '늙은 뱃사람', bio: '루스 패시브, 콜을 자주 해요. 좋은 이야기 앞에선 절대 폴드하지 않아요.' },
+    nova: { name: '노바', title: '계산기', bio: '밸런스형, 수학 중심. 확률을 줄줄 읊고 썰렁한 농담을 해요.' },
+    lin: { name: '린', title: '천재 소녀', bio: '타이트 패시브, 블러프는 드물게. 수줍고 예의 바르지만, 조용히 치명적이에요.' },
+  },
+  ja: {
+    aoi: { name: '葵', title: 'ホスト', bio: 'バランス型で柔軟。あたたかくて、からかい好きで、大の負けず嫌い。' },
+    ren: { name: 'レン', title: '策士', bio: 'タイト・アグレッシブ。冷静で口数少なめ、ユーモアはドライ。' },
+    mika: { name: 'ミカ', title: '目立ちたがり', bio: 'ルース・アグレッシブで、オールインが大好き。にぎやかで怖いもの知らず。' },
+    bram: { name: 'ブラム船長', title: '老船乗り', bio: 'ルース・パッシブでコール多め。いい話からは決して降りない。' },
+    nova: { name: 'ノヴァ', title: '計算機', bio: 'バランス型の確率重視。オッズを語っては、ひどいジョークを飛ばす。' },
+    lin: { name: 'リン', title: '天才少女', bio: 'タイト・パッシブでブラフはまれ。内気で礼儀正しく、静かに致命的。' },
+  },
+}
+
+type AgentLike = {
+  id: string
+  name: string
+  name_zh?: string
+  title?: string
+  title_zh?: string
+  bio?: string
+  bio_zh?: string
+  i18n?: Partial<Record<string, Partial<AgentText>>>
+}
+
+// English rank words (singular and plural) as the server and the mock
+// evaluator spell them, mapped to 0 (Two) .. 12 (Ace).
+const RANK_WORDS: Record<string, number> = {}
+;['Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten', 'Jack', 'Queen', 'King', 'Ace'].forEach((w, i) => {
+  RANK_WORDS[w] = i
+  RANK_WORDS[w === 'Six' ? 'Sixes' : w + 's'] = i
+})
+
+const HAND_PATTERNS: [RegExp, keyof Dict['holdem']['hands']][] = [
+  [/^Royal Flush$/, 'royal'],
+  [/^Straight Flush, (\w+) high$/, 'sf'],
+  [/^Four of a Kind, (\w+)$/, 'quads'],
+  [/^Full House, (\w+) (?:full of|over) (\w+)$/, 'fh'],
+  [/^Flush, (\w+) high$/, 'flush'],
+  [/^Straight, (\w+) high$/, 'straight'],
+  [/^Three of a Kind, (\w+)$/, 'trips'],
+  [/^Two Pair, (\w+) and (\w+)$/, 'twoPair'],
+  [/^Pair of (\w+)$/, 'pair'],
+  [/^High Card, (\w+)$/, 'high'],
+  [/^(\w+) high$/, 'high'],
+]
+
+function localHandName(name: string, d: Dict): string {
+  for (const [re, key] of HAND_PATTERNS) {
+    const m = re.exec(name)
+    if (!m) continue
+    const r = (w?: string) => (w !== undefined && w in RANK_WORDS ? d.holdem.ranks[RANK_WORDS[w]] : w ?? '')
+    return d.holdem.hands[key].replace('{a}', r(m[1])).replace('{b}', r(m[2]))
+  }
+  return name
+}
 
 export function usePlayT() {
   const { lang } = useI18n()
-  const s = lang === 'zh' ? zh : en
+  const l = lang as PlayLang
+  const s = dicts[l] ?? en
   const f = (str: string, vars: Record<string, string | number>) => str.replace(/\{(\w+)\}/g, (_, k) => String(vars[k] ?? ''))
-  return { s, f, lang }
+  const local = AGENTS[l]
+  const agentText = (a: AgentLike | undefined, field: keyof AgentText): string => {
+    if (!a) return ''
+    // the server's per-language copy wins; then the local ko/ja table (older
+    // servers, the static roster); then the legacy en/zh fields
+    const fromApi = a.i18n?.[l]?.[field]
+    if (fromApi) return fromApi
+    const t = local?.[a.id]?.[field]
+    if (t) return t
+    if (a.i18n?.en?.[field] && l !== 'zh') return a.i18n.en[field]!
+    if (l === 'zh') return (a[`${field}_zh` as const] || a[field] || '') as string
+    return a[field] || ''
+  }
+  // English hand names (from the server or the mock evaluator) in the
+  // player's language; anything unrecognised is shown as is.
+  const handName = (name: string | undefined | null) => (!name ? '' : l === 'en' ? name : localHandName(name, s))
+  return { s, f, lang, agentText, handName }
 }

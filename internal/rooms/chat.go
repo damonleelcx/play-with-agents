@@ -597,10 +597,15 @@ var (
 	cardSuit = regexp.MustCompile(`(10|[2-9TJQKA])\s?([♠♥♦♣])|([♠♥♦♣])\s?(10|[2-9TJQKA])`)
 	cardWord = regexp.MustCompile(`(?i)\b(two|three|four|five|six|seven|eight|nine|ten|jack|queen|king|ace)s? of (spade|heart|diamond|club)s?\b`)
 	cardZH   = regexp.MustCompile(`(黑桃|红桃|红心|方块|方片|梅花|草花)\s?(10|[2-9JQKA])`)
+	// Japanese and Korean: "スペードのA", "ハートのエース", "스페이드 A", "하트 에이스".
+	cardJK = regexp.MustCompile(`(スペード|ハート|ダイヤモンド|ダイヤ|クラブ|스페이드|하트|다이아몬드|다이아|클로버|클럽)\s?の?\s?(10|[2-9JQKA]|エース|キング|クイーン|ジャック|에이스|킹|퀸|잭)`)
 )
 
 var suitSym = map[string]string{"♠": "s", "♥": "h", "♦": "d", "♣": "c"}
 var suitZH = map[string]string{"黑桃": "s", "红桃": "h", "红心": "h", "方块": "d", "方片": "d", "梅花": "c", "草花": "c"}
+var suitJK = map[string]string{"スペード": "s", "ハート": "h", "ダイヤモンド": "d", "ダイヤ": "d", "クラブ": "c",
+	"스페이드": "s", "하트": "h", "다이아몬드": "d", "다이아": "d", "클로버": "c", "클럽": "c"}
+var rankJK = map[string]string{"エース": "A", "キング": "K", "クイーン": "Q", "ジャック": "J", "에이스": "A", "킹": "K", "퀸": "Q", "잭": "J"}
 var rankWord = map[string]string{"two": "2", "three": "3", "four": "4", "five": "5", "six": "6", "seven": "7", "eight": "8",
 	"nine": "9", "ten": "T", "jack": "J", "queen": "Q", "king": "K", "ace": "A"}
 
@@ -657,6 +662,13 @@ func revealsHidden(text string, public map[string]bool) bool {
 	for _, m := range cardZH.FindAllStringSubmatch(text, -1) {
 		found = append(found, normCard(m[2], suitZH[m[1]]))
 	}
+	for _, m := range cardJK.FindAllStringSubmatch(text, -1) {
+		rank := m[2]
+		if r, ok := rankJK[rank]; ok {
+			rank = r
+		}
+		found = append(found, normCard(rank, suitJK[m[1]]))
+	}
 	for _, c := range found {
 		if !public[c] {
 			return true
@@ -669,7 +681,7 @@ func revealsHidden(text string, public map[string]bool) bool {
 // when it cannot be used (empty, or naming a card that is not public).
 func sanitizeLine(text, speaker string, names []string, public map[string]bool) string {
 	text = strings.Join(strings.Fields(text), " ")
-	text = strings.Trim(text, `"“”'「」 `)
+	text = strings.Trim(text, `"“”'「」『』 `)
 	for _, p := range []string{speaker + ":", speaker + "：", "**" + speaker + "**:"} {
 		text = strings.TrimSpace(strings.TrimPrefix(text, p))
 	}
@@ -679,7 +691,7 @@ func sanitizeLine(text, speaker string, names []string, public map[string]bool) 
 	}
 	if r := []rune(text); len(r) > maxAgentRunes {
 		cut := string(r[:maxAgentRunes-1])
-		if i := strings.LastIndexAny(cut, " ，。,.!?！？"); i > maxAgentRunes/2 {
+		if i := strings.LastIndexAny(cut, " ，。、,.!?！？"); i > maxAgentRunes/2 {
 			cut = cut[:i]
 		}
 		text = strings.TrimSpace(cut) + "…"

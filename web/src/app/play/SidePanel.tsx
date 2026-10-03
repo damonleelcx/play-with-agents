@@ -2,10 +2,11 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { PLAYER_COLORS, type TableView } from '../../lib/playApi'
 import { Avatar, VoiceWave } from './parts'
 import { usePlayT } from './strings'
+import { uiLocale } from '../../lib/i18n'
 
 function hhmm(at: string) {
   const d = new Date(at)
-  return isNaN(+d) ? '' : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+  return isNaN(+d) ? '' : d.toLocaleTimeString(uiLocale(), { hour: '2-digit', minute: '2-digit' })
 }
 
 export default function SidePanel({

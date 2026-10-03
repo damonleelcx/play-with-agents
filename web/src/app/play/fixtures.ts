@@ -1030,7 +1030,7 @@ export function createMock(kind: string | null): MockGame | null {
 
 // Mock lobby data for /app/games when the API is unavailable in mock mode.
 export const MOCK_GAMES = {
-  builtin: [{ id: 'holdem', kind: 'builtin', name: "Texas Hold'em", summary: 'No-limit hold’em for 2 to 9 players.', min_seats: 2, max_seats: 9, hidden_info: true, status: 'published', visibility: 'public', version: 1, plays: 1284 }],
+  builtin: [{ id: 'holdem', kind: 'builtin', name: "Texas Hold'em", summary: 'No-limit hold’em for 2 to 9 players.', min_seats: 2, max_seats: 9, hidden_info: true, status: 'published', visibility: 'public', version: 1, plays: 1284, cover: '/play/covers/holdem.webp' }],
   mine: [{ id: 'sevens', kind: 'script', name: 'Lucky Sevens', summary: 'Shed your hand by matching suit or rank. Sevens are wild.', min_seats: 2, max_seats: 5, hidden_info: true, status: 'draft', visibility: 'private', version: 3, plays: 12 }],
   community: [
     { id: 'c4', kind: 'script', name: 'Connect Four', summary: 'Drop discs, line up four.', min_seats: 2, max_seats: 2, hidden_info: false, status: 'published', visibility: 'public', owner_name: 'Yuki', version: 2, plays: 341 },

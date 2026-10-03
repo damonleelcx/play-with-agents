@@ -8,6 +8,7 @@ import (
 
 	"github.com/damonleelcx/play-with-agents/internal/engine"
 	"github.com/damonleelcx/play-with-agents/internal/games/script"
+	"github.com/damonleelcx/play-with-agents/internal/persona"
 	"github.com/damonleelcx/play-with-agents/internal/skills"
 )
 
@@ -36,6 +37,7 @@ var registerOnce sync.Once
 func Register() {
 	registerOnce.Do(func() {
 		registerTools()
+		registerArtTool()
 		registerVerifiers()
 		registerRoles()
 		skills.Register(playbook())
@@ -50,7 +52,8 @@ func playbook() *skills.Skill {
 		Name: Skill, Domain: Domain, Title: "Build a game", TitleZH: "制作游戏", Fixed: true,
 		Description: "Designer writes the rules → Engineer writes the JavaScript module until it passes the contract check → " +
 			"Playtester simulates hundreds of games → an independent Critic reviews rules vs module vs report → the owner approves publishing. " +
-			"A failed playtest or a critic's 'revise' sends the module back to the Engineer (bounded by the replan limit).",
+			"A failed playtest or a critic's 'revise' sends the module back to the Engineer (bounded by the replan limit). " +
+			"In parallel, once the rules exist, the Artist paints the cover; nothing waits for it.",
 		Criteria:   criteria("en"),
 		Milestones: milestones("en"),
 		Steps: []skills.Step{
@@ -60,6 +63,11 @@ func playbook() *skills.Skill {
 			{Key: "write-module", Title: "Build the game module", Role: RoleEngineer, Deps: []string{"design-rules"},
 				Tools: []string{ToolSaveModule, ToolReadExample}, Verify: []string{VerifyModuleChecks}, MaxSteps: engineSteps,
 				Instructions: "Implement the rules as a JavaScript game module and save it with save_module until the contract check passes."},
+			// The Artist runs beside the build: no step depends on it, it
+			// needs no approval, and its tool always succeeds (a procedural
+			// cover when the image model is unavailable).
+			{Key: "illustrate-cover", Title: "Illustrate the cover", Role: RoleArtist, Deps: []string{"design-rules"},
+				Tool: ToolIllustrate},
 			{Key: "playtest", Title: "Playtest hundreds of games", Role: RolePlaytester, Deps: []string{"write-module"},
 				Tool: ToolPlaytest, Verify: []string{VerifyPlaytestPassed}},
 			{Key: "critic-review", Title: "Independent review", Role: RoleCritic, Deps: []string{"playtest"},
@@ -256,9 +264,4 @@ func coordinatorContext(ctx context.Context, s *engine.Store, g *engine.Goal, t 
 		t.Spec.Instructions, game.Name, gameID, v.Version, gameID, v.Version, langName(g.Language), truncate(str(v.Report, "review", "markdown"), 2000)), nil
 }
 
-func langName(lang string) string {
-	if lang == "zh" {
-		return "Simplified Chinese (简体中文)"
-	}
-	return "English"
-}
+func langName(lang string) string { return persona.LangName(lang) }

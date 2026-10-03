@@ -1,6 +1,10 @@
 package agents
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 func TestRosterMatchesContract(t *testing.T) {
 	want := []string{"aoi", "ren", "mika", "bram", "nova", "lin"}
@@ -62,7 +66,7 @@ func TestPersonaSkillAndFallback(t *testing.T) {
 	}
 	for _, id := range IDs() {
 		for _, tr := range []string{TriggerJoin, TriggerAllIn, TriggerBigPot, TriggerWin, TriggerLoss, TriggerBust, TriggerGameOver, TriggerReply, TriggerBanter, "unknown"} {
-			for _, lang := range []string{"en", "zh"} {
+			for _, lang := range []string{"en", "zh", "ko", "ja"} {
 				l := Fallback(id, tr, lang, "salt")
 				if l == "" || len([]rune(l)) > 140 {
 					t.Fatalf("Fallback(%s,%s,%s) = %q", id, tr, lang, l)
@@ -71,6 +75,54 @@ func TestPersonaSkillAndFallback(t *testing.T) {
 					t.Fatal("fallback must be deterministic")
 				}
 			}
+		}
+	}
+}
+
+// Every agent has a full profile in every language, and the JSON keeps the
+// original flat fields for old clients next to the i18n map.
+func TestProfilesInEveryLanguage(t *testing.T) {
+	names := map[string][2]string{"aoi": {"아오이", "葵"}, "ren": {"렌", "レン"}, "mika": {"미카", "ミカ"},
+		"bram": {"브램 선장", "ブラム船長"}, "nova": {"노바", "ノヴァ"}, "lin": {"린", "リン"}}
+	for _, a := range All() {
+		for _, lang := range []string{"en", "zh", "ko", "ja"} {
+			p, ok := a.I18n[lang]
+			if !ok || p.Name == "" || p.Title == "" || p.Bio == "" {
+				t.Fatalf("%s has no complete %s profile: %+v", a.ID, lang, p)
+			}
+		}
+		if a.I18n["en"].Name != a.Name || a.I18n["zh"].Bio != a.BioZH {
+			t.Fatalf("%s: i18n en/zh must mirror the flat fields", a.ID)
+		}
+		if a.DisplayName("ko") != names[a.ID][0] || a.DisplayName("ja") != names[a.ID][1] || a.DisplayName("fr") != a.Name {
+			t.Fatalf("%s display names: ko %q ja %q", a.ID, a.DisplayName("ko"), a.DisplayName("ja"))
+		}
+		// Korean and Japanese fallback lines exist for every trigger, so a
+		// ko/ja table never falls back to English.
+		for _, lang := range []string{"ko", "ja"} {
+			for _, tr := range []string{TriggerJoin, TriggerAllIn, TriggerWin, TriggerLoss, TriggerGameOver, TriggerReply, TriggerBanter} {
+				if len(bankI18n[lang][a.ID][tr]) == 0 {
+					t.Fatalf("no %s fallback for %s/%s", lang, a.ID, tr)
+				}
+			}
+		}
+	}
+	if got := Fallback("ren", "unknown-trigger", "ja", "x"); got != "忍耐だ。" && got != "……" {
+		t.Fatalf("unknown trigger in ja should use the banter lines, got %q", got)
+	}
+	if got := Fallback("nobody", TriggerJoin, "ko", "x"); got != bankI18n["ko"][Host][TriggerJoin][0] && got != bankI18n["ko"][Host][TriggerJoin][1] {
+		t.Fatalf("unknown agent in ko should speak as the host, got %q", got)
+	}
+	// Clients must not be able to mutate the roster through a copy.
+	a, _ := Get("aoi")
+	a.I18n["ko"] = Text{}
+	if b, _ := Get("aoi"); b.I18n["ko"].Name != "아오이" {
+		t.Fatal("Get must return a copy of the i18n map")
+	}
+	raw, _ := json.Marshal(All()[0])
+	for _, k := range []string{`"name":"Aoi"`, `"name_zh":"葵"`, `"title_zh"`, `"bio_zh"`, `"i18n":{`, `"ko":{"name":"아오이"`, `"ja":{"name":"葵"`} {
+		if !strings.Contains(string(raw), k) {
+			t.Fatalf("GET /api/agents JSON lacks %s: %s", k, raw)
 		}
 	}
 }

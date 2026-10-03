@@ -431,12 +431,26 @@ func (s *Service) DeleteAccount(ctx context.Context, userID, password string) er
 	return err
 }
 
-// ── Mail templates (English / 中文) ─────────────────────────────────────────
+// ── Mail templates (English / 中文 / 한국어 / 日本語) ─────────────────────────
 // Aoi writes them. They carry a link and nothing else of value: the token is
 // single-use and short-lived, and only its hash is stored.
 
 func verifyMail(lang, name, link string) mailer.Message {
 	sig := mailer.Signature(lang)
+	switch lang {
+	case "ja":
+		lead := jaGreet(name) + "Play with Agents の AI ホスト、葵です。テーブルにあなたの席を取っておいたよ。まずは、このメールアドレスがあなたのものか確認させてね："
+		foot := "リンクの有効期限は 48 時間です。登録した覚えがなければ、このメールは無視してください。"
+		return mailer.Message{Subject: "メールアドレスの確認 · Play with Agents",
+			Text: fmt.Sprintf("%s\n\n%s\n\n%s\n\n%s", lead, link, foot, sig),
+			HTML: mailer.Page(lang, "メールアドレスを確認してね", lead, "メールアドレスを確認", link, foot)}
+	case "ko":
+		lead := koGreet(name) + " 저는 Play with Agents의 AI 호스트, 아오이예요. 테이블에 자리를 맡아 뒀어요 — 먼저 이 이메일이 맞는지만 확인해 주세요:"
+		foot := "링크는 48시간 동안 유효해요. 가입한 적이 없다면 이 메일은 무시하셔도 괜찮아요."
+		return mailer.Message{Subject: "이메일 확인 · Play with Agents",
+			Text: fmt.Sprintf("%s\n\n%s\n\n%s\n\n%s", lead, link, foot, sig),
+			HTML: mailer.Page(lang, "이메일을 확인해 주세요", lead, "이메일 확인하기", link, foot)}
+	}
 	if lang == "zh" {
 		lead := greetName(name) + "你好！我是葵，Play with Agents 的 AI 主持人。牌桌已经给你留好位置了——先确认一下这是你的邮箱："
 		return mailer.Message{Subject: "确认你的邮箱 · Play with Agents",
@@ -451,6 +465,20 @@ func verifyMail(lang, name, link string) mailer.Message {
 
 func resetMail(lang, name, link string) mailer.Message {
 	sig := mailer.Signature(lang)
+	switch lang {
+	case "ja":
+		lead := jaGreet(name) + "パスワード再設定のリクエストを受け取ったよ。下のボタンから新しいパスワードを設定して、またテーブルに戻ってきてね！"
+		foot := "リンクの有効期限は 1 時間で、使えるのは 1 回だけです。心当たりがなければ、このメールは無視してください。パスワードは変わりません。"
+		return mailer.Message{Subject: "パスワードの再設定 · Play with Agents",
+			Text: fmt.Sprintf("%s\n\n%s\n\n%s\n\n%s", lead, link, foot, sig),
+			HTML: mailer.Page(lang, "パスワードの再設定", lead, "新しいパスワードを設定", link, foot)}
+	case "ko":
+		lead := koGreet(name) + " 비밀번호 재설정 요청을 받았어요. 아래 버튼으로 새 비밀번호를 설정하고, 다시 테이블로 돌아오세요!"
+		foot := "링크는 1시간 동안 유효하고 한 번만 사용할 수 있어요. 직접 요청하지 않았다면 이 메일은 무시하세요 — 비밀번호는 바뀌지 않아요."
+		return mailer.Message{Subject: "비밀번호 재설정 · Play with Agents",
+			Text: fmt.Sprintf("%s\n\n%s\n\n%s\n\n%s", lead, link, foot, sig),
+			HTML: mailer.Page(lang, "비밀번호 재설정", lead, "새 비밀번호 설정하기", link, foot)}
+	}
 	if lang == "zh" {
 		lead := greetName(name) + "你好，我们收到了重置密码的请求。点下面的按钮设置新密码，然后回来接着玩！"
 		return mailer.Message{Subject: "重置你的密码 · Play with Agents",
@@ -468,6 +496,23 @@ func orThere(n string) string {
 		return "there"
 	}
 	return n
+}
+
+// jaGreet opens a Japanese email: "Sam さん、こんにちは！" or just
+// "こんにちは！".
+func jaGreet(n string) string {
+	if n == "" {
+		return "こんにちは！"
+	}
+	return n + " さん、こんにちは！"
+}
+
+// koGreet opens a Korean email: "Sam 님, 안녕하세요!" or "안녕하세요!".
+func koGreet(n string) string {
+	if n == "" {
+		return "안녕하세요!"
+	}
+	return n + " 님, 안녕하세요!"
 }
 
 func greetName(n string) string {

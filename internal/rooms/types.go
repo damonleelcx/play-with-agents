@@ -147,7 +147,7 @@ type Settings struct {
 	AgentSpeed  string   `json:"agent_speed"`      // fast | natural | slow
 	TableTalk   string   `json:"table_talk"`       // all | quiet | off
 	Difficulty  string   `json:"agent_difficulty"` // casual | regular | shark
-	Language    string   `json:"language"`         // en | zh
+	Language    string   `json:"language"`         // en | zh | ko | ja
 	FillEmpty   bool     `json:"fill_empty_seats"`
 	Favorites   []string `json:"favorite_agents,omitempty"`
 }
@@ -163,7 +163,7 @@ type ChatRequest struct {
 	AgentName string
 	Voice     string
 	Persona   games.Persona
-	Language  string // en | zh
+	Language  string // en | zh | ko | ja
 	Trigger   string // agents.Trigger*
 	About     string // the triggering event or message, names substituted
 	Table     string // public summary of the table
