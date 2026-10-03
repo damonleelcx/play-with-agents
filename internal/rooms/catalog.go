@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/damonleelcx/play-with-agents/internal/art"
 	"github.com/damonleelcx/play-with-agents/internal/games"
 )
 
@@ -49,17 +50,29 @@ type GameList struct {
 	Community []GameCard `json:"community"`
 }
 
-func builtinCard(m games.Meta, plays int) GameCard {
+func builtinCard(m games.Meta, plays, coverVersion int) GameCard {
 	return GameCard{ID: m.ID, Kind: "builtin", Name: m.Name, Summary: m.Summary, MinSeats: m.MinSeats, MaxSeats: m.MaxSeats,
-		HiddenInfo: m.HiddenInfo, Status: "published", Visibility: "public", Plays: plays}
+		HiddenInfo: m.HiddenInfo, Status: "published", Visibility: "public", Plays: plays,
+		Cover: coverURL(m.ID, coverVersion, art.StaticURL(m.ID))}
+}
+
+// coverURL is a game's cover: the stored one (versioned for caching), else
+// the cover shipped with the web app, else none.
+func coverURL(id string, version int, static string) string {
+	if version > 0 {
+		return fmt.Sprintf("/api/games/%s/cover?v=%d", id, version)
+	}
+	return static
 }
 
 const cardCols = `g.id, g.kind, g.name, g.summary, g.status, g.visibility, coalesce(u.name,''), coalesce(v.version, g.current_version), g.plays,
-	coalesce(v.meta, '{}'), g.rules_md, coalesce(g.goal_id::text,''), coalesce(g.owner_id::text,''), g.owner_gone`
+	coalesce(v.meta, '{}'), g.rules_md, coalesce(g.goal_id::text,''), coalesce(g.owner_id::text,''), g.owner_gone,
+	coalesce(cv.version, 0)`
 
 // The card shows the published version, or — for a game not published yet —
 // its newest version, so a draft already lists its seats.
 const cardFrom = ` FROM games g LEFT JOIN users u ON u.id = g.owner_id
+	LEFT JOIN game_covers cv ON cv.game_id = g.id
 	LEFT JOIN game_versions v ON v.game_id = g.id AND v.version = CASE WHEN g.current_version > 0 THEN g.current_version
 		ELSE (SELECT max(version) FROM game_versions WHERE game_id = g.id) END`
 
@@ -71,13 +84,14 @@ type cardRow struct {
 	GameCard
 	rules, goal, owner string
 	ownerGone          bool
+	coverVersion       int
 }
 
 func scanCard(row pgx.Row) (*cardRow, error) {
 	var c cardRow
 	var meta []byte
 	if err := row.Scan(&c.ID, &c.Kind, &c.Name, &c.Summary, &c.Status, &c.Visibility, &c.OwnerName, &c.Version, &c.Plays,
-		&meta, &c.rules, &c.goal, &c.owner, &c.ownerGone); err != nil {
+		&meta, &c.rules, &c.goal, &c.owner, &c.ownerGone, &c.coverVersion); err != nil {
 		return nil, err
 	}
 	var m games.Meta
@@ -90,6 +104,13 @@ func scanCard(row pgx.Row) (*cardRow, error) {
 			c.OwnerName = formerOwner
 		}
 	}
+	// The seeded examples' shipped covers are theirs only while nobody
+	// else owns the id.
+	static := ""
+	if c.owner == "" && !c.ownerGone {
+		static = art.StaticURL(c.ID)
+	}
+	c.Cover = coverURL(c.ID, c.coverVersion, static)
 	return &c, nil
 }
 
@@ -97,21 +118,22 @@ func scanCard(row pgx.Row) (*cardRow, error) {
 // Unlisted games are reachable only by id (GameDetail).
 func (s *Service) Games(ctx context.Context, userID string) (*GameList, error) {
 	out := &GameList{Builtin: []GameCard{}, Mine: []GameCard{}, Community: []GameCard{}}
-	plays := map[string]int{}
-	rows, err := s.Pool.Query(ctx, `SELECT id, plays FROM games WHERE kind='builtin'`)
+	plays, covers := map[string]int{}, map[string]int{}
+	rows, err := s.Pool.Query(ctx, `SELECT g.id, g.plays, coalesce(c.version, 0) FROM games g
+		LEFT JOIN game_covers c ON c.game_id = g.id WHERE g.kind='builtin'`)
 	if err != nil {
 		return nil, err
 	}
 	for rows.Next() {
 		var id string
-		var n int
-		if rows.Scan(&id, &n) == nil {
-			plays[id] = n
+		var n, cv int
+		if rows.Scan(&id, &n, &cv) == nil {
+			plays[id], covers[id] = n, cv
 		}
 	}
 	rows.Close()
 	for _, m := range games.Builtins() {
-		out.Builtin = append(out.Builtin, builtinCard(m, plays[m.ID]))
+		out.Builtin = append(out.Builtin, builtinCard(m, plays[m.ID], covers[m.ID]))
 	}
 	rows, err = s.Pool.Query(ctx, `SELECT `+cardCols+cardFrom+`
 		WHERE g.kind='script' AND (g.owner_id=$1 OR (g.status='published' AND g.visibility='public'))
@@ -139,9 +161,10 @@ func (s *Service) Games(ctx context.Context, userID string) (*GameList, error) {
 func (s *Service) GameDetail(ctx context.Context, userID, id string) (*GameDetail, error) {
 	if g, ok := games.Builtin(id); ok {
 		m := g.Meta()
-		var plays int
-		_ = s.Pool.QueryRow(ctx, `SELECT plays FROM games WHERE id=$1`, id).Scan(&plays)
-		return &GameDetail{GameCard: builtinCard(m, plays), RulesMD: m.RulesMD, Versions: []GameVersion{}}, nil
+		var plays, cv int
+		_ = s.Pool.QueryRow(ctx, `SELECT g.plays, coalesce(c.version, 0) FROM games g LEFT JOIN game_covers c ON c.game_id = g.id
+			WHERE g.id=$1`, id).Scan(&plays, &cv)
+		return &GameDetail{GameCard: builtinCard(m, plays, cv), RulesMD: m.RulesMD, Versions: []GameVersion{}}, nil
 	}
 	c, err := scanCard(s.Pool.QueryRow(ctx, `SELECT `+cardCols+cardFrom+` WHERE g.id=$1 AND g.kind='script'`, id))
 	if errors.Is(err, pgx.ErrNoRows) {
@@ -243,4 +266,51 @@ func SourceLoader(pool *pgxpool.Pool, compile func(id, src string) (games.Game, 
 		}
 		return compile(id, src)
 	}
+}
+
+// Cover is a game's stored cover, for someone who may see the game
+// (GameDetail's rules). static is the web app's shipped cover when there is
+// no stored one (built-ins and seeded examples); both empty means none.
+type Cover struct {
+	Bytes       []byte
+	ContentType string
+	Version     int
+	Static      string
+}
+
+// GameCover returns the cover of a game the user may see, ErrNotFound
+// otherwise (and for a game with neither a stored nor a shipped cover).
+func (s *Service) GameCover(ctx context.Context, userID, id string) (*Cover, error) {
+	static := ""
+	if _, ok := games.Builtin(id); ok {
+		static = art.StaticURL(id)
+	} else {
+		var owner, status, visibility string
+		var gone bool
+		err := s.Pool.QueryRow(ctx, `SELECT coalesce(owner_id::text,''), status, visibility, owner_gone FROM games WHERE id=$1 AND kind='script'`, id).
+			Scan(&owner, &status, &visibility, &gone)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrNotFound
+		}
+		if err != nil {
+			return nil, err
+		}
+		if owner != userID && (status != "published" || visibility == "private") {
+			return nil, ErrNotFound
+		}
+		if owner == "" && !gone {
+			static = art.StaticURL(id)
+		}
+	}
+	b, ct, v, ok, err := art.Load(ctx, s.Pool, id)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		if static == "" {
+			return nil, ErrNotFound
+		}
+		return &Cover{Static: static}, nil
+	}
+	return &Cover{Bytes: b, ContentType: ct, Version: v}, nil
 }

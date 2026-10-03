@@ -54,6 +54,11 @@ type Config struct {
 	// TTSDailyChars is each account's daily allowance of characters Aoi
 	// reads aloud (only lines that reach the vendor count).
 	TTSDailyChars int
+
+	// Cover art (internal/art): DashScope text-to-image. Optional: without
+	// a key every cover is the procedural one.
+	ImageAPIKey string
+	ImageModel  string
 }
 
 func Load() (Config, error) {
@@ -83,6 +88,8 @@ func Load() (Config, error) {
 		TTSVoiceID:            os.Getenv("PLAY_TTS_VOICE_ID"),
 		TTSModel:              env("PLAY_TTS_MODEL", "s2.1-pro-free"),
 		TTSDailyChars:         envInt("PLAY_TTS_DAILY_CHARS", 20000),
+		ImageAPIKey:           os.Getenv("PLAY_IMAGE_API_KEY"),
+		ImageModel:            env("PLAY_IMAGE_MODEL", "wan2.5-t2i-preview"),
 	}
 	for _, e := range strings.Split(os.Getenv("PLAY_ADMIN_EMAILS"), ",") {
 		if e = strings.ToLower(strings.TrimSpace(e)); e != "" {

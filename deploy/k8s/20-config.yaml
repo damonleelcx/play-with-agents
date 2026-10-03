@@ -28,6 +28,9 @@ data:
   # in the privacy policy); s2.1-pro does not. The key is in play-voice.
   PLAY_TTS_VOICE_ID: "df5c6c19dca944918dcbd6f1368fd02f"
   PLAY_TTS_MODEL: "s2.1-pro-free"
+  # Game covers (the studio's Artist): DashScope text-to-image, falling back
+  # to wan2.2-t2i-flash, then to a procedural cover. The key is in `play`.
+  PLAY_IMAGE_MODEL: "wan2.5-t2i-preview"
   # Spending ceilings (tokens/day). A public sign-up form sits in front of a
   # paid key: the per-account cap bounds one person, the deployment cap bounds
   # everyone.

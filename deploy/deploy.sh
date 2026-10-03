@@ -5,7 +5,7 @@
 #   INSTANCE=i-… deploy/deploy.sh 373468206837.dkr.ecr.us-east-1.amazonaws.com/play@sha256:…
 #
 # Prerequisites (one-time, see deploy/README.md):
-#   - Secrets Manager `play/prod` with PLAY_DATABASE_URL and PLAY_LLM_API_KEY
+#   - Secrets Manager `play/prod` with PLAY_DATABASE_URL, PLAY_LLM_API_KEY and PLAY_IMAGE_API_KEY
 #   - node role inline policy PlaySecretsRead on secret:play/*
 #   - Route53 A record play.heros-agent.space → the node's public IP
 set -euo pipefail
@@ -25,10 +25,13 @@ for f in "$HERE"/k8s/*.yaml; do
   # A separator between files, never a plain cat: concatenation silently
   # merges the last document of one file into the first of the next.
   printf -- '---\n'
-  sed "s|PLAY_IMAGE|${IMAGE}|g" "$f"
+  # Only the `image: PLAY_IMAGE` placeholder: env names such as
+  # PLAY_IMAGE_API_KEY and PLAY_IMAGE_MODEL must pass through untouched.
+  sed -E "s#^([[:space:]]*image:[[:space:]]*)PLAY_IMAGE[[:space:]]*\$#\1${IMAGE}#" "$f"
   printf '\n'
 done > "$OUT"
-grep -q "PLAY_IMAGE" "$OUT" && { echo "unsubstituted PLAY_IMAGE" >&2; exit 1; }
+grep -Eq "image:[[:space:]]*PLAY_IMAGE" "$OUT" && { echo "unsubstituted PLAY_IMAGE" >&2; exit 1; }
+grep -q "PLAY_IMAGE_API_KEY" "$OUT" || { echo "PLAY_IMAGE_API_KEY lost in rendering" >&2; exit 1; }
 SUM=$(sha256sum "$OUT" | cut -d' ' -f1)
 PAYLOAD=$(gzip -9 < "$OUT" | base64 | tr -d '\n')
 echo "    $(grep -c '^---' "$OUT") documents, sha256 ${SUM:0:16}…"
