@@ -7,9 +7,10 @@ import { useSession } from '../lib/session'
 import Img from './landing/Img'
 import PokerTable from './landing/PokerTable'
 import {
-  IArrow, IBulb, IChat, ICheck, IChip, IClock, IClose, IDice, IEyeOff, IMenu, ISend, IShuffle, ISpark, Logo, useReveal,
+  IArrow, IBulb, IChat, ICheck, IChip, IClock, IClose, IDice, IEyeOff, IMenu, IMoon, ISend, IShuffle, ISpark, ISun, Logo, useReveal,
 } from './landing/parts'
 import { landingStrings } from './landing/strings'
+import { useLandingTheme } from './landing/theme'
 import '../styles/landing.css'
 
 // Play with Agents, the landing page. Five sections:
@@ -27,6 +28,7 @@ export default function Landing() {
   const { lang } = useI18n()
   const t = landingStrings[lang] ?? landingStrings.en
   const { user } = useSession()
+  const { mode, toggle } = useLandingTheme(!!user)
   const [menu, setMenu] = useState(false)
   const [dock, setDock] = useState(false)
   const heroRef = useRef<HTMLElement>(null)
@@ -85,6 +87,19 @@ export default function Landing() {
 
   const startHref = user ? '/app' : '/signup'
 
+  // sun in dark (go light), moon in light (go dark)
+  const themeBtn = (
+    <button
+      type="button"
+      className="theme-btn"
+      aria-label={mode === 'light' ? t.nav.toDark : t.nav.toLight}
+      title={mode === 'light' ? t.nav.toDark : t.nav.toLight}
+      onClick={toggle}
+    >
+      {mode === 'light' ? <IMoon width={18} height={18} /> : <ISun width={18} height={18} />}
+    </button>
+  )
+
   return (
     <div className={`lp lang-${lang}`}>
       <a className="lp-skip" href="#main">
@@ -112,6 +127,7 @@ export default function Landing() {
             </ul>
             <div className="hero-actions">
               <LangSwitch />
+              {themeBtn}
               <span className="hero-auth">{authActions()}</span>
               <button
                 ref={menuBtn}
@@ -584,7 +600,10 @@ export default function Landing() {
           ))}
         </ul>
         <div className="lp-menu-foot">
-          <LangSwitch />
+          <span className="lp-menu-prefs">
+            <LangSwitch />
+            {themeBtn}
+          </span>
           <span className="lp-menu-auth">{authActions()}</span>
         </div>
       </div>

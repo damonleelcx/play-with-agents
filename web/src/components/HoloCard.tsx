@@ -221,13 +221,23 @@ export default function HoloCard({
     let dpr = 1
     let sprite: HTMLCanvasElement | null = null
     let spriteBlue: HTMLCanvasElement | null = null
+    // On a light page additive glow washes out, so the day theme draws
+    // deeper, opaque-cored embers with normal blending.
+    let spriteDay: HTMLCanvasElement | null = null
+    let spriteBlueDay: HTMLCanvasElement | null = null
+    const html = document.documentElement
+    let day = html.dataset.theme === 'light'
+    const mo = new MutationObserver(() => {
+      day = html.dataset.theme === 'light'
+    })
+    mo.observe(html, { attributes: true, attributeFilter: ['data-theme'] })
 
-    const makeSprite = (inner: string, outer: string) => {
+    const makeSprite = (inner: string, outer: string, core = '#fff6e6') => {
       const c = document.createElement('canvas')
       c.width = c.height = 32
       const g = c.getContext('2d')!
       const grd = g.createRadialGradient(16, 16, 0, 16, 16, 16)
-      grd.addColorStop(0, '#fff6e6')
+      grd.addColorStop(0, core)
       grd.addColorStop(0.18, inner)
       grd.addColorStop(0.45, outer)
       grd.addColorStop(1, 'rgba(0,0,0,0)')
@@ -262,9 +272,11 @@ export default function HoloCard({
     }
 
     const drawEmbers = (dt: number, t: number) => {
-      if (!ctx || !sprite || !spriteBlue) return
+      if (!ctx || !sprite || !spriteBlue || !spriteDay || !spriteBlueDay) return
       ctx.clearRect(0, 0, cw, ch)
-      ctx.globalCompositeOperation = 'lighter'
+      ctx.globalCompositeOperation = day ? 'source-over' : 'lighter'
+      const warm = day ? spriteDay : sprite
+      const cool = day ? spriteBlueDay : spriteBlue
       for (const p of parts) {
         p.life += dt
         if (p.life > p.max || p.y < -20) spawn(p)
@@ -275,7 +287,7 @@ export default function HoloCard({
         const flicker = 0.75 + 0.25 * Math.sin(t * 0.012 + p.ph * 3)
         ctx.globalAlpha = Math.max(0, fade * flicker)
         const size = p.r * 7
-        ctx.drawImage(p.blue ? spriteBlue : sprite, p.x - size / 2, p.y - size / 2, size, size)
+        ctx.drawImage(p.blue ? cool : warm, p.x - size / 2, p.y - size / 2, size, size)
       }
       ctx.globalAlpha = 1
       ctx.globalCompositeOperation = 'source-over'
@@ -328,6 +340,8 @@ export default function HoloCard({
         inited = true
         sprite = makeSprite('#ffc27a', 'rgba(255,120,40,0.35)')
         spriteBlue = makeSprite('#bfe0ff', 'rgba(61,123,255,0.35)')
+        spriteDay = makeSprite('#ff7a1f', 'rgba(226,92,18,0.4)', '#ffd9a8')
+        spriteBlueDay = makeSprite('#3d7bff', 'rgba(42,99,230,0.35)', '#cfe1ff')
         sizeCanvas()
       }
       wake()
@@ -356,6 +370,7 @@ export default function HoloCard({
     return () => {
       io.disconnect()
       ro.disconnect()
+      mo.disconnect()
       if (raf) cancelAnimationFrame(raf)
       stage.removeEventListener('pointermove', onMove)
       stage.removeEventListener('pointerdown', onDown)
@@ -365,7 +380,7 @@ export default function HoloCard({
       stage.removeEventListener('dblclick', onDbl)
       stage.removeEventListener('keydown', onKey)
       parts = []
-      sprite = spriteBlue = null
+      sprite = spriteBlue = spriteDay = spriteBlueDay = null
       canvas.width = canvas.height = 0
     }
   }, [])
