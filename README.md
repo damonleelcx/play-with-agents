@@ -151,7 +151,7 @@ code below.
 <p align="center"><a href="https://patreon.com/damonleelcx"><img src="https://img.shields.io/badge/Patreon-Support%20Play%20with%20Agents-F96854?style=for-the-badge&logo=patreon&logoColor=white" alt="Support Play with Agents on Patreon" height="32"></a></p>
 
 <p align="center">
-  <img src="docs/assets/sponsor-afdian.jpg" alt="Afdian sponsor card: scan the QR code to sponsor the creator of Play with Agents" width="360">
+  <img src="docs/assets/sponsor-afdian-2.jpg" alt="Afdian sponsor card for damonleelcx: scan the QR code to sponsor the creator of Play with Agents" width="420">
 </p>
 
 ---
