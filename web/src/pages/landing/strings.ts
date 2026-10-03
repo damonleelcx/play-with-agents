@@ -18,6 +18,8 @@ const en = {
     menu: 'Open menu',
     close: 'Close menu',
     menuTitle: 'Menu',
+    toLight: 'Switch to light theme',
+    toDark: 'Switch to dark theme',
   },
   hero: {
     tagline: ['A GAME TABLE THAT IS', 'ALWAYS FULL — EVEN AT 2 A.M.'],
@@ -192,6 +194,8 @@ const zh: LandingStrings = {
     menu: '打开菜单',
     close: '关闭菜单',
     menuTitle: '菜单',
+    toLight: '切换到浅色主题',
+    toDark: '切换到深色主题',
   },
   hero: {
     tagline: ['一张永远坐满的牌桌', '哪怕是凌晨两点'],

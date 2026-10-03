@@ -9,6 +9,7 @@ import './styles/base.css'
 // The landing page loads eagerly (it is the first paint for most visitors);
 // the app and auth pages are split so the landing does not carry them.
 import Landing from './pages/Landing'
+import { landingMode } from './pages/landing/theme'
 const SignIn = lazy(() => import('./pages/auth/SignIn'))
 const SignUp = lazy(() => import('./pages/auth/SignUp'))
 const Verify = lazy(() => import('./pages/auth/Verify'))
@@ -18,10 +19,14 @@ const AppShell = lazy(() => import('./app/AppShell'))
 const Legal = lazy(() => import('./pages/legal/Legal'))
 
 // Paint the cached theme before anything else, so a light-theme reload
-// doesn't flash navy.
+// doesn't flash navy. The landing follows the OS when nothing is saved
+// (pages/landing/theme.ts); the rest of the site stays dark by default.
 try {
   const look = JSON.parse(localStorage.getItem('play.look') || '{}')
-  const light = look.theme === 'light' || (look.theme === 'system' && window.matchMedia?.('(prefers-color-scheme: light)').matches)
+  const light =
+    location.pathname === '/'
+      ? landingMode(look.theme) === 'light'
+      : look.theme === 'light' || (look.theme === 'system' && window.matchMedia?.('(prefers-color-scheme: light)').matches)
   document.documentElement.dataset.theme = light ? 'light' : 'dark'
   if (look.font_size) document.documentElement.dataset.fs = look.font_size
 } catch {}
