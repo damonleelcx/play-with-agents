@@ -313,7 +313,11 @@ func runPlaytest(ctx context.Context, env *tools.Env, a map[string]any) (map[str
 		n = playtestGames(ctx, env)
 	}
 	m := g.Meta()
-	rep := playtest.Run(ctx, g, playtest.Options{Games: n, Seats: seatCounts(m.MinSeats, m.MaxSeats), Seed: int64(v.Version), MaxErrors: 20})
+	// Production runs on one shared core: the run is time-budgeted (well
+	// inside the tool's timeout) and the playtest AI searches lightly; it
+	// only has to show that skill matters, not play well.
+	rep := playtest.Run(ctx, g, playtest.Options{Games: n, Seats: seatCounts(m.MinSeats, m.MaxSeats), Seed: int64(v.Version),
+		MaxErrors: 20, Budget: playtestBudget, AIIterations: 16})
 	if ctx.Err() != nil {
 		return nil, &tools.Transient{Err: fmt.Errorf("playtest interrupted: %w", ctx.Err())}
 	}
@@ -341,6 +345,9 @@ func runPlaytest(ctx context.Context, env *tools.Env, a map[string]any) (map[str
 	return map[string]any{"version": v.Version, "pass": pass, "reasons": reasons, "games": rep.Run,
 		"completed": rep.Completed, "errors": rep.ErrorCount, "summary": truncate(md, 6000)}, nil
 }
+
+// playtestBudget bounds one playtest run; the tool's own timeout is 6 minutes.
+const playtestBudget = 3 * time.Minute
 
 // playtestGames is the owner's playtest_games preference (50/200/500).
 func playtestGames(ctx context.Context, env *tools.Env) int {
