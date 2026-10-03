@@ -88,10 +88,14 @@ type Report struct {
 	Seed    int64     `json:"seed"`
 	Options OptionsIn `json:"options"`
 
-	Run       int `json:"run"`       // games played to an end, an abort or an error
-	Completed int `json:"completed"` // reached an outcome
-	Aborted   int `json:"aborted"`   // hit MaxMoves
-	Errored   int `json:"errored"`
+	Run int `json:"run"` // games played to an end, an abort or an error
+	// Requested is how many games were asked for; BudgetStopped is set when
+	// the time budget ended the run before all of them started.
+	Requested     int  `json:"requested"`
+	BudgetStopped bool `json:"budget_stopped"`
+	Completed     int  `json:"completed"` // reached an outcome
+	Aborted       int  `json:"aborted"`   // hit MaxMoves
+	Errored       int  `json:"errored"`
 
 	ErrorCount int            `json:"error_count"`
 	Errors     []Error        `json:"errors"` // the first MaxErrors, by game
@@ -298,6 +302,7 @@ const (
 	maxSeatShare    = 0.80
 	minAIEdge       = 0.10 // AI win share must beat the baseline by this much
 	minSampleGames  = 20   // balance warnings need this many games
+	minBudgetGames  = 30   // a budget-stopped run needs at least this many
 	minAISampleGame = 10
 )
 
@@ -315,6 +320,13 @@ func (r Report) Verdict() (pass bool, reasons []string) {
 	if r.Run == 0 {
 		failf("no games were played")
 		return pass, reasons
+	}
+	if r.BudgetStopped {
+		if need := max(minBudgetGames, r.Requested/4); r.Run < need {
+			failf("only %d of %d games finished within the time budget (at least %d needed): legal/apply/view or the game's length make it too slow to play", r.Run, r.Requested, need)
+		} else {
+			warnf("the time budget stopped the run after %d of %d games", r.Run, r.Requested)
+		}
 	}
 	if r.FlakyTimeouts > 0 {
 		warnf("%d game(s) timed out once but not on replay (a busy machine, not the module); keep legal/apply/view cheap", r.FlakyTimeouts)

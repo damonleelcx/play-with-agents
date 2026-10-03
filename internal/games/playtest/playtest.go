@@ -59,6 +59,11 @@ type Options struct {
 	// MaxErrors bounds the errors kept in the report (all are counted).
 	// Default 50.
 	MaxErrors int
+	// Budget, when set, stops starting new games once this much time has
+	// passed; games already running finish. A slow machine (one shared
+	// core in production) then plays fewer games instead of timing out,
+	// and the verdict judges whether enough were played.
+	Budget time.Duration
 }
 
 func (o Options) withDefaults(m games.Meta) Options {
@@ -161,8 +166,13 @@ func Run(ctx context.Context, g games.Game, opt Options) Report {
 			}
 		}()
 	}
+	stopped := false
 feed:
 	for i := range opt.Games {
+		if opt.Budget > 0 && time.Since(start) > opt.Budget {
+			stopped = true
+			break
+		}
 		select {
 		case jobs <- i:
 		case <-ctx.Done():
@@ -172,7 +182,9 @@ feed:
 	close(jobs)
 	wg.Wait()
 
-	return buildReport(meta, ai.DeterminizerOf(g) != nil, opt, results, time.Since(start))
+	r := buildReport(meta, ai.DeterminizerOf(g) != nil, opt, results, time.Since(start))
+	r.Requested, r.BudgetStopped = opt.Games, stopped
+	return r
 }
 
 // gameSeed derives a per-game seed so each game is independent of the
