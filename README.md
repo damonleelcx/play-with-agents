@@ -14,136 +14,136 @@
   <img src="web/public/play/aoi/aoi-face-sad.webp" alt="Aoi sad" width="72">
 </p>
 <p align="center"><b>Aoi · 葵</b>: your AI agent player. Not just a player, but your AI teammate.</p>
-<p align="center">
-  <img src="web/public/play/agents/ren.webp" alt="Ren" width="56" title="Ren 蓮: calm strategist">
-  <img src="web/public/play/agents/mika.webp" alt="Mika" width="56" title="Mika 美香: fearless showoff">
-  <img src="web/public/play/agents/bram.webp" alt="Captain Bram" width="56" title="Captain Bram: old sailor, calls a lot">
-  <img src="web/public/play/agents/nova.webp" alt="Nova" width="56" title="Nova: cheerful robot, quotes odds">
-  <img src="web/public/play/agents/lin.webp" alt="Lin" width="56" title="Lin 琳: shy prodigy">
-  <br><sub>…and the rest of the table: Ren, Mika, Captain Bram, Nova and Lin.</sub>
-</p>
 
-**Live: https://play.heros-agent.space** · English / 中文
+<p align="center"><b>A game table that is always full.</b><br>
+Play Texas Hold'em with your friends, with AI players who each have a personality, or both.<br>
+Describe a board game you have always wanted, and it is on the table tonight.</p>
 
-A game table that is always full. Play Texas Hold'em and board games with
-friends, with AI agents, or both — and describe a game of your own to the host,
-**Aoi (葵)**, and the studio agents design it, build it, playtest it and set it
-on the table.
+<p align="center"><b><a href="https://play.heros-agent.space">play.heros-agent.space</a></b> · English / 中文 · free, play money only</p>
 
-- Play money only: no purchases, no cash-out, no real-money wagering.
-- English and 中文 everywhere: the site, the emails and Aoi's replies.
+---
 
-| Read | For |
-|---|---|
-| [docs/00-architecture.md](docs/00-architecture.md) | The contract: product, agent system, game contract, HTTP API, settings |
-| [docs/01-intents-tools-skills.md](docs/01-intents-tools-skills.md) | What Aoi can be asked, what agents can do, the playbooks and the gates |
-| [docs/02-soul.md](docs/02-soul.md) | Aoi: how she looks, talks, what she values, moods and faces |
+## Game night, without the empty chairs
 
-## How it is built
+Two friends free tonight and Hold'em needs five? Open a table, send the
+invite link, and the AI players fill the empty seats. They bet, bluff, fold,
+tease and congratulate, and they play by the same rules you do. When a friend
+arrives late, they take a seat; when someone has to leave mid-hand, an agent
+quietly takes over their chips so the game goes on.
 
-One Go binary, `play`, and one Postgres database.
+Or skip the friends entirely: tell Aoi "deal me into Hold'em with Mika and
+Ren" and you are playing a few seconds later.
 
-```
-cmd/play            serve | web | worker | migrate | mailcheck
-internal/agent      Aoi's chat: router (intents), capabilities (Tables, Studio, Catalog), settings schema
-internal/persona    Aoi's soul (system prompts), moods → faces
-internal/engine     durable missions: goals, task DAGs, leased queue with fencing, planner/replanner,
-                    checkpoints, G1 approvals, budgets, verifiers, scheduler, timeline
-internal/tools      tool contract and registry (schemas, gates, idempotency, verification)
-internal/skills     playbooks (template DAGs)
-internal/games      the game contract; holdem (built in) and script (JavaScript games, sandboxed)
-internal/rooms      tables: seats, moves, turn clocks, agent players, table chat, SSE
-internal/notify     email outbox (enqueued in the same transaction as the fact it announces)
-internal/tts        Aoi's voice: Fish Audio MP3, text cleaner, LRU cache
-internal/auth       accounts, argon2id passwords, sessions, verify/reset emails
-internal/httpapi    JSON API under /api, cookie session play_session, streamed chat
-web/                the React app, embedded into the binary at build time
-```
+## Meet the table
 
-The engine's guarantees, in one paragraph: work is claimed with `FOR UPDATE
-SKIP LOCKED` and a lease whose epoch is a fencing token, so a worker that lost
-its lease cannot write anything; every step is checkpointed, so a crash loses
-at most the step in flight; side effects carry idempotency keys; a G1 action
-parks its task with the exact proposed arguments until the owner decides, and
-only those arguments run; budgets stop a goal and ask for a person rather than
-running on.
+<table>
+  <tr>
+    <td align="center" width="16%"><img src="web/public/play/agents/aoi.webp" width="96" alt="Aoi"><br><b>Aoi 葵</b></td>
+    <td>Your host. Warm, teasing and competitive; she adapts to how you play. She explains the rules, gives you a tip when you ask, and runs the game studio.</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="web/public/play/agents/ren.webp" width="96" alt="Ren"><br><b>Ren 蓮</b></td>
+    <td>The calm strategist. Few words, dry humour, plays few hands and plays them hard.</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="web/public/play/agents/mika.webp" width="96" alt="Mika"><br><b>Mika 美香</b></td>
+    <td>The fearless showoff. Loud, loves an all-in, and bluffs more than she should.</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="web/public/play/agents/bram.webp" width="96" alt="Captain Bram"><br><b>Captain Bram</b></td>
+    <td>The old sailor. Tells stories, calls almost everything, never folds a good yarn.</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="web/public/play/agents/nova.webp" width="96" alt="Nova"><br><b>Nova</b></td>
+    <td>The cheerful robot. Balanced, quotes the odds, tells terrible jokes.</td>
+  </tr>
+  <tr>
+    <td align="center"><img src="web/public/play/agents/lin.webp" width="96" alt="Lin"><br><b>Lin 琳</b></td>
+    <td>The shy prodigy. Polite, rarely bluffs, quietly deadly.</td>
+  </tr>
+</table>
 
-## Run it locally
+Pick how hard they play (casual, regular or shark), how fast they act, and
+how much they chat, from a lively table to a silent one.
 
-Needs Go 1.26, Node 20 and Docker.
+## Texas Hold'em, tonight
 
-1. Create `.env` in the repo root (git-ignored; never commit it):
+The first game on the shelf is no-limit Texas Hold'em for 2 to 9 players.
 
-   ```sh
-   PLAY_LLM_API_KEY=…        # OpenAI-compatible key for the model endpoint
-   PLAY_DATABASE_URL=postgres://play@127.0.0.1:55860/play_dev?sslmode=disable
-   PLAY_ADDR=:8090
-   PLAY_PUBLIC_ORIGIN=http://localhost:8090
-   PLAY_COOKIE_SECURE=false
-   ```
+- **A real table.** Cards dealt and turned over, chips sliding to the pot,
+  side pots when someone is all-in, a clock on every turn, and the winning
+  hand named at showdown.
+- **Learn as you play.** Turn on Aoi's tips and she tells you what you are
+  holding and what the pot is offering, in plain words.
+- **Your table, your look.** Navy, emerald or crimson felt, three card backs,
+  a four-colour deck if you like it, sound and motion on or off, dark or light.
+- **Life happens.** Step away and your seat is marked away, so nobody waits on
+  you; come back with one tap. A table nobody is watching pauses itself.
 
-2. `scripts/dev.sh` — starts (or creates) the `play-pg` container on
-   `127.0.0.1:55860` (user `play`, trust auth, local only), makes the `play`
-   and `play_dev` databases, builds `bin/play` and runs `play serve` on
-   http://localhost:8090. Without SMTP settings, verification and reset links
-   are printed to the log.
-3. `npm --prefix web install && npm --prefix web run dev` — the hot-reload UI
-   on http://localhost:5173, proxying `/api` to :8090.
+## Make your own game
 
-## Tests
+Describe a game in your own words, the way you would explain it to a friend:
 
-```sh
-go vet ./...
-go test ./...
-```
+> *"A two-player game on a 5×5 grid. We take turns placing stones, four in a
+> row wins, and if the board fills up it's a draw."*
 
-Database tests run against the local `play-pg` (database `play`; the agent
-tests create `play_agent_test` next to it) or `PLAY_TEST_DATABASE_URL`, and skip
-when no database is reachable. The router's live evaluation runs only when a
-key is present:
+Aoi hands it to her studio team, and you can watch them work:
 
-```sh
-set -a; . ./.env; set +a; go test ./internal/agent -run TestRouteEval -v
-```
+1. **The Designer** turns your idea into clear, complete rules, settling
+   anything you left open (and noting how, so you can change it).
+2. **The Engineer** builds the game so it can be played on screen: board,
+   pieces, cards, scores.
+3. **The Playtester** plays it hundreds of times to make sure every game can
+   finish, nothing breaks, and no player can see what they shouldn't.
+4. **The Critic**, who did not build it, checks the game against your rules
+   and reports anything wrong, unfair or no fun. If something needs fixing,
+   the team fixes it and tests again.
+5. **You decide.** Nothing is published until you say yes. Before that you
+   can already play your draft with friends or the agents.
 
-## Configuration
+A simple game takes a couple of minutes from your sentence to the table.
+Keep it to yourself, share it by link, or put it on the community shelf, next
+to Tic-tac-toe, Connect Four, Reversi and Lantern Market.
 
-Every knob is an environment variable (`internal/config`); the production
-values are in `deploy/k8s/20-config.yaml`, secrets in AWS Secrets Manager
-(`play/prod`) synced by External Secrets.
+## Aoi
 
-| Variable | Default | |
-|---|---|---|
-| `PLAY_DATABASE_URL` | — (required) | Postgres DSN |
-| `PLAY_ADDR` | `:8080` | listen address |
-| `PLAY_PUBLIC_ORIGIN` | — | origin every emailed link is built on; mail is off without it |
-| `PLAY_COOKIE_SECURE` | `true` | |
-| `PLAY_SESSION_TTL` | `720h` | |
-| `PLAY_LLM_BASE_URL`, `PLAY_LLM_API_KEY` | token-plan endpoint, — | model endpoint |
-| `PLAY_LLM_MODEL`, `PLAY_LLM_FAST_MODEL` | `qwen3.8-max`, `qwen3.8-flash` | replies/planning; routing/summaries |
-| `PLAY_SMTP_HOST`, `_PORT`, `_USERNAME`, `_PASSWORD`, `_FROM`, `_REPLY_TO` | —, 587 | mail relay (STARTTLS, verified) |
-| `PLAY_ADMIN_EMAILS` | — | operators, comma separated (verified addresses only) |
-| `PLAY_WORKERS`, `PLAY_LEASE` | 2, `90s` | mission workers |
-| `PLAY_TABLE_WORKERS`, `PLAY_TABLE_LEASE` | 4, `15s` | table workers |
-| `PLAY_ACCOUNT_DAILY_TOKENS`, `PLAY_DEPLOYMENT_DAILY_TOKENS` | 1.5M, 40M | spending ceilings per UTC day |
-| `PLAY_TTS_API_KEY`, `PLAY_TTS_VOICE_ID`, `PLAY_TTS_MODEL` | —, —, `s2.1-pro-free` | Aoi's voice (Fish Audio); no key or voice id = no voice |
+Aoi is an AI agent player: smart, friendly, competitive, curious, always
+learning. She chats with you in English or 中文, remembers what you tell her
+(you can see and delete what she remembers), and her face shows how she
+feels: a smile when you arrive, a wink when she wins, a pout when you beat
+her. She has her own voice, too: tap the speaker on any of her messages, or
+let her read her replies aloud.
 
-## Deploy
+She is honest that she is an AI, she never peeks at anyone's cards, and she
+keeps it friendly: teasing, never insulting.
 
-Namespace `play` on the heros k3s node, image in ECR repository `play`,
-database `play` on the shared Postgres.
+## Fair play
 
-```sh
-INSTANCE=i-… deploy/release.sh --dry-run   # build linux/arm64, push, server-side dry run
-INSTANCE=i-… deploy/release.sh             # … and apply, pinned by digest
-```
+- **Play money only.** Chips have no cash value. There is nothing to buy and
+  nothing to cash out, and nobody here will encourage real-money gambling.
+- **Agents can't see your cards.** AI players decide using only what they
+  are allowed to see, exactly like you.
+- **Fair shuffles.** Every deal comes from a fresh, recorded shuffle that no
+  player, human or AI, can influence.
+- **Games are checked before anyone plays them.** Every new game is
+  playtested for hidden-card leaks and broken rules before it can be
+  published, and you approve your own game before anyone else sees it.
 
-`deploy/deploy.sh` is idempotent: it creates the database role and database
-(reading the DSN on the node, so no password travels in the SSM payload),
-admits `play` pods to the shared Postgres and mail relay by namespace and
-label, adds `play` to the nightly backup, applies the manifests and waits for
-`play-web` and `play-worker`.
+## Get started
 
-## License
+1. Open **[play.heros-agent.space](https://play.heros-agent.space)** and sign up
+   with your email.
+2. Say hi to Aoi, or go straight to **Play** and open a table.
+3. Send the invite link to your friends. The agents will keep the seats
+   warm.
 
-Apache-2.0, see [LICENSE](LICENSE).
+Play with Agents is part of the [heros-agent.space](https://heros-agent.space)
+family of agents.
+
+---
+
+<sub>For developers: how it is built, run, tested and deployed is in
+[docs/03-development.md](docs/03-development.md). The design contract is
+[docs/00-architecture.md](docs/00-architecture.md), and Aoi's character is
+[docs/02-soul.md](docs/02-soul.md). Licensed under Apache-2.0, see
+[LICENSE](LICENSE).</sub>
