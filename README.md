@@ -19,7 +19,9 @@
 Play Texas Hold'em with your friends, with AI players who each have a personality, or both.<br>
 Describe a board game you have always wanted, and it is on the table tonight.</p>
 
-<p align="center"><b><a href="https://play.heros-agent.space">play.heros-agent.space</a></b> · English / 中文 · free, play money only</p>
+<p align="center"><b><a href="https://play.heros-agent.space">play.heros-agent.space</a></b> · English / 中文 / 한국어 / 日本語 · free, play money only</p>
+
+<p align="center"><a href="https://patreon.com/damonleelcx"><img src="https://img.shields.io/badge/Patreon-Support%20Play%20with%20Agents-F96854?style=for-the-badge&logo=patreon&logoColor=white" alt="Support Play with Agents on Patreon" height="32"></a></p>
 
 ---
 
@@ -143,7 +145,10 @@ family of agents.
 ## Support the project
 
 Enjoying a night at the table with Aoi and the gang? You can sponsor new
-agents, games and features on Afdian (爱发电): scan the code below.
+agents, games and features on Patreon, or on Afdian (爱发电) by scanning the
+code below.
+
+<p align="center"><a href="https://patreon.com/damonleelcx"><img src="https://img.shields.io/badge/Patreon-Support%20Play%20with%20Agents-F96854?style=for-the-badge&logo=patreon&logoColor=white" alt="Support Play with Agents on Patreon" height="32"></a></p>
 
 <p align="center">
   <img src="docs/assets/sponsor-afdian.jpg" alt="Afdian sponsor card: scan the QR code to sponsor the creator of Play with Agents" width="360">
