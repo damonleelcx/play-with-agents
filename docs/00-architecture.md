@@ -16,15 +16,21 @@ then design it, build it, playtest it and set it on the table.
 - The AI player roster (all play poker and every custom game):
   | id | name | style (poker) | persona |
   |---|---|---|---|
-  | `aoi` | Aoi 葵 | balanced, adaptive | the host; warm, teasing, competitive |
-  | `ren` | Ren 蓮 | tight-aggressive | calm strategist, few words, dry humour |
-  | `mika` | Mika 美香 | loose-aggressive, bluffs | fearless showoff, loud, loves all-ins |
-  | `bram` | Captain Bram | loose-passive (calls a lot) | old sailor, tells stories, never folds a good yarn |
-  | `nova` | Nova | balanced, math-driven | cheerful robot, quotes odds, terrible jokes |
-  | `lin` | Lin 琳 | tight-passive, rarely bluffs | shy prodigy, polite, quietly deadly |
+  | `aoi` | Aoi 葵 · 아오이 | balanced, adaptive | the host; warm, teasing, competitive |
+  | `ren` | Ren 蓮 · 렌 · レン | tight-aggressive | calm strategist, few words, dry humour |
+  | `mika` | Mika 美香 · 미카 · ミカ | loose-aggressive, bluffs | fearless showoff, loud, loves all-ins |
+  | `bram` | Captain Bram 布拉姆船长 · 브램 선장 · ブラム船長 | loose-passive (calls a lot) | old sailor, tells stories, never folds a good yarn |
+  | `nova` | Nova 诺娃 · 노바 · ノヴァ | balanced, math-driven | cheerful robot, quotes odds, terrible jokes |
+  | `lin` | Lin 琳 · 린 · リン | tight-passive, rarely bluffs | shy prodigy, polite, quietly deadly |
 - Chips are play money. There is no purchase, no cash-out and no real-money
   wagering anywhere. The landing page, the rules and the terms say so.
-- Bilingual: English and 中文 across the site, emails and Aoi's replies.
+- Four languages: English, 中文, 한국어 and 日本語 (`en | zh | ko | ja`) across the
+  site, emails, Aoi's replies and the agents' table talk. Japanese is Aoi's
+  native tongue. The reply language is the language of the player's message
+  (`agent.DetectLang`: Hangul → ko, any kana → ja, Han only → zh, English
+  text → en), else their `language` setting when the message is too short to
+  tell. Han-only text from a player whose setting is `ja` stays Japanese
+  (kanji-only Japanese such as 「了解」). A table speaks its host's `language`.
 - Deployed at `https://play.heros-agent.space`, namespace `play` on the
   heros-prod k3s node. Env prefix `PLAY_`, binary `play` (`serve|web|worker|migrate|mailcheck`).
 
@@ -43,6 +49,7 @@ Specialised workers
   → Engineer   writes the game module (JavaScript) (LLM, tools save_module, check_module)
   → Playtester simulates hundreds of games          (deterministic tool playtest; no LLM)
   → Critic     reviews rules vs module vs report    (LLM, independent of the Engineer)
+  → Artist     paints the cover beside the build     (tool illustrate_cover; fast model writes the prompt; never gates)
   → Coordinator replans on failed checks/critique   (engine.Planner.Replan)
   ↓
 Verification (check_module + playtest gates; critic verdict) → checkpoint → publish approval (G1, the user)
@@ -222,9 +229,25 @@ New:
 status: "building"|"draft"|"published", visibility: "private"|"unlisted"|"public",
 owner_name?, version, plays, cover? }` (built-in Hold'em has id `holdem`).
 
+`cover` is a 16:9 image URL: `/api/games/{id}/cover?v=N` when the game has a
+stored cover, else the cover shipped with the web app for the built-in and the
+seeded examples (`/play/covers/{id}.webp`), else absent.
+
+- `GET /api/games/{id}/cover` → the stored cover (`image/jpeg`, 1280×720, < 250 KB),
+  with GameDetail's visibility (built-ins, own games, published public or unlisted;
+  404 otherwise). `?v=` the current version is `private, max-age=31536000, immutable`;
+  otherwise `no-cache`; `ETag` + `If-None-Match` → 304. A built-in or seeded example
+  without a stored cover redirects (302) to its shipped one.
+
 ### Agents
-- `GET /api/agents` → `[{ id, name, name_zh, title, title_zh, bio, bio_zh, avatar,
-  style: { tightness, aggression, bluff, talk } }]` (0..1 each)
+- `GET /api/agents` → `[{ id, name, name_zh, title, title_zh, bio, bio_zh,
+  i18n: { en|zh|ko|ja: { name, title, bio } }, avatar,
+  style: { tightness, aggression, bluff, talk } }]` (0..1 each).
+  `i18n` holds the profile in every supported language under one shape, so a
+  client reads `agent.i18n[lang]` (falling back to `en`) and a new language
+  needs no new fields. The flat `name`/`title`/`bio` (English) and `*_zh`
+  fields are kept unchanged for older clients; `i18n.en` and `i18n.zh` mirror
+  them. There are deliberately no `name_ko`/`name_ja` fields.
 
 ### Tables
 - `POST /api/tables` `{ game_id, name?, options?, turn_seconds?, seats: [{ kind: "me"|"agent"|"open", agent_id? }] }` → `TableView`
@@ -320,7 +343,7 @@ Aoi's message `meta.cards`: `[{ kind: "table", table_id } | { kind: "mission", g
 
 | group | key | values |
 |---|---|---|
-| Profile | `display_name`, `language` | text; `en`/`zh` |
+| Profile | `display_name`, `language` | text; `en`/`zh`/`ko`/`ja` |
 | Aoi | `aoi_tone` | `playful` `calm` `competitive` |
 | | `aoi_talk` | `chatty` `normal` `quiet` |
 | | `aoi_coaching` | bool: tips during your own hands |
@@ -353,6 +376,12 @@ background), `aoi-portrait.webp`, `aoi-card.webp` (holo card art),
 `aoi-face-{neutral,smile,wink,surprised,angry,sad}.webp`,
 `aoi-outfit-{default,casual,combat,summer}.webp`, `aoi-action.webp`,
 `aoi-sheet.webp`. `web/public/play/agents/{aoi,ren,mika,bram,nova,lin}.webp` (square avatars).
+`web/public/play/covers/{holdem,tictactoe,connect-four,reversi,lantern-market}.webp`
+(16:9 game covers, 1280×720). Studio games' covers live in Postgres (`game_covers`,
+migration 0014; `internal/art`): generated with DashScope `wan2.5-t2i-preview`
+(fallback `wan2.2-t2i-flash`; `PLAY_IMAGE_API_KEY`, `PLAY_IMAGE_MODEL`), or a
+deterministic procedural cover (brand gradient keyed by the id's hash, a board
+motif, the name in Go Bold when it has the glyphs) without a key or on failure.
 
 ## Aoi's voice
 
@@ -370,7 +399,7 @@ so; switch PLAY_TTS_MODEL to `s2.1-pro` if that must change).
   as Aoi's, never free text. The body is exactly one of:
   - `{ message_id }`: one of Aoi's replies (`role: assistant`) in a conversation the caller owns;
   - `{ table_id, chat_id }`: one of Aoi's (`agent_id: aoi`) table-talk lines at a table the caller may watch;
-  - `{ sample: "en" | "zh" }`: the fixed "Hear Aoi" line of the settings page (the strings live on the server).
+  - `{ sample: "en" | "zh" | "ko" | "ja" }`: the fixed "Hear Aoi" line of the settings page (the strings live on the server).
 
   Signed in + verified. 400 for anything else (including `{ text }`), 404 for a line
   that is not the caller's or not Aoi's, 403 for a table they cannot watch. Text is

@@ -27,6 +27,7 @@ func (s *Server) tableRoutes(m *http.ServeMux) {
 
 	m.HandleFunc("GET /api/games", s.authed(s.listGames))
 	m.HandleFunc("GET /api/games/{id}", s.authed(s.getGame))
+	m.HandleFunc("GET /api/games/{id}/cover", s.authed(s.gameCover))
 	m.HandleFunc("PATCH /api/games/{id}", s.verified(s.patchGame))
 	m.HandleFunc("DELETE /api/games/{id}", s.verified(s.deleteGame))
 
@@ -94,6 +95,42 @@ func (s *Server) getGame(w http.ResponseWriter, r *http.Request, u *auth.User) {
 		return
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// gameCover serves a game's cover to whoever may see the game. A versioned
+// URL (?v= the current version, as GameCard.cover has it) is immutable; the
+// bare URL revalidates. Built-ins and seeded examples without a stored cover
+// redirect to the cover shipped with the web app.
+func (s *Server) gameCover(w http.ResponseWriter, r *http.Request, u *auth.User) {
+	c, err := s.Rooms.GameCover(r.Context(), u.ID, r.PathValue("id"))
+	if err != nil {
+		roomsErr(w, err)
+		return
+	}
+	if c.Static != "" {
+		w.Header().Set("Cache-Control", "private, max-age=300")
+		http.Redirect(w, r, c.Static, http.StatusFound)
+		return
+	}
+	etag := fmt.Sprintf(`"cover-%s-%d"`, r.PathValue("id"), c.Version)
+	h := w.Header()
+	h.Set("ETag", etag)
+	h.Set("Vary", "Cookie")
+	if r.URL.Query().Get("v") == strconv.Itoa(c.Version) {
+		h.Set("Cache-Control", "private, max-age=31536000, immutable")
+	} else {
+		h.Set("Cache-Control", "private, no-cache")
+	}
+	if match := r.Header.Get("If-None-Match"); match != "" && (match == etag || match == "*") {
+		w.WriteHeader(http.StatusNotModified)
+		return
+	}
+	h.Set("Content-Type", c.ContentType)
+	h.Set("Content-Length", strconv.Itoa(len(c.Bytes)))
+	w.WriteHeader(http.StatusOK)
+	if r.Method != http.MethodHead {
+		_, _ = w.Write(c.Bytes)
+	}
 }
 
 func (s *Server) patchGame(w http.ResponseWriter, r *http.Request, u *auth.User) {

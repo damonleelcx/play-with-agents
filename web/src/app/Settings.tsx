@@ -5,7 +5,7 @@ import { IconAlert, IconBell, IconCards, IconChart, IconCheck, IconLock, IconPal
 import { PasswordInput } from '../pages/auth/AuthLayout'
 import { api, type Agent } from '../lib/api'
 import { setVoiceVolume, speakSample, stop as stopVoice, useVoice } from '../lib/voice'
-import { useI18n, type Lang } from '../lib/i18n'
+import { agentText, LANG_NAMES, LANGS, useI18n, type Lang } from '../lib/i18n'
 import { fmtTime } from './missionModel'
 import { usePrefs, useToast } from './prefs'
 import { ROSTER } from './roster'
@@ -115,8 +115,8 @@ const ent = <T extends Record<string, string>>(o: T) => Object.entries(o) as [ke
 
 // ── sections ──────────────────────────────────────────────────────────────
 function Profile() {
-  const { t, lang } = useI18n()
-  const { data, prefs, save } = usePrefs()
+  const { t, lang, date } = useI18n()
+  const { data, save } = usePrefs()
   const u = data!.user
   return (
     <Card>
@@ -125,24 +125,20 @@ function Profile() {
         <div><strong>{u.name || u.email}</strong><small>{u.email} {u.email_verified && <span className="ok-tag"><IconCheck size={12} /></span>}</small></div>
       </div>
       <TextPref label={t.settings.displayName} hint={t.settings.displayHint} value={u.name || ''} max={80} onSave={(v) => save({ name: v })} />
-      <Row label={t.settings.language}>
-        <Seg<Lang> value={(prefs.language || lang) as Lang} label={t.settings.language} options={[['en', 'English'], ['zh', '中文']]} onChange={(v) => save({ preferences: { language: v } })} />
+      <Row label={t.settings.language} hint={t.settings.languageHint}>
+        <Seg<Lang> value={lang} label={t.settings.language} options={LANGS.map((l) => [l, LANG_NAMES[l].native] as [Lang, string])} onChange={(v) => save({ preferences: { language: v } })} />
       </Row>
-      <Row label={t.settings.joined}><span className="s-value">{new Date(u.created_at).toLocaleDateString(lang === 'zh' ? 'zh-CN' : 'en-US', { year: 'numeric', month: 'long', day: 'numeric' })}</span></Row>
+      <Row label={t.settings.joined}><span className="s-value">{date(u.created_at, { year: 'numeric', month: 'long', day: 'numeric' })}</span></Row>
     </Card>
   )
 }
 
 function AoiPrefs() {
-  const { t, lang } = useI18n()
+  const { t } = useI18n()
   const { prefs, save } = usePrefs()
   const tone = prefs.aoi_tone || 'playful'
-  const zh = lang === 'zh'
-  const preview: Record<string, [string, any]> = {
-    playful: [zh ? '「加注？好大胆，我喜欢。」' : '“Ooh, a raise? Brave. I like brave.”', 'wink'],
-    calm: [zh ? '「慢慢来，底池不会跑。」' : '“Take your time. The pot will wait.”', 'neutral'],
-    competitive: [zh ? '「跟。亮出你的底牌吧。」' : '“Call. Show me what you’ve got.”', 'angry'],
-  }
+  const moods: Record<string, any> = { playful: 'wink', calm: 'neutral', competitive: 'angry' }
+  const preview: Record<string, [string, any]> = Object.fromEntries(Object.entries(moods).map(([k, m]) => [k, [t.settings.previews[k], m]]))
   return (
     <>
       <div className="aoi-preview">
@@ -198,7 +194,7 @@ function VoicePrefs() {
               <AoiFace mood="smile" size={40} speaking={sampling && voice.speaking} />
               <small>{t.settings.sample}</small>
             </div>
-            <button className="btn btn-soft btn-sm" onClick={() => (sampling ? stopVoice() : speakSample(lang === 'zh' ? 'zh' : 'en', 'sample'))}>
+            <button className="btn btn-soft btn-sm" onClick={() => (sampling ? stopVoice() : speakSample(lang, 'sample'))}>
               {sampling ? <IconStop size={14} /> : <IconSpeaker size={15} />} {t.settings.hear}
             </button>
           </div>
@@ -268,13 +264,13 @@ function AgentPrefs() {
         <div className="agent-grid">
           {agents.map((a) => {
             const on = fav.includes(a.id)
-            const name = lang === 'zh' ? a.name_zh || a.name : a.name
+            const name = agentText(a, 'name', lang)
             return (
               <button key={a.id} className={`agent-pick ${on ? 'on' : ''}`} aria-pressed={on} onClick={() => flip(a.id)}>
                 <AgentAvatar id={a.id} name={a.name} src={a.avatar} size={52} />
                 <span className="ap-text">
                   <strong>{name}</strong>
-                  <small>{lang === 'zh' ? a.title_zh || a.title : a.title}</small>
+                  <small>{agentText(a, 'title', lang)}</small>
                 </span>
                 <span className="ap-star"><IconStar size={16} /></span>
               </button>
@@ -448,12 +444,12 @@ function device(ua: string) {
 }
 
 function Usage() {
-  const { t, lang } = useI18n()
+  const { t, num } = useI18n()
   const { prefs, save } = usePrefs()
   const [u, setU] = useState<{ tokens_today: number; tokens_month: number; goals?: { id: string; title: string; status: string; usage: any; limits: any }[] | null } | null>(null)
   const [err, setErr] = useState(false)
   useEffect(() => { api.get<NonNullable<typeof u>>('/api/account/usage').then(setU).catch(() => setErr(true)) }, [])
-  const fmt = (n: number) => (n || 0).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US')
+  const fmt = (n: number) => num(n)
   return (
     <>
       <Card>

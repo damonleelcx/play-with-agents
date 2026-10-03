@@ -159,6 +159,24 @@ func (s *Service) prefs(ctx context.Context, userID string) map[string]any {
 }
 
 func criteria(lang string) []string {
+	switch lang {
+	case "ja":
+		return []string{
+			"ルール文書が保存されている：準備、手番、合法手、得点、終了とタイブレーク、例外ケース",
+			"ゲームモジュールが契約チェックをエラーなしで通過している",
+			"モジュールがテストプレイ関門を通過：全人数で数百局のシミュレーション、エラーなし、全局が終了する",
+			"独立したクリティックがモジュールを承認している（判定：合格）",
+			"オーナーが公開を承認した（または下書きとして残すことを選んだ）",
+		}
+	case "ko":
+		return []string{
+			"규칙 문서 저장 완료: 준비, 턴, 가능한 수, 점수, 종료와 동점 처리, 예외 상황",
+			"게임 모듈이 계약 검사를 오류 없이 통과",
+			"모듈이 플레이테스트 관문 통과: 모든 인원수에서 수백 판 시뮬레이션, 오류 없음, 모든 판이 끝남",
+			"독립 크리틱이 모듈을 승인(판정: 통과)",
+			"주인이 공개를 승인함(또는 초안으로 두기로 함)",
+		}
+	}
 	if lang == "zh" {
 		return []string{
 			"规则文档已保存：配置、回合、合法走法、计分、结束与平局判定、边界情况",
@@ -178,6 +196,12 @@ func criteria(lang string) []string {
 }
 
 func milestones(lang string) []string {
+	switch lang {
+	case "ja":
+		return []string{"ルール", "モジュール", "テストプレイ", "レビュー", "公開"}
+	case "ko":
+		return []string{"규칙", "모듈", "플레이테스트", "리뷰", "공개"}
+	}
 	if lang == "zh" {
 		return []string{"规则", "模块", "试玩", "评审", "发布"}
 	}
@@ -190,6 +214,10 @@ func buildTitle(name, lang string, revise bool) string {
 	switch {
 	case lang == "zh" && revise:
 		return name + "（修改）"
+	case lang == "ja" && revise:
+		return name + "（修正）"
+	case lang == "ko" && revise:
+		return name + " (수정)"
 	case revise:
 		return name + " (revision)"
 	default:

@@ -19,3 +19,4 @@ The key comes from `PLAY_IMAGE_API_KEY`. In total, 37 generation calls were made
 | agents/{ren,mika,bram,nova,lin}.webp | **wan2.5-t2i-preview** text-to-image (1024², best of 2) with a shared head-and-shoulders, navy and electric-blue bokeh style prompt (see `gen.py` AVATARS), then resized to 512. |
 | scene-table.webp | **wan2.5-t2i-preview** (1664x928, best of 2), then Lanczos to 1920x1080. |
 | /favicon.png, /apple-touch-icon.png | Tight face crop of the HD smile render (`face-smile-1`), 64 and 180 px. |
+| covers/{holdem,tictactoe,connect-four,reversi,lantern-market}.webp | **wan2.5-t2i-preview** text-to-image (1280x720, best of 2) with a shared cinematic board-game key-art style (deep navy, electric blue, ember accents, no text; see `scripts/gen-art/covers.py`), then WebP q90. Picks: the first candidate, except lantern-market (the second). 5 calls. |

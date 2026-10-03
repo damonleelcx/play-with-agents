@@ -1,5 +1,7 @@
 // Thin client for the Play with Agents API. Every mutating call carries the
 // custom header: the server rejects state changes without it (CSRF defence).
+import type { Lang } from './i18n'
+
 export class ApiError extends Error {
   status: number
   data: any
@@ -62,7 +64,7 @@ export type User = {
   role?: string
   email_verified: boolean
   admin?: boolean
-  language: 'en' | 'zh'
+  language: Lang
   mail_enabled: boolean
   created_at: string
 }
@@ -170,6 +172,7 @@ export type Agent = {
   title_zh?: string
   bio?: string
   bio_zh?: string
+  i18n?: Partial<Record<Lang, { name?: string; title?: string; bio?: string }>>
   avatar: string
   style?: { tightness: number; aggression: number; bluff: number; talk: number }
 }

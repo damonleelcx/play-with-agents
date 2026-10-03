@@ -3,14 +3,14 @@ import { useEffect, useState, type CSSProperties } from 'react'
 // Images that may not exist yet (art lands separately from code): each <Img>
 // walks a list of sources and, when all fail, renders a branded fallback, so
 // a missing file never shows a broken-image icon.
-export function Img({ srcs, alt = '', className, style, fallback, width, height }: {
-  srcs: string[]; alt?: string; className?: string; style?: CSSProperties; fallback?: React.ReactNode; width?: number; height?: number
+export function Img({ srcs, alt = '', className, style, fallback, width, height, lazy }: {
+  srcs: string[]; alt?: string; className?: string; style?: CSSProperties; fallback?: React.ReactNode; width?: number; height?: number; lazy?: boolean
 }) {
   const [i, setI] = useState(0)
   const key = srcs.join('|')
   useEffect(() => setI(0), [key])
   if (i >= srcs.length) return <>{fallback ?? null}</>
-  return <img src={srcs[i]} alt={alt} className={className} style={style} width={width} height={height} onError={() => setI((n) => n + 1)} draggable={false} />
+  return <img src={srcs[i]} alt={alt} className={className} style={style} width={width} height={height} loading={lazy ? 'lazy' : undefined} decoding={lazy ? 'async' : undefined} onError={() => setI((n) => n + 1)} draggable={false} />
 }
 
 export type Mood = 'neutral' | 'smile' | 'wink' | 'surprised' | 'angry' | 'sad'

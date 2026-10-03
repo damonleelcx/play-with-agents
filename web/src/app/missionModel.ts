@@ -1,16 +1,18 @@
 import type { Goal, Task } from '../lib/api'
+import { dictFor, fmt, localeOf } from '../lib/i18n'
 
 // How a build mission's tasks map onto the studio team. The planner names
 // tasks freely, so a task's role is its explicit `role` when the server sends
 // one, otherwise read from its key, title and mode.
-export type Role = 'designer' | 'engineer' | 'playtester' | 'critic' | 'coordinator'
-export const ROLES: Exclude<Role, 'coordinator'>[] = ['designer', 'engineer', 'playtester', 'critic']
+export type Role = 'designer' | 'engineer' | 'playtester' | 'artist' | 'critic' | 'coordinator'
+export const ROLES: Exclude<Role, 'coordinator'>[] = ['designer', 'engineer', 'playtester', 'artist', 'critic']
 
 export function roleOf(t: Task): Role {
   const r = (t.role || '').toLowerCase()
-  if (r === 'designer' || r === 'engineer' || r === 'playtester' || r === 'critic') return r
+  if (r === 'designer' || r === 'engineer' || r === 'playtester' || r === 'artist' || r === 'critic') return r
   const s = `${t.key} ${t.title} ${t.mode || ''} ${t.activity?.tool || ''}`.toLowerCase()
   if (/critic|critique|review|评审|审查/.test(s)) return 'critic'
+  if (/illustrat|\bcover\b|封面|插画/.test(s)) return 'artist'
   if (/playtest|simulat|balance|试玩|模拟/.test(s)) return 'playtester'
   if (/engineer|module|code|implement|script|check_module|save_module|编写|实现|模块/.test(s)) return 'engineer'
   if (/design|rule|concept|save_rules|设计|规则/.test(s)) return 'designer'
@@ -80,7 +82,7 @@ export function fmtTime(s: string | null | undefined, lang: string) {
   if (!s) return ''
   const d = new Date(s)
   if (isNaN(d.getTime())) return ''
-  return d.toLocaleString(lang === 'zh' ? 'zh-CN' : 'en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  return d.toLocaleString(localeOf(lang), { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
 }
 
 export function ago(at: string, lang: string) {
@@ -88,6 +90,6 @@ export function ago(at: string, lang: string) {
   const m = Math.floor(s / 60)
   const h = Math.floor(m / 60)
   const d = Math.floor(h / 24)
-  if (lang === 'zh') return d > 0 ? `${d} 天前` : h > 0 ? `${h} 小时前` : m > 0 ? `${m} 分钟前` : '刚刚'
-  return d > 0 ? `${d}d ago` : h > 0 ? `${h}h ago` : m > 0 ? `${m}m ago` : 'just now'
+  const a = dictFor(lang).common.ago
+  return d > 0 ? fmt(a.d, { n: d }) : h > 0 ? fmt(a.h, { n: h }) : m > 0 ? fmt(a.m, { n: m }) : a.now
 }

@@ -1,3 +1,4 @@
+@import url('https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Dela+Gothic+One&display=swap'); /* ko / ja display faces, see the end of this file */
 /* Play with Agents — landing page.
    Hero: studio-grey panel with a gigantic condensed headline (agency
    reference). The rest flows into Aoi's night palette, then closes on a
@@ -867,4 +868,34 @@
   background:
     radial-gradient(60% 50% at 85% 10%, rgba(61, 123, 255, .1), transparent 70%),
     var(--lp-bg);
+}
+
+/* ---------- Korean and Japanese ----------
+   Anton has no Hangul or kana, so the display lines fall through to a heavy
+   CJK display face (Google Fonts serves it in unicode-range slices, so only
+   the glyphs on the page are fetched; imported at the top). Both faces ship a single weight: keep
+   400 to avoid faux bold. Headlines are four syllables / characters, so they
+   run a little smaller than the three-character Chinese line. */
+.lp.lang-ko { --cjk-display: 'Anton', 'Black Han Sans', 'Apple SD Gothic Neo', 'Malgun Gothic', 'Noto Sans KR', sans-serif; word-break: keep-all; overflow-wrap: anywhere; }
+.lp.lang-ja { --cjk-display: 'Anton', 'Dela Gothic One', 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Yu Gothic', 'Meiryo', 'Noto Sans JP', sans-serif; line-break: strict; }
+.lang-ko .hero-title, .lang-ja .hero-title { font-family: var(--cjk-display); font-weight: 400; font-size: 20cqw; letter-spacing: -0.03em; line-height: 1; }
+.lang-ko .hero-title { font-size: 24cqw; } /* Black Han Sans runs narrower than Dela Gothic One */
+.lang-ko .hero-card, .lang-ja .hero-card { left: 50%; }
+.lang-ko .h2, .lang-ja .h2 { letter-spacing: -0.01em; line-height: 1.2; }
+/* Kana and kanji set wider than Latin: at the Latin size a phrase like
+   「プレイヤーじゃない。」 is wider than its column and has to split mid-word
+   even with auto-phrase. Japanese headings run at ~80%. */
+.lang-ja .h2 { font-size: clamp(30px, 3.75vw, 54px); }
+.lang-ja .poker .h2 { font-size: clamp(28px, 3.4vw, 46px); }
+.lang-ko .cta-title, .lang-ja .cta-title { font-family: var(--cjk-display); font-weight: 400; letter-spacing: -0.03em; line-height: 1.05; font-size: clamp(52px, 11.5vw, 200px); }
+/* katakana / hangul action words run wider than "Fold": centre them over the seat so edge seats stay inside the table */
+.lang-ko .pk-act, .lang-ja .pk-act { left: 50%; translate: -50% 0; letter-spacing: 0; }
+.lang-ko .lp-menu-links a, .lang-ja .lp-menu-links a { font-family: var(--cjk-display); font-size: clamp(40px, 7.5vw, 96px); }
+@media (max-width: 760px) {
+  .lang-ja .hero-title { font-size: 23cqw; }
+  .lang-ko .hero-title { font-size: 27cqw; }
+  /* kana and hangul lose meaning when half covered: drop the card below the line */
+  .lang-ko .hero-stage, .lang-ja .hero-stage { min-height: 136cqw; }
+  .lang-ko .hero-card, .lang-ja .hero-card { left: 50%; top: 30cqw; }
+  .lang-ko .cta-title, .lang-ja .cta-title { font-size: clamp(40px, 13vw, 64px); }
 }

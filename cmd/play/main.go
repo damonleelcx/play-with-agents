@@ -7,6 +7,8 @@
 //	play worker     workers + scheduler only
 //	play migrate    apply migrations and exit
 //	play mailcheck  prove the mail relay accepts our login, send nothing
+//	play covers backfill [--dry-run]
+//	                cover art for every draft/published game that has none
 package main
 
 import (
@@ -21,7 +23,10 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+
 	"github.com/damonleelcx/play-with-agents/internal/agent"
+	"github.com/damonleelcx/play-with-agents/internal/art"
 	"github.com/damonleelcx/play-with-agents/internal/auth"
 	"github.com/damonleelcx/play-with-agents/internal/config"
 	"github.com/damonleelcx/play-with-agents/internal/db"
@@ -109,6 +114,16 @@ func run(mode string) error {
 	client.Fallback = map[string]string{cfg.LLMModel: cfg.LLMFastModel}
 	store := &engine.Store{Pool: pool}
 	model := &engine.Model{Client: client, Store: store, AccountDailyTokens: cfg.AccountDailyTokens, DeploymentDailyTokens: cfg.DeploymentDailyTokens}
+	// The studio's Artist: cover art. Optional: without a key every cover
+	// is procedural.
+	artist := studio.Artist{Images: art.NewClient(cfg.ImageAPIKey, cfg.ImageModel), Model: model, FastLLM: cfg.LLMFastModel}
+	studio.ConfigureArt(artist)
+	if !artist.Images.Enabled() {
+		slog.Warn("IMAGES_DISABLED: PLAY_IMAGE_API_KEY is empty; game covers are procedural")
+	}
+	if mode == "covers" {
+		return covers(ctx, pool, artist, os.Args[2:])
+	}
 	hub := httpapi.NewHub()
 	wake := make(chan struct{}, 16)
 
@@ -194,7 +209,7 @@ func run(mode string) error {
 		})
 	}
 	if mode != "serve" && mode != "web" && mode != "worker" {
-		return fmt.Errorf("unknown mode %q (serve | web | worker | migrate)", mode)
+		return fmt.Errorf("unknown mode %q (serve | web | worker | migrate | mailcheck | covers)", mode)
 	}
 
 	<-ctx.Done()
@@ -212,6 +227,23 @@ func run(mode string) error {
 		slog.Warn("shutdown timed out; leases will expire and tasks resume elsewhere from their checkpoints")
 	}
 	return serveErr
+}
+
+// covers runs `play covers backfill [--dry-run]`.
+func covers(ctx context.Context, pool *pgxpool.Pool, a studio.Artist, args []string) error {
+	if len(args) == 0 || args[0] != "backfill" {
+		return fmt.Errorf("usage: play covers backfill [--dry-run]")
+	}
+	dry := false
+	for _, x := range args[1:] {
+		switch x {
+		case "--dry-run", "-dry-run", "-n":
+			dry = true
+		default:
+			return fmt.Errorf("unknown flag %q (usage: play covers backfill [--dry-run])", x)
+		}
+	}
+	return studio.BackfillCovers(ctx, pool, a, dry, os.Stdout)
 }
 
 func originOr(origin, addr string) string {

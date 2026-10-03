@@ -115,18 +115,12 @@ export function useSubmit<T>(fn: () => Promise<T>) {
 
 // Server errors come in English; show the friendly local version when known.
 export function useAuthError() {
-  const { t, lang } = useI18n()
-  const zh: Record<string, string> = {
-    'an account with this email already exists': '该邮箱已注册账户',
-    'that email address does not look valid': '邮箱地址格式不正确',
-    'password must be at least 10 characters': '密码至少需要 10 个字符',
-    'password must not be your email address': '密码不能与邮箱相同',
-  }
+  const { t } = useI18n()
   return (e: string) => {
     if (!e) return ''
     if (e === 'offline') return t.auth.offline
     if (/invalid email or password|invalid credentials/i.test(e)) return t.auth.badCreds
     if (/expired|invalid token|token/i.test(e)) return t.auth.linkInvalid
-    return (lang === 'zh' && zh[e]) || e
+    return t.auth.serverErrors[e] || e
   }
 }

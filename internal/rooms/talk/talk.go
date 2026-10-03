@@ -24,6 +24,15 @@ type ModelChatter struct {
 
 var errNoModel = errors.New("no model configured")
 
+// languages names each table language for the prompt. Korean and Japanese
+// lines are written natively, in the agent's own register.
+var languages = map[string]string{
+	"en": "English",
+	"zh": "Simplified Chinese",
+	"ko": "Korean (natural spoken Korean in your own voice: casual or polite as fits your character)",
+	"ja": "Japanese (natural spoken Japanese in your own voice: casual or polite as fits your character)",
+}
+
 var triggerHint = map[string]string{
 	"join":      "Someone just sat down at the table. Greet them.",
 	"allin":     "Someone just went all-in (or the stakes jumped). React.",
@@ -42,9 +51,9 @@ func (c *ModelChatter) Line(ctx context.Context, req rooms.ChatRequest) (string,
 	if c == nil || c.Model == nil || c.Model.Client == nil || !c.Model.Client.Configured() {
 		return "", errNoModel
 	}
-	lang := "English"
-	if req.Language == "zh" {
-		lang = "Simplified Chinese"
+	lang, ok := languages[req.Language]
+	if !ok {
+		lang = languages["en"]
 	}
 	sys := fmt.Sprintf(`You are %s, an AI player at a play-money game table. Character: %s
 

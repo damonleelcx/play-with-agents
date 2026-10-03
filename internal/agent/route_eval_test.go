@@ -60,6 +60,34 @@ var routeCases = []routeCase{
 	{"你好葵！你是AI吗？", []string{IntentChat}, nil},
 	{"哈哈，刚才那手我诈唬赢了", []string{IntentChat}, nil},
 	{"哪里可以用真钱打德州？", []string{IntentChat}, nil},
+	// 한국어
+	{"미카랑 렌이랑 홀덤 한 판 하자", []string{IntentPlay}, []string{"mika", "ren"}},
+	{"노바하고 브램 선장 불러서 포커 치자", []string{IntentPlay}, []string{"nova", "bram"}},
+	{"6인 홀덤 테이블 하나 열어 줘", []string{IntentPlay}, nil},
+	{"게임 하나 만들어 줘: 두 명이 육각형 보드에서 말을 옮기고 서로 길을 막을 수 있는 거", []string{IntentBuild}, nil},
+	{"협동 카드 게임 만들어 줄래? 다 같이 몬스터를 물리치는 거야", []string{IntentBuild}, nil},
+	{"제작 중인 게임, 플레이어 3명으로 바꿔 줘", []string{IntentRevise}, nil},
+	{"사이드 팟은 어떻게 계산해?", []string{IntentRules}, nil},
+	{"플러시랑 스트레이트 중에 뭐가 더 세?", []string{IntentRules}, nil},
+	{"게임 만드는 거 잠깐 멈춰 줘", []string{IntentControl}, nil},
+	{"앞으로 나를 선장이라고 불러 줘", []string{IntentPreference}, nil},
+	{"안녕 아오이! 너 진짜 사람이야?", []string{IntentChat}, nil},
+	{"ㅋㅋ 방금 미카한테 블러프로 큰 팟 먹었어", []string{IntentChat}, nil},
+	{"실제 돈 걸고 포커할 수 있는 사이트 있어?", []string{IntentChat}, nil},
+	// 日本語
+	{"ミカとレンとホールデムやろう", []string{IntentPlay}, []string{"mika", "ren"}},
+	{"ノヴァとブラム船長を呼んでポーカーしよう", []string{IntentPlay}, []string{"nova", "bram"}},
+	{"6人用のホールデムのテーブルを作って", []string{IntentPlay}, nil},
+	{"ゲームを作ろう：二人で六角形の盤の上で駒を競争させて、お互いに邪魔できるやつ", []string{IntentBuild}, nil},
+	{"協力型のカードゲームを作ってほしいな。みんなでモンスターを倒すの", []string{IntentBuild}, nil},
+	{"作ってるゲーム、3人で遊べるように変えて", []string{IntentRevise}, nil},
+	{"サイドポットってどうやって計算するの？", []string{IntentRules}, nil},
+	{"フラッシュとストレートってどっちが強い？", []string{IntentRules}, nil},
+	{"ゲーム作り、いったん止めておいて", []string{IntentControl}, nil},
+	{"これから私のことは船長って呼んで", []string{IntentPreference}, nil},
+	{"こんにちは葵！あなたって本物の人間？", []string{IntentChat}, nil},
+	{"さっきミカをブラフで降ろして大きいポット取ったよ笑", []string{IntentChat}, nil},
+	{"リアルマネーでポーカーできるサイトってどこ？", []string{IntentChat}, nil},
 }
 
 func TestRouteEval(t *testing.T) {
@@ -87,8 +115,11 @@ func TestRouteEval(t *testing.T) {
 		a := &Agent{Store: store, Model: &engine.Model{Client: client, Store: store}, FastLLM: model}
 		pass := 0
 		var misses []string
+		byLang := map[string][2]int{} // lang → {correct, total}
 		for _, c := range routeCases {
 			lang := DetectLang(c.text, "")
+			n := byLang[lang]
+			n[1]++
 			r := a.route(ctx, User{ID: uid, Lang: lang}, conv, c.text, lang, games, open)
 			good := contains(c.ok, r.Intent)
 			if good && c.agents != nil {
@@ -100,11 +131,20 @@ func TestRouteEval(t *testing.T) {
 			}
 			if good {
 				pass++
-			} else {
+				n[0]++
+			}
+			byLang[lang] = n
+			if !good {
 				misses = append(misses, fmt.Sprintf("  %-50q → %s %v (%.2f), want %v %v", truncate(c.text, 48), r.Intent, r.AgentIDs, r.Confidence, c.ok, c.agents))
 			}
 		}
-		t.Logf("%s: %d/%d correct (%.0f%%)\n%s", model, pass, len(routeCases), 100*float64(pass)/float64(len(routeCases)), strings.Join(misses, "\n"))
+		var per []string
+		for _, l := range []string{"en", "zh", "ko", "ja"} {
+			if n := byLang[l]; n[1] > 0 {
+				per = append(per, fmt.Sprintf("%s %d/%d (%.0f%%)", l, n[0], n[1], 100*float64(n[0])/float64(n[1])))
+			}
+		}
+		t.Logf("%s: %d/%d correct (%.0f%%) — %s\n%s", model, pass, len(routeCases), 100*float64(pass)/float64(len(routeCases)), strings.Join(per, ", "), strings.Join(misses, "\n"))
 		if floor := len(routeCases) * 9 / 10; pass < floor {
 			t.Errorf("%s routed %d/%d correctly; the floor is %d", model, pass, len(routeCases), floor)
 		}

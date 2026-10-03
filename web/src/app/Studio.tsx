@@ -51,7 +51,7 @@ export default function Studio() {
       <header className="studio-hero">
         <div className="sh-text">
           <span className="app-eyebrow"><IconWand size={14} /> {t.studio.title}</span>
-          <h1>{lang === 'zh' ? <>把想法<em>变成游戏</em></> : <>Dream it. <em>They’ll build it.</em></>}</h1>
+          <h1>{t.studio.heroA}<em>{t.studio.heroEm}</em></h1>
           <p>{t.studio.sub}</p>
           <button className="btn btn-primary" onClick={() => setDialog(true)}><IconPlus size={18} /> {t.studio.newGame}</button>
         </div>

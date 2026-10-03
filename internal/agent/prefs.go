@@ -45,7 +45,7 @@ type PrefSpec struct {
 }
 
 var PrefSpecs = []PrefSpec{
-	{Key: "language", Group: "profile", Kind: PrefEnum, Values: []string{"en", "zh"}, Default: "en", Chat: true},
+	{Key: "language", Group: "profile", Kind: PrefEnum, Values: []string{"en", "zh", "ko", "ja"}, Default: "en", Chat: true},
 
 	{Key: "aoi_tone", Group: "aoi", Kind: PrefEnum, Values: []string{"playful", "calm", "competitive"}, Default: "playful", Chat: true},
 	{Key: "aoi_talk", Group: "aoi", Kind: PrefEnum, Values: []string{"chatty", "normal", "quiet"}, Default: "normal", Chat: true},
@@ -258,6 +258,9 @@ func coercePref(key, raw string) (any, error) {
 		v = float64(n)
 	case PrefEnum:
 		v = strings.ToLower(raw)
+		if key == "language" {
+			v = langCode(raw)
+		}
 	}
 	if err := ValidatePref(key, v); err != nil {
 		return nil, err
@@ -294,4 +297,29 @@ func contains(xs []string, x string) bool {
 		}
 	}
 	return false
+}
+
+// langCode maps what a router may write for a language ("ja", "ja-JP",
+// "Japanese", "日本語", "한국어") onto the language preference values. Anything
+// it does not recognise is returned lower-cased, for validation to reject.
+func langCode(raw string) string {
+	l := strings.ToLower(strings.TrimSpace(raw))
+	for code, names := range langNames {
+		if l == code || strings.HasPrefix(l, code+"-") || strings.HasPrefix(l, code+"_") {
+			return code
+		}
+		for _, n := range names {
+			if strings.Contains(l, n) {
+				return code
+			}
+		}
+	}
+	return l
+}
+
+var langNames = map[string][]string{
+	"en": {"english", "英语", "英文", "英語", "영어"},
+	"zh": {"chinese", "mandarin", "中文", "汉语", "普通话", "中国語", "중국어"},
+	"ko": {"korean", "한국어", "한국말", "韩语", "韩文", "韓国語", "韓語"},
+	"ja": {"japanese", "日本語", "日语", "日文", "일본어"},
 }

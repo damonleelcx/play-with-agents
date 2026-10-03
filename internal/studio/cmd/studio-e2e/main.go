@@ -23,6 +23,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/damonleelcx/play-with-agents/internal/art"
 	"github.com/damonleelcx/play-with-agents/internal/config"
 	"github.com/damonleelcx/play-with-agents/internal/db"
 	"github.com/damonleelcx/play-with-agents/internal/engine"
@@ -31,7 +32,7 @@ import (
 	"github.com/damonleelcx/play-with-agents/internal/studio"
 )
 
-var outPath *string
+var outPath, coverPath *string
 
 func main() {
 	prompt := flag.String("prompt", "a 2-player game on a 5x5 grid where players take turns placing stones; you win by making a line of 4; if the board fills it's a draw", "the game idea")
@@ -41,6 +42,7 @@ func main() {
 	approve := flag.Bool("approve", false, "approve publishing and run to completion")
 	lang := flag.String("lang", "en", "owner language")
 	outPath = flag.String("out", "", "save the newest playtested module here")
+	coverPath = flag.String("cover", "", "save the game's cover image here")
 	flag.Parse()
 	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelWarn})))
 	if err := run(*prompt, *dbName, *lang, *timeout, *workers, *approve); err != nil {
@@ -77,6 +79,10 @@ func run(prompt, dbName, lang string, timeout time.Duration, nWorkers int, appro
 	store := &engine.Store{Pool: pool}
 	model := &engine.Model{Client: client, Store: store}
 	planner := &engine.Planner{Store: store, Model: model, LLM: cfg.LLMModel}
+	// The Artist: real cover art when PLAY_IMAGE_API_KEY is set.
+	images := art.NewClient(cfg.ImageAPIKey, cfg.ImageModel)
+	studio.ConfigureArt(studio.Artist{Images: images, Model: model, FastLLM: cfg.LLMFastModel})
+	fmt.Printf("cover art: image generation enabled=%v (model %s)\n", images.Enabled(), images.Model)
 
 	// The owner.
 	var uid, conv string
@@ -178,8 +184,8 @@ func report(ctx context.Context, s *engine.Store, pool *pgxpool.Pool, goalID, ga
 	}
 	u := g.Usage
 	fmt.Printf("\nGOAL %q status=%s replans=%d/%d wall=%s\n", g.Title, g.Status, g.Replans, g.Limits.MaxReplans, time.Since(start).Round(time.Second))
-	fmt.Printf("usage: %d model steps, %d tool calls, %d prompt + %d completion = %d tokens, ~$%.2f\n",
-		u.Iterations, u.ToolCalls, u.PromptTokens, u.CompletionTokens, u.Tokens(), u.CostUSD)
+	fmt.Printf("usage: %d model steps, %d tool calls, %d prompt + %d completion = %d tokens, %d image calls, ~$%.2f\n",
+		u.Iterations, u.ToolCalls, u.PromptTokens, u.CompletionTokens, u.Tokens(), u.Images, u.CostUSD)
 
 	fmt.Println("\nTASKS")
 	ts, _ := s.Tasks(ctx, goalID)
@@ -229,6 +235,18 @@ func report(ctx context.Context, s *engine.Store, pool *pgxpool.Pool, goalID, ga
 	_ = pool.QueryRow(ctx, `SELECT coalesce(report->>'markdown',''), coalesce(report->'review'->>'markdown',''), source FROM game_versions
 		WHERE game_id=$1 AND report ? 'playtest' ORDER BY version DESC LIMIT 1`, gameID).Scan(&md, &review, &src)
 	fmt.Printf("\nNEWEST PLAYTEST\n%s\n\nNEWEST REVIEW\n%s\n", md, review)
+	if c, err := art.Info(ctx, pool, gameID); err == nil && c != nil {
+		fmt.Printf("\nCOVER v%d source=%s model=%s for %q, made %s\nprompt: %s\n", c.Version, c.Source, c.Model, c.Name, c.CreatedAt.Format(time.RFC3339), clip(c.Prompt, 600))
+		if *coverPath != "" {
+			if b, _, _, ok, err := art.Load(ctx, pool, gameID); err == nil && ok {
+				if err := os.WriteFile(*coverPath, b, 0o644); err == nil {
+					fmt.Printf("cover saved to %s (%d KB)\n", *coverPath, len(b)/1024)
+				}
+			}
+		}
+	} else {
+		fmt.Println("\nCOVER none", err)
+	}
 	if *outPath != "" && src != "" {
 		if err := os.WriteFile(*outPath, []byte(src), 0o644); err == nil {
 			fmt.Println("module saved to", *outPath)

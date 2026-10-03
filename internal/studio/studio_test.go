@@ -16,6 +16,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/damonleelcx/play-with-agents/internal/art"
 	"github.com/damonleelcx/play-with-agents/internal/db"
 	"github.com/damonleelcx/play-with-agents/internal/engine"
 	"github.com/damonleelcx/play-with-agents/internal/games/script"
@@ -298,9 +299,11 @@ func TestPlaybookShape(t *testing.T) {
 	if !ok || !sk.Fixed {
 		t.Fatalf("build_game is not registered as a fixed playbook")
 	}
-	want := []struct{ key, role, tool string }{
-		{"design-rules", RoleDesigner, ""}, {"write-module", RoleEngineer, ""}, {"playtest", RolePlaytester, ToolPlaytest},
-		{"critic-review", RoleCritic, ""}, {"publish", RoleCoordinator, ""},
+	want := []struct{ key, role, tool, dep string }{
+		{"design-rules", RoleDesigner, "", ""}, {"write-module", RoleEngineer, "", "design-rules"},
+		{"illustrate-cover", RoleArtist, ToolIllustrate, "design-rules"},
+		{"playtest", RolePlaytester, ToolPlaytest, "write-module"},
+		{"critic-review", RoleCritic, "", "playtest"}, {"publish", RoleCoordinator, "", "critic-review"},
 	}
 	if len(sk.Steps) != len(want) {
 		t.Fatalf("%d steps", len(sk.Steps))
@@ -310,9 +313,35 @@ func TestPlaybookShape(t *testing.T) {
 		if s.Key != w.key || s.Role != w.role || s.Tool != w.tool {
 			t.Errorf("step %d = %s/%s/%s, want %v", i, s.Key, s.Role, s.Tool, w)
 		}
-		if i > 0 && (len(s.Deps) != 1 || s.Deps[0] != want[i-1].key) {
+		if (w.dep == "" && len(s.Deps) != 0) || (w.dep != "" && (len(s.Deps) != 1 || s.Deps[0] != w.dep)) {
 			t.Errorf("step %s deps %v", s.Key, s.Deps)
 		}
+	}
+	// The Artist never gates publishing: nothing depends on it, it needs no
+	// approval and it declares no check that could fail it.
+	byKey := map[string]skills.Step{}
+	for _, s := range sk.Steps {
+		byKey[s.Key] = s
+	}
+	var upstream func(k string, seen map[string]bool)
+	upstream = func(k string, seen map[string]bool) {
+		for _, d := range byKey[k].Deps {
+			seen[d] = true
+			upstream(d, seen)
+		}
+	}
+	for _, s := range sk.Steps {
+		seen := map[string]bool{}
+		upstream(s.Key, seen)
+		if seen["illustrate-cover"] {
+			t.Errorf("%s waits for the cover", s.Key)
+		}
+	}
+	if a := byKey["illustrate-cover"]; len(a.Verify) != 0 {
+		t.Errorf("illustrate-cover verifies %v", a.Verify)
+	}
+	if it, ok := tools.Get(ToolIllustrate); !ok || it.Gate != tools.G0 {
+		t.Fatal("illustrate_cover must run unattended (G0)")
 	}
 	// Every gate is declared on its step.
 	gates := map[string]string{"write-module": VerifyModuleChecks, "playtest": VerifyPlaytestPassed,
@@ -351,7 +380,8 @@ func TestPlaybookShape(t *testing.T) {
 	for _, x := range ts {
 		kinds[x.Key] = x.Kind + "/" + x.Spec.Role + "/" + x.Status
 	}
-	if kinds["playtest"] != "tool/playtester/blocked" || kinds["design-rules"] != "llm/designer/ready" || kinds["critic-review"] != "llm/critic/blocked" {
+	if kinds["playtest"] != "tool/playtester/blocked" || kinds["design-rules"] != "llm/designer/ready" || kinds["critic-review"] != "llm/critic/blocked" ||
+		kinds["illustrate-cover"] != "tool/artist/blocked" {
 		t.Fatalf("tasks: %v", kinds)
 	}
 	if n := r.sc.calls["other"]; n != 0 {
@@ -456,6 +486,10 @@ func TestBuildToPublishApproval(t *testing.T) {
 	r.drive(t, func() bool { return r.goal(t, goalID).Status == "completed" })
 	if st, cur := r.gameState(t, gameID); st != "published" || cur != 1 {
 		t.Fatalf("after approval: %s v%d", st, cur)
+	}
+	// The Artist ran beside the build (no image key here: procedural).
+	if c, err := art.Info(ctx, r.pool, gameID); err != nil || c == nil || c.Source != "procedural" {
+		t.Fatalf("cover after the build: %+v %v", c, err)
 	}
 	// Aoi posts the game card in the originating conversation.
 	var meta []byte

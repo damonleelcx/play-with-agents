@@ -93,6 +93,9 @@ func failedGate(ctx context.Context, s *engine.Store, g *engine.Goal, all []*eng
 			continue
 		}
 		switch x.Spec.Role {
+		case RoleArtist:
+			// The cover never gates anything; look past it.
+			continue
 		case RolePlaytester:
 			var raw []byte
 			err := s.Pool.QueryRow(ctx, `SELECT output FROM tool_calls WHERE task_id=$1 AND tool=$2 AND status='succeeded' ORDER BY id DESC LIMIT 1`,
@@ -190,25 +193,51 @@ func escalate(ctx context.Context, p *engine.Planner, g *engine.Goal, t *engine.
 		name = game.Name
 	}
 	var msg, reason string
-	if g.Language == "zh" {
+	why := localShort(tr, g.Language)
+	switch g.Language {
+	case "zh":
 		msg = fmt.Sprintf("《%s》需要你来拿主意：工作室已经修改了 %d 轮，可还是没过关（%s）。告诉我想怎么改，比如简化某条规则，我就让大家再来一轮；也可以先取消这次制作。",
-			name, g.Replans, zhShort(tr))
-		reason = fmt.Sprintf("修改了 %d 轮仍未通过（%s），需要你的决定", g.Replans, zhShort(tr))
-	} else {
+			name, g.Replans, why)
+		reason = fmt.Sprintf("修改了 %d 轮仍未通过（%s），需要你的决定", g.Replans, why)
+	case "ja":
+		msg = fmt.Sprintf("「%s」について、あなたの判断が必要なの。スタジオで %d 回直したけど、まだ通らなくて（%s）。どこを変えたいか教えてね——ルールを一つシンプルにするだけで通ることも多いよ。もう一回チームで挑戦するか、今回の制作をキャンセルしてもOK。",
+			name, g.Replans, why)
+		reason = fmt.Sprintf("%d 回修正しても未通過（%s）。オーナーの判断が必要です", g.Replans, why)
+	case "ko":
+		msg = fmt.Sprintf("“%s”에 대해 결정이 필요해요. 스튜디오에서 %d번이나 고쳤는데 아직 통과하지 못했어요(%s). 어떻게 바꾸고 싶은지 알려 주세요 — 규칙 하나만 단순하게 바꿔도 통과하는 경우가 많아요. 팀이 한 번 더 도전하거나, 이번 제작을 취소할 수도 있어요.",
+			name, g.Replans, why)
+		reason = fmt.Sprintf("%d번 수정했지만 아직 통과하지 못함(%s). 주인의 결정이 필요해요", g.Replans, why)
+	default:
 		msg = fmt.Sprintf("I need your call on “%s”: the studio has been through %d revision rounds and it still doesn't pass (%s). Tell me what to change — simplifying a rule often does it — and the team will go another round, or cancel the build.",
-			name, g.Replans, tr.short)
-		reason = fmt.Sprintf("still failing after %d revision rounds (%s); the owner needs to decide", g.Replans, tr.short)
+			name, g.Replans, why)
+		reason = fmt.Sprintf("still failing after %d revision rounds (%s); the owner needs to decide", g.Replans, why)
 	}
 	p.Store.PostMessage(ctx, g.ConversationID, g.UserID, msg, map[string]any{"intent": Skill, "mood": "sad", "goal_id": g.ID,
 		"kind": "attention", "cards": []map[string]any{{"kind": "mission", "goal_id": g.ID}}}, "studio-escalate-"+t.ID)
 	return p.Store.SetGoalStatus(ctx, g.ID, "needs_attention", reason)
 }
 
-func zhShort(tr *trigger) string {
-	if tr.task.Spec.Role == RoleCritic {
-		return "评审要求修改"
+// localShort says, in the owner's language, which gate keeps failing.
+func localShort(tr *trigger, lang string) string {
+	critic := tr.task.Spec.Role == RoleCritic
+	switch lang {
+	case "zh":
+		if critic {
+			return "评审要求修改"
+		}
+		return "试玩没有通过"
+	case "ja":
+		if critic {
+			return "クリティックが修正を求めています"
+		}
+		return "テストプレイに通りませんでした"
+	case "ko":
+		if critic {
+			return "크리틱이 수정을 요청했어요"
+		}
+		return "플레이테스트를 통과하지 못했어요"
 	}
-	return "试玩没有通过"
+	return tr.short
 }
 
 // finish completes a build once the owner decided on publishing: published,
@@ -267,6 +296,14 @@ func announce(ctx context.Context, p *engine.Planner, g *engine.Goal, name strin
 		return "《" + name + "》上架啦！快来开一桌，我第一个坐下～"
 	case g.Language == "zh":
 		return "《" + name + "》做好了，先作为草稿留着——随时可以开一桌试试！"
+	case g.Language == "ja" && published:
+		return "「" + name + "」、棚に並んだよ！さっそく一卓どう？最初の一手はわたしがもらうね～"
+	case g.Language == "ja":
+		return "「" + name + "」ができたよ。下書きとして保存してあるから、いつでも試しに一卓どうぞ！"
+	case g.Language == "ko" && published:
+		return "“" + name + "”이(가) 진열대에 올라갔어요! 한 판 해요, 첫 수는 제가 할게요~"
+	case g.Language == "ko":
+		return "“" + name + "” 완성! 초안으로 저장해 뒀어요 — 언제든 한 판 시험해 봐요!"
 	case published:
 		return "“" + name + "” is on the shelf! Pull up a chair — I call first move."
 	default:

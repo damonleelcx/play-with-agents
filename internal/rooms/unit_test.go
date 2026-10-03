@@ -46,8 +46,12 @@ func TestRevealsHidden(t *testing.T) {
 		"the ace of spades is out":      false,
 		"我有黑桃A":                         false, // As is public
 		"我有红桃Q":                         true,
-		"As Ah, sweet":                  true, // two codes: Ah counts here
-		"Bet 20 on 3 to 1 odds, 9s ago": true, // conservative: 9s reads as a card
+		"スペードのAは見えてるね":                  false, // As is public
+		"ハートのクイーンを持ってるよ":                true,
+		"클로버 에이스가 내 손에":                 true,
+		"다이아 K 나왔네":                     false, // Kd is public
+		"As Ah, sweet":                  true,  // two codes: Ah counts here
+		"Bet 20 on 3 to 1 odds, 9s ago": true,  // conservative: 9s reads as a card
 	} {
 		if got := revealsHidden(text, public); got != want {
 			t.Errorf("revealsHidden(%q) = %v, want %v", text, got, want)
@@ -99,6 +103,11 @@ func TestSettingsFromPrefs(t *testing.T) {
 	if st.TurnSeconds != 0 || st.AgentSpeed != "natural" || st.TableTalk != "quiet" || st.Difficulty != "shark" ||
 		st.Language != "zh" || st.FillEmpty || len(st.Favorites) != 1 {
 		t.Fatalf("%+v", st)
+	}
+	for in, want := range map[string]string{"ko": "ko", "ko-KR": "ko", "ja": "ja", "JA-jp": "ja", "fr": "en"} {
+		if got := settingsFrom(map[string]any{"language": in}, meta).Language; got != want {
+			t.Fatalf("language %q → %q, want %q", in, got, want)
+		}
 	}
 	if d := settingsFrom(nil, meta); d.TurnSeconds != 20 || !d.FillEmpty || d.TableTalk != "all" || d.Language != "en" {
 		t.Fatalf("defaults %+v", d)

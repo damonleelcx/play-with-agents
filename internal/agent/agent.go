@@ -48,7 +48,7 @@ type TableRequest struct {
 	AgentIDs []string       // roster ids (see Roster), validated before the call
 	Seats    int            // total seats including the player; always >= 1+len(AgentIDs)
 	Options  map[string]any // game options as the player stated them; the game validates
-	Lang     string         // en | zh, for the table's name and agent chatter
+	Lang     string         // en | zh | ko | ja, for the table's name and agent chatter
 }
 
 // Tables creates tables (implemented by the rooms service).
@@ -92,16 +92,16 @@ var builtinGames = []GameInfo{{ID: "holdem", Name: "Texas Hold'em", Summary: "No
 // full profiles (bios, avatars, play styles) live with the rooms service; this
 // list must name the same ids (docs/00-architecture.md, "AI player roster").
 type RosterAgent struct {
-	ID, Name, NameZH, Style string
+	ID, Name, NameZH, NameKO, NameJA, Style string
 }
 
 var Roster = []RosterAgent{
-	{"aoi", "Aoi", "葵", "balanced, adaptive; the host"},
-	{"ren", "Ren", "蓮", "tight-aggressive; calm strategist"},
-	{"mika", "Mika", "美香", "loose-aggressive; loves to bluff"},
-	{"bram", "Captain Bram", "布拉姆船长", "loose-passive; calls a lot, tells stories"},
-	{"nova", "Nova", "诺瓦", "balanced, math-driven; cheerful robot"},
-	{"lin", "Lin", "琳", "tight-passive; shy prodigy"},
+	{"aoi", "Aoi", "葵", "아오이", "葵", "balanced, adaptive; the host"},
+	{"ren", "Ren", "蓮", "렌", "レン", "tight-aggressive; calm strategist"},
+	{"mika", "Mika", "美香", "미카", "ミカ", "loose-aggressive; loves to bluff"},
+	{"bram", "Captain Bram", "布拉姆船长", "브램 선장", "ブラム船長", "loose-passive; calls a lot, tells stories"},
+	{"nova", "Nova", "诺娃", "노바", "ノヴァ", "balanced, math-driven; cheerful robot"},
+	{"lin", "Lin", "琳", "린", "リン", "tight-passive; shy prodigy"},
 }
 
 // IsAgentID reports whether id names a roster agent.
@@ -117,8 +117,13 @@ func IsAgentID(id string) bool {
 func agentName(id, lang string) string {
 	for _, a := range Roster {
 		if a.ID == id {
-			if lang == "zh" {
+			switch lang {
+			case "zh":
 				return a.NameZH
+			case "ko":
+				return a.NameKO
+			case "ja":
+				return a.NameJA
 			}
 			return a.Name
 		}

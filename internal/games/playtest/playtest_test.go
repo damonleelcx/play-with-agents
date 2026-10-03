@@ -37,7 +37,11 @@ func TestExamplesPass(t *testing.T) {
 	for _, e := range script.Examples() {
 		t.Run(e.ID, func(t *testing.T) {
 			t.Parallel()
-			sopts := script.Options{}
+			// This test proves the examples are valid games; timeouts have
+			// their own sandbox tests. A shared desktop can stall a thread
+			// for most of a second (antivirus, other load), so the budget is
+			// the 1s live tables use rather than the playtester's 250ms.
+			sopts := script.Options{CallBudget: time.Second}
 			if raceEnabled {
 				// Budgets are wall-clock; the race detector slows the
 				// interpreter by an order of magnitude.

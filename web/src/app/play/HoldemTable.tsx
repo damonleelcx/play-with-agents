@@ -63,13 +63,13 @@ export default function HoldemTable({
   prefs: PlayPrefs
   speakingSeat?: number
 }) {
-  const { s, f } = usePlayT()
+  const { s, f, handName } = usePlayT()
   const compact = useMediaQuery('(max-width: 720px)')
   const d = table.view!.data as HoldemData
   const me = table.my_seat
   const viewer = me >= 0 ? me : 0
   const n = Math.max(d.players.length, table.seats.length, 2)
-  const seatInfo = (i: number): SeatInfo => table.seats[i] || { seat: i, kind: 'open', name: `Seat ${i + 1}`, avatar: '' }
+  const seatInfo = (i: number): SeatInfo => table.seats[i] || { seat: i, kind: 'open', name: f(s.newTable.seatN, { n: i + 1 }), avatar: '' }
   const reduced = prefs.motion === 'reduced'
   const sound = prefs.sound
 
@@ -253,7 +253,7 @@ export default function HoldemTable({
 
           {/* dealer button + blinds */}
           {G[d.button] && (
-            <div className="pw-dealer" style={{ left: `${G[d.button].dx}%`, top: `${G[d.button].dy}%` }} title="Dealer">
+            <div className="pw-dealer" style={{ left: `${G[d.button].dx}%`, top: `${G[d.button].dy}%` }} title={s.holdem.dealer}>
               D
             </div>
           )}
@@ -316,7 +316,7 @@ export default function HoldemTable({
                 />
               ))}
               {prefs.show_hand_strength && !resultOn && meP?.hand_name && meP?.status !== 'folded' && (
-                <div className="pw-strength">{meP?.hand_name}</div>
+                <div className="pw-strength">{handName(meP?.hand_name)}</div>
               )}
             </div>
           )}
@@ -410,7 +410,7 @@ function Seat({
   from: { x: string; y: string }
   speaking: boolean
 }) {
-  const { s } = usePlayT()
+  const { s, handName } = usePlayT()
   if (info.kind === 'open' && !p) {
     return (
       <div className="pw-seat is-empty" style={{ left: `${g.x}%`, top: `${g.y}%` }}>
@@ -476,7 +476,7 @@ function Seat({
         {isMe && actBubble}
       </div>
       {status === 'allin' && !winner && <span className="pw-badge-allin">{s.holdem.allin}</span>}
-      {reveal?.hand && !isMe && <span className={`pw-handname ${winner ? 'is-win' : ''}`}>{reveal.hand}</span>}
+      {reveal?.hand && !isMe && <span className={`pw-handname ${winner ? 'is-win' : ''}`}>{handName(reveal.hand)}</span>}
       {winner && reveal && reveal.won > 0 && <span className="pw-won">+{fmtChips(reveal.won)}</span>}
     </div>
   )
@@ -484,7 +484,7 @@ function Seat({
 
 // ── result toast ──────────────────────────────────────────────────────────
 function ResultToast({ res, seats, me }: { res: LastHand; seats: SeatInfo[]; me: number }) {
-  const { s, f } = usePlayT()
+  const { s, f, handName } = usePlayT()
   const w = res.winners
   const main = w[0]
   const info = seats[main.seat]
@@ -503,7 +503,7 @@ function ResultToast({ res, seats, me }: { res: LastHand; seats: SeatInfo[]; me:
               ? f(s.holdem.youWin, { amount: fmtChips(main.amount) })
               : f(s.holdem.wins, { name: info?.name || '', amount: fmtChips(main.amount) })}
         </b>
-        <span>{w.length > 1 ? w.map((x) => `${seats[x.seat]?.name} +${fmtChips(x.amount)}`).join(' · ') : main.hand_name || ''}</span>
+        <span>{w.length > 1 ? w.map((x) => `${seats[x.seat]?.name} +${fmtChips(x.amount)}`).join(' · ') : handName(main.hand_name)}</span>
       </div>
     </div>
   )

@@ -387,11 +387,45 @@ func TestDetectLang(t *testing.T) {
 		{"👍", "zh", "zh"},
 		{"100", "", "en"},
 		{"Aoi，来一局 hold'em", "en", "zh"},
+		// Korean: any Hangul.
+		{"홀덤 한 판 하자", "en", "ko"},
+		{"미카랑 렌 불러서 poker 하자", "zh", "ko"},
+		{"ㅋㅋ", "en", "ko"},
+		// Japanese: any kana, even with kanji and Latin around it.
+		{"ポーカーやろう", "en", "ja"},
+		{"ミカとレンを呼んでhold'em", "zh", "ja"},
+		{"麻雀のルールを教えて", "", "ja"},
+		{"よし", "ko", "ja"},
+		// Han only is Chinese — unless the player chose Japanese, where
+		// kanji-only text (了解, 麻雀最高) is Japanese.
+		{"了解", "en", "zh"},
+		{"了解", "ja", "ja"},
+		{"麻雀最高", "ja-JP", "ja"},
+		{"开一桌德州", "ko", "zh"},
+		// Too short to tell: the preference, whatever it is.
+		{"ok", "ko", "ko"},
+		{"👍", "ja", "ja"},
+		{"gg", "", "en"},
+		// Real English beats the preference.
+		{"deal me in", "ja", "en"},
 	}
 	for _, c := range cases {
 		if got := DetectLang(c.text, c.pref); got != c.want {
 			t.Errorf("DetectLang(%q,%q)=%s want %s", c.text, c.pref, got, c.want)
 		}
+	}
+}
+
+func TestLanguagePreference(t *testing.T) {
+	for raw, want := range map[string]string{"ja": "ja", "ko": "ko", "ja-JP": "ja", "Japanese": "ja", "日本語": "ja",
+		"한국어": "ko", "korean": "ko", "中文": "zh", "English": "en", "zh-CN": "zh"} {
+		v, err := coercePref("language", raw)
+		if err != nil || v != want {
+			t.Errorf("coercePref(language, %q) = %v, %v; want %s", raw, v, err, want)
+		}
+	}
+	if _, err := coercePref("language", "klingon"); err == nil {
+		t.Error("unknown language must be rejected")
 	}
 }
 

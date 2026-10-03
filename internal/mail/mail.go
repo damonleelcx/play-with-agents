@@ -183,10 +183,31 @@ const SenderName = "Aoi · Play with Agents"
 
 // Signature is how Aoi signs off, per language.
 func Signature(lang string) string {
-	if lang == "zh" {
+	switch lang {
+	case "zh":
 		return "—— 葵 · Play with Agents"
+	case "ja":
+		return "—— 葵（あおい） · Play with Agents"
+	case "ko":
+		return "— 아오이 · Play with Agents"
 	}
 	return "— Aoi · Play with Agents"
+}
+
+// playMoneyNote is the footer line under every email, per language.
+var playMoneyNote = map[string]string{
+	"en": "Play money only — no purchases, no cash-out, no real-money wagering.",
+	"zh": "仅限娱乐筹码——无需购买，不能兑现，不涉及任何真钱下注。",
+	"ko": "게임 머니 전용 — 구매도, 현금화도, 실제 돈을 건 베팅도 없어요.",
+	"ja": "遊び用のチップのみ — 購入・換金・リアルマネーでの賭けは一切ありません。",
+}
+
+// htmlLang is the lang attribute of the email page.
+func htmlLang(lang string) string {
+	if _, ok := playMoneyNote[lang]; ok {
+		return lang
+	}
+	return "en"
 }
 
 // Page is the branded HTML frame every email uses: the wordmark, a title, a
@@ -195,7 +216,7 @@ func Signature(lang string) string {
 // inline styles because that is what mail clients render reliably.
 func Page(lang, title, lead, cta, link, foot string) string {
 	e := html.EscapeString
-	return `<!doctype html><html><body style="margin:0;background:#0b1430;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#e8eeff">
+	return `<!doctype html><html lang="` + htmlLang(lang) + `"><body style="margin:0;background:#0b1430;font-family:-apple-system,Segoe UI,Helvetica,Arial,sans-serif;color:#e8eeff">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#0b1430"><tr><td align="center" style="padding:40px 16px">
 <table role="presentation" width="520" cellpadding="0" cellspacing="0" style="max-width:520px;background:#121e45;border:1px solid #23346e;border-radius:20px;padding:36px">
 <tr><td style="font-size:12px;letter-spacing:.22em;font-weight:700;color:#4f8cff">PLAY WITH AGENTS</td></tr>
@@ -206,6 +227,6 @@ func Page(lang, title, lead, cta, link, foot string) string {
 <tr><td style="padding-top:18px;font-size:13px;line-height:1.6;color:#7f8bb5">` + e(foot) + `</td></tr>
 <tr><td style="padding-top:26px;font-size:14px;color:#3fd2ff">` + e(Signature(lang)) + `</td></tr>
 </table>
-<p style="margin:18px 0 0;font-size:11px;color:#56618a">Play money only — no purchases, no cash-out, no real-money wagering.</p>
+<p style="margin:18px 0 0;font-size:11px;color:#56618a">` + e(playMoneyNote[htmlLang(lang)]) + `</p>
 </td></tr></table></body></html>`
 }

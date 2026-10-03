@@ -61,6 +61,9 @@ type Usage struct {
 	PromptTokens     int     `json:"prompt_tokens"`
 	CompletionTokens int     `json:"completion_tokens"`
 	CostUSD          float64 `json:"cost_usd"`
+	// Images counts image-model calls (the studio's cover art); their cost
+	// is in CostUSD.
+	Images int `json:"images,omitempty"`
 }
 
 func (u Usage) Tokens() int { return u.PromptTokens + u.CompletionTokens }
@@ -189,7 +192,8 @@ func (s *Store) AddUsage(ctx context.Context, goalID string, d Usage) error {
 		'tool_calls',        coalesce((usage->>'tool_calls')::int,0) + $3,
 		'prompt_tokens',     coalesce((usage->>'prompt_tokens')::int,0) + $4,
 		'completion_tokens', coalesce((usage->>'completion_tokens')::int,0) + $5,
-		'cost_usd',          coalesce((usage->>'cost_usd')::float,0) + $6) WHERE id=$1`,
-		goalID, d.Iterations, d.ToolCalls, d.PromptTokens, d.CompletionTokens, d.CostUSD)
+		'cost_usd',          coalesce((usage->>'cost_usd')::float,0) + $6,
+		'images',            coalesce((usage->>'images')::int,0) + $7) WHERE id=$1`,
+		goalID, d.Iterations, d.ToolCalls, d.PromptTokens, d.CompletionTokens, d.CostUSD, d.Images)
 	return err
 }

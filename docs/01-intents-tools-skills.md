@@ -73,6 +73,7 @@ unknown tool.
 | `read_example` | R | G0 | Read one of the bundled reference modules (the Engineer's templates) |
 | `playtest` | R | G0 | Simulate hundreds of games deterministically; report outcomes, stalls, errors |
 | `submit_review` | W | G0 | The Critic's verdict (`pass`/`revise`) and findings, stored on the reviewed version |
+| `illustrate_cover` | W | G0 | The Artist's tool task: the fast model writes a text-free 16:9 art prompt from the rules (theme, board, pieces, mood) in the brand palette; DashScope paints it (≤ 2 image calls per build, counted in the goal's `usage.images` and cost, a `usage.image` event); any failure stores the procedural cover and still succeeds. A revision keeps the cover unless the game's name changed |
 | `publish_game` | W | **G1**, `Notify: "build_ready"` | Publish the approved version; the owner is emailed that the game is ready. Refuses a version that has not passed both the playtest and the critic |
 
 `save_module` stores a version and returns the check report; it rewrites the
@@ -109,7 +110,7 @@ owner, and on a daily review.
 | Skill | DAG | Gates | Done when |
 |---|---|---|---|
 | `general-task` | work → report | none | the request is fulfilled and the player told; also the fallback for an unknown skill |
-| `build_game` *(fixed playbook, `internal/studio`)* | design rules → engineer module (until `save_module` checks clean) → playtest (tool task) → critic review → publish. A failed playtest or a critic `revise` adds a round (revise → playtest → critic → publish), deterministically, up to `max_replans` (4); then Aoi asks the owner and the goal waits in `needs_attention` | **G1** publish | the module passes the check and the playtest gate, the critic accepts, and the owner decided on publishing (approved, or kept it as a draft) |
+| `build_game` *(fixed playbook, `internal/studio`)* | design rules → engineer module (until `save_module` checks clean) → playtest (tool task) → critic review → publish; beside it, design rules → illustrate cover (Artist, tool task; nothing depends on it, so it never blocks publishing). A failed playtest or a critic `revise` adds a round (revise → playtest → critic → publish), deterministically, up to `max_replans` (4); then Aoi asks the owner and the goal waits in `needs_attention` | **G1** publish | the module passes the check and the playtest gate, the critic accepts, and the owner decided on publishing (approved, or kept it as a draft) |
 
 ### 3.1 Verifiers
 

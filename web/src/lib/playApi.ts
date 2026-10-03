@@ -29,6 +29,7 @@ export type GameDetail = GameCard & {
 export type GamesList = { builtin: GameCard[]; mine: GameCard[]; community: GameCard[] }
 
 export type AgentStyle = { tightness: number; aggression: number; bluff: number; talk: number }
+export type AgentI18n = { name: string; title: string; bio: string }
 export type Agent = {
   id: string
   name: string
@@ -39,6 +40,8 @@ export type Agent = {
   bio_zh: string
   avatar: string
   style: AgentStyle
+  // per-language name/title/bio (en, zh, ko, ja); older servers omit it
+  i18n?: Partial<Record<string, AgentI18n>>
 }
 
 export type TableSummary = {

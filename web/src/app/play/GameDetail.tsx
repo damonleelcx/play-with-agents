@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { Img } from '../../components/Aoi'
+import { uiLocale } from '../../lib/i18n'
 import { md } from '../../lib/md'
 import { playApi, type GameCard, type GameDetail as Detail } from '../../lib/playApi'
 import { MOCK_GAMES } from './fixtures'
@@ -64,10 +66,10 @@ export default function GameDetail() {
         ‹ {s.detail.back}
       </Link>
       <header className="pw-detail-head">
-        <div className="pw-game-cover is-big">{g.cover ? <img src={g.cover} alt="" /> : <span className="pw-game-mono">{g.name.slice(0, 2)}</span>}</div>
+        <div className="pw-game-cover is-big"><Img srcs={g.cover ? [g.cover] : []} alt="" fallback={<span className="pw-game-mono">{g.name.slice(0, 2)}</span>} /></div>
         <div>
           <span className="pw-eyebrow">
-            {g.kind === 'builtin' ? 'Built-in' : g.owner_name ? `${s.lobby.by} ${g.owner_name}` : ''} · v{g.version}
+            {g.kind === 'builtin' ? s.detail.builtin : g.owner_name ? `${s.lobby.by} ${g.owner_name}` : ''} · v{g.version}
           </span>
           <h1>{g.id === 'holdem' ? s.lobby.holdemName : g.name}</h1>
           <p className="pw-muted">{g.summary}</p>
@@ -103,7 +105,7 @@ export default function GameDetail() {
                 {g.versions.map((v) => (
                   <li key={v.version}>
                     <b>v{v.version}</b>
-                    <small>{new Date(v.created_at).toLocaleDateString()}</small>
+                    <small>{new Date(v.created_at).toLocaleDateString(uiLocale())}</small>
                     {v.report?.summary && <span>{String(v.report.summary)}</span>}
                   </li>
                 ))}

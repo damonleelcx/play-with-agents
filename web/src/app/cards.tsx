@@ -1,14 +1,14 @@
 import { Component, useCallback, useEffect, useState, type ReactNode } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { AoiFace, Img } from '../components/Aoi'
-import { IconAlert, IconArrow, IconBolt, IconCards, IconCheck, IconEye, IconPalette, IconPlay, IconX } from '../components/Icons'
+import { IconAlert, IconArrow, IconBolt, IconCards, IconCheck, IconEye, IconPalette, IconPlay, IconSpark, IconX } from '../components/Icons'
 import { api, type Approval, type GameCard as Game, type Goal } from '../lib/api'
 import { useI18n } from '../lib/i18n'
 import { useLive } from './live'
 import { lanes, progress, workTasks, type Lane, type Role } from './missionModel'
 
 export const ROLE_ICON: Record<Role, (p: { size?: number }) => JSX.Element> = {
-  designer: IconPalette, engineer: IconBolt, playtester: IconCards, critic: IconEye, coordinator: IconCards,
+  designer: IconPalette, engineer: IconBolt, playtester: IconCards, artist: IconSpark, critic: IconEye, coordinator: IconCards,
 }
 
 export function RoleBadge({ role, size = 30, state }: { role: Role; size?: number; state?: Lane['state'] }) {
@@ -131,7 +131,7 @@ export function GameCover({ game, size = 'md' }: { game: Pick<Game, 'id' | 'name
   )
   return (
     <span className={`game-cover ${size}`}>
-      <Img srcs={game.cover ? [game.cover] : []} alt="" fallback={fallback} />
+      <Img srcs={game.cover ? [game.cover] : []} alt="" fallback={fallback} lazy />
     </span>
   )
 }

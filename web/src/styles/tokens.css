@@ -49,9 +49,16 @@
   --focus: 0 0 0 3px rgba(61, 123, 255, 0.45);
   --glow: 0 0 24px rgba(61, 123, 255, 0.45);
 
-  --font-display: 'Anton', 'Oswald', 'PingFang SC', 'Microsoft YaHei', Impact, sans-serif;
-  --font-head: 'Space Grotesk', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
-  --font-body: 'Inter', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  /* CJK fallbacks sit behind the Latin faces and are swapped per <html lang>
+     below, so Han characters get Chinese or Japanese glyph forms as fits and
+     Hangul gets a Korean face. Noto Sans KR / JP and the two display faces are
+     loaded from Google Fonts in index.html (sliced by unicode-range, so only
+     the glyphs on screen are fetched; system faces win where installed). */
+  --font-cjk: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', 'Noto Sans JP', 'Noto Sans KR';
+  --font-cjk-display: 'PingFang SC', 'Microsoft YaHei';
+  --font-display: 'Anton', 'Oswald', var(--font-cjk-display), Impact, sans-serif;
+  --font-head: 'Space Grotesk', var(--font-cjk), system-ui, sans-serif;
+  --font-body: 'Inter', var(--font-cjk), system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
   --font-serif: 'Cormorant Garamond', 'Songti SC', Georgia, serif; /* the holo card */
 
@@ -65,6 +72,19 @@
   --ease: cubic-bezier(0.2, 0.7, 0.1, 1);
   --fs: 15px;
   color-scheme: dark;
+}
+
+/* Korean: system Gothic on Apple, Noto Sans KR elsewhere. Anton has no Hangul,
+   so display lines fall through to Black Han Sans: heavy, condensed, punchy. */
+:root:lang(ko) {
+  --font-cjk: 'Apple SD Gothic Neo', 'Noto Sans KR', 'Malgun Gothic', 'PingFang SC', 'Microsoft YaHei';
+  --font-cjk-display: 'Black Han Sans', 'Noto Sans KR', 'Apple SD Gothic Neo', 'Malgun Gothic';
+}
+/* Japanese: Hiragino on Apple, Noto Sans JP elsewhere (Japanese kanji forms
+   for 葵); display lines fall through to Dela Gothic One. */
+:root:lang(ja) {
+  --font-cjk: 'Hiragino Sans', 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', 'Yu Gothic UI', 'Meiryo', 'PingFang SC';
+  --font-cjk-display: 'Dela Gothic One', 'Noto Sans JP', 'Hiragino Sans', 'Yu Gothic UI';
 }
 
 /* Light theme for the app (Settings → Appearance). The landing page sets its
