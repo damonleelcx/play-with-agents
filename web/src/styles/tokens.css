@@ -1,0 +1,115 @@
+/* Design tokens — Play with Agents.
+   Brand: Aoi's character sheet. Deep night navy, electric blue light, ice
+   white; a warm ember accent borrowed from the bonfire holo card for wins and
+   highlights. The landing page also uses the studio-grey "paper" canvas and
+   heavy condensed type of the agency reference. The app is dark by default
+   and honours a light theme. */
+:root {
+  --navy-950: #060a14;
+  --navy-900: #0a1020;
+  --navy-850: #0d1528;
+  --navy-800: #111b33;
+  --navy-700: #182544;
+  --navy-600: #22325a;
+  --blue-500: #3d7bff;
+  --blue-400: #5b93ff;
+  --blue-300: #8fb6ff;
+  --cyan-400: #4fd6ff;
+  --ice-50: #f3f7ff;
+  --ice-200: #d5e2fb;
+  --paper: #e6e6e4;      /* landing hero canvas */
+  --paper-2: #d9d9d6;
+  --ink: #0a0a0b;
+  --ember-500: #ff8a3d;
+  --ember-400: #ffab6b;
+  --gold-400: #e9c46a;
+  --green-400: #3ddc97;
+  --red-400: #ff5d73;
+
+  /* player colours p0..p7 (also used by the board renderer) */
+  --p0: #4f8cff; --p1: #ff5d73; --p2: #ffc04d; --p3: #3ddc97;
+  --p4: #b07cff; --p5: #ff8f40; --p6: #3fd2ff; --p7: #e6e6e6;
+
+  /* semantic — dark (default) */
+  --bg: var(--navy-900);
+  --bg-soft: var(--navy-850);
+  --surface: var(--navy-800);
+  --surface-2: var(--navy-700);
+  --glass: rgba(17, 27, 51, 0.62);
+  --glass-strong: rgba(17, 27, 51, 0.88);
+  --line: rgba(143, 182, 255, 0.12);
+  --line-strong: rgba(143, 182, 255, 0.24);
+  --text: #eef3ff;
+  --text-2: #b9c6e4;
+  --text-3: #7f8db0;
+  --accent: var(--blue-500);
+  --accent-2: var(--cyan-400);
+  --accent-ink: #ffffff;
+  --warm: var(--ember-500);
+  --focus: 0 0 0 3px rgba(61, 123, 255, 0.45);
+  --glow: 0 0 24px rgba(61, 123, 255, 0.45);
+
+  --font-display: 'Anton', 'Oswald', 'PingFang SC', 'Microsoft YaHei', Impact, sans-serif;
+  --font-head: 'Space Grotesk', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-body: 'Inter', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', 'SFMono-Regular', Consolas, monospace;
+  --font-serif: 'Cormorant Garamond', 'Songti SC', Georgia, serif; /* the holo card */
+
+  --r-sm: 10px;
+  --r-md: 16px;
+  --r-lg: 24px;
+  --r-xl: 32px;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-md: 0 10px 28px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 28px 70px rgba(0, 0, 0, 0.5);
+  --ease: cubic-bezier(0.2, 0.7, 0.1, 1);
+  --fs: 15px;
+  color-scheme: dark;
+}
+
+/* Light theme for the app (Settings → Appearance). The landing page sets its
+   own palettes per section and ignores this. */
+:root[data-theme='light'] .themed,
+:root[data-theme='light'] body.themed-body {
+  --bg: #eef2fa;
+  --bg-soft: #e6ecf7;
+  --surface: #ffffff;
+  --surface-2: #f4f7fd;
+  --glass: rgba(255, 255, 255, 0.7);
+  --glass-strong: rgba(255, 255, 255, 0.92);
+  --line: rgba(10, 16, 32, 0.09);
+  --line-strong: rgba(10, 16, 32, 0.18);
+  --text: #0a1020;
+  --text-2: #2c3a5c;
+  --text-3: #66739a;
+  --shadow-sm: 0 1px 2px rgba(10, 20, 50, 0.06), 0 2px 8px rgba(10, 20, 50, 0.05);
+  --shadow-md: 0 8px 24px rgba(10, 20, 50, 0.09);
+  --shadow-lg: 0 24px 60px rgba(10, 20, 50, 0.14);
+  color-scheme: light;
+}
+:root[data-fs='small'] { --fs: 14px; }
+:root[data-fs='large'] { --fs: 17px; }
+
+/* App additions (signed-in experience). */
+:root {
+  --blue-600: #2a63e6;
+  --ember-600: #f0712a;
+  --amber-400: #ffc04d;
+  --violet-400: #b07cff;
+  --grad-brand: linear-gradient(135deg, #3d7bff 0%, #4fd6ff 100%);
+  --grad-ember: linear-gradient(135deg, #ff8a3d 0%, #ffb36b 100%);
+  --ok: var(--green-400);
+  --bad: var(--red-400);
+  --warn: var(--amber-400);
+  --side-w: 276px;
+  --rail-w: 76px;
+  --tabbar-h: 62px;
+}
+:root[data-theme='light'] .themed,
+:root[data-theme='light'] body.themed-body {
+  --accent: #2a63e6;
+  --accent-2: #0a86b8;
+  --blue-300: #2a63e6;
+  --ember-400: #d9601c;
+  --focus: 0 0 0 3px rgba(42, 99, 230, 0.28);
+}

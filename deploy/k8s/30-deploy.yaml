@@ -1,0 +1,101 @@
+# Two deployments from one image. The web tier holds no work; the workers hold
+# no HTTP. Scaling either is a replica count — the queue's leases and fencing
+# tokens are what make more than one worker safe.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: play-web
+  namespace: play
+  labels: { app.kubernetes.io/name: play-web, app.kubernetes.io/part-of: play }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app.kubernetes.io/name: play-web } }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: play-web, app.kubernetes.io/part-of: play }
+    spec:
+      # The relay's certificate is for mail.heros-agent.space; STARTTLS verifies
+      # that name, so it is dialled by name and resolved here to the relay's
+      # pinned ClusterIP. Not a CoreDNS rewrite: that would also answer
+      # cert-manager's HTTP-01 self-check for the relay and break its renewal.
+      hostAliases:
+        - ip: 10.43.120.55
+          hostnames: [mail.heros-agent.space]
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: web
+          image: PLAY_IMAGE
+          args: ["web"]
+          ports: [{ name: http, containerPort: 8080 }]
+          envFrom:
+            - configMapRef: { name: play-config }
+            - secretRef: { name: play }
+            - secretRef: { name: play-mail, optional: true }
+            - secretRef: { name: play-voice, optional: true }
+          env:
+            - { name: PLAY_WORKERS, value: "0" }
+          startupProbe:
+            httpGet: { path: /readyz, port: http }
+            failureThreshold: 30
+            periodSeconds: 2
+          readinessProbe:
+            httpGet: { path: /readyz, port: http }
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            periodSeconds: 20
+            failureThreshold: 3
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: "1", memory: 768Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: play-worker
+  namespace: play
+  labels: { app.kubernetes.io/name: play-worker, app.kubernetes.io/part-of: play }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app.kubernetes.io/name: play-worker } }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: play-worker, app.kubernetes.io/part-of: play }
+    spec:
+      hostAliases:
+        - ip: 10.43.120.55
+          hostnames: [mail.heros-agent.space]
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        seccompProfile: { type: RuntimeDefault }
+      # A worker told to stop finishes its current step, checkpoints and
+      # releases its lease; anything slower is resumed by the next worker once
+      # the lease expires.
+      terminationGracePeriodSeconds: 40
+      containers:
+        - name: worker
+          image: PLAY_IMAGE
+          args: ["worker"]
+          envFrom:
+            - configMapRef: { name: play-config }
+            - secretRef: { name: play }
+            - secretRef: { name: play-mail, optional: true }
+            - secretRef: { name: play-voice, optional: true }
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { cpu: "1", memory: 768Mi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }

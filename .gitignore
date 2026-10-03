@@ -1,0 +1,9 @@
+/dist/
+/bin/
+web/node_modules/
+web/dist/
+internal/web/dist/*
+!internal/web/dist/.keep
+.env
+deploy/deploy.env
+*.test

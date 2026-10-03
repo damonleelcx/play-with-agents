@@ -1,0 +1,41 @@
+# Every knob the process reads (internal/config). Nothing here is a secret.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: play-config
+  namespace: play
+data:
+  PLAY_ADDR: ":8080"
+  PLAY_PUBLIC_ORIGIN: "https://play.heros-agent.space"
+  PLAY_COOKIE_SECURE: "true"
+  # Same prepaid token-plan host as forge/jobs; the key is issued against it.
+  PLAY_LLM_BASE_URL: "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1"
+  PLAY_LLM_MODEL: "qwen3.8-max"
+  PLAY_LLM_FAST_MODEL: "qwen3.8-flash"
+  # The relay presents a certificate for this name; the pod resolves it to the
+  # relay's pinned ClusterIP via hostAliases (see 30-deploy.yaml).
+  PLAY_SMTP_HOST: "mail.heros-agent.space"
+  PLAY_SMTP_PORT: "587"
+  PLAY_SMTP_REPLY_TO: "support@heros-agent.space"
+  PLAY_ADMIN_EMAILS: "damonlee1020@gmail.com"
+  PLAY_WORKERS: "3"
+  PLAY_LEASE: "90s"
+  # Table workers play agents' turns and run turn clocks (short jobs, short lease).
+  PLAY_TABLE_WORKERS: "4"
+  PLAY_TABLE_LEASE: "15s"
+  # Aoi's voice: the published Fish Audio voice shared with jobs and forge.
+  # s2.1-pro-free lets the vendor train on requests (a deliberate choice, said
+  # in the privacy policy); s2.1-pro does not. The key is in play-voice.
+  PLAY_TTS_VOICE_ID: "df5c6c19dca944918dcbd6f1368fd02f"
+  PLAY_TTS_MODEL: "s2.1-pro-free"
+  # Spending ceilings (tokens/day). A public sign-up form sits in front of a
+  # paid key: the per-account cap bounds one person, the deployment cap bounds
+  # everyone.
+  PLAY_ACCOUNT_DAILY_TOKENS: "1500000"
+  PLAY_DEPLOYMENT_DAILY_TOKENS: "40000000"
+  # Player-written games run in an in-process JS sandbox. Its builtins are
+  # size-capped, but string concatenation in a loop can only be stopped by
+  # the time budget; this soft limit makes the Go GC fight back well before
+  # the 768Mi container ceiling (30-deploy.yaml) instead of the pod being
+  # OOM-killed mid-table.
+  GOMEMLIMIT: "560MiB"

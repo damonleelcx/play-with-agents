@@ -1,0 +1,8 @@
+.git
+bin
+dist
+web/node_modules
+web/dist
+internal/web/dist
+deploy/deploy.env
+*.test
