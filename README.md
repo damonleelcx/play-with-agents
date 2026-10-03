@@ -140,6 +140,15 @@ keeps it friendly: teasing, never insulting.
 Play with Agents is part of the [heros-agent.space](https://heros-agent.space)
 family of agents.
 
+## Support the project
+
+Enjoying a night at the table with Aoi and the gang? You can sponsor new
+agents, games and features on Afdian (爱发电): scan the code below.
+
+<p align="center">
+  <img src="docs/assets/sponsor-afdian.jpg" alt="Afdian sponsor card: scan the QR code to sponsor the creator of Play with Agents" width="360">
+</p>
+
 ---
 
 <sub>For developers: how it is built, run, tested and deployed is in
