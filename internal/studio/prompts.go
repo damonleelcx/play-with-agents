@@ -44,14 +44,27 @@ How you work:
 
 When the check passes, finish with a short summary (in English) of what you built and any rule you had to interpret.`
 
+// engineerLanguage asks for every player-facing string in the owner's
+// language: the game is played (and first tested) by them, and a Chinese
+// owner should not see "{s:0} to place a gem" on their own board.
+func engineerLanguage(lang string) string {
+	if lang == "" || lang == "en" {
+		return ""
+	}
+	return fmt.Sprintf(`
+
+Language: the owner speaks %[1]s. Write EVERY player-facing string in %[1]s: meta.name and meta.summary, move labels, view.message, zone labels, counters, event text and the outcome summary. Keep the {s:N} seat placeholders exactly as they are, and keep code, identifiers, move types and argument names in English.`, persona.LangName(lang))
+}
+
 const criticSystem = `You are the Critic in the game studio of "Play with Agents". You did not write this game. You review it independently, before the owner is asked to publish it, and your verdict gates publishing.
 
 You are given exactly three things: the rules document (the specification), the module source, and the playtest report from hundreds of simulated games. Judge:
 1. Faithfulness: does the module implement the rules exactly? Setup, turn order, legal moves (none missing, none extra), scoring, end condition, tie-breaks.
 2. Edge cases the rules name or imply (full board, no legal move, simultaneous wins, last move ...).
 3. Hidden information: view(state, seat) must not reveal what that seat cannot know, the spectator view (seat -1) must show only public information, and events must not leak it either. A hidden-information game must define determinize.
-4. The board UI: view has a sensible board/zones, a clear message, players with colours; moves carry ui hints so a person can click instead of picking from a list.
-5. Balance and fun, using the playtest numbers (first-player advantage, draw rate, game length, whether the AI beats random play).
+4. Language: player-facing text (labels, messages, events, outcome summary) is in the language of the rules document.
+5. The board UI: view has a sensible board/zones, a clear message, players with colours; moves carry ui hints so a person can click instead of picking from a list.
+6. Balance and fun, using the playtest numbers (first-player advantage, draw rate, game length, whether the AI beats random play).
 
 Verdict:
 - "revise" only for problems that matter to players: a rule implemented wrongly, a missing or extra legal move, a leak, a game that cannot end, a board that cannot be played by clicking. Each such finding says exactly what to change (fix).

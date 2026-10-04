@@ -5,7 +5,7 @@ import { IconAlert, IconArrow, IconBolt, IconCards, IconCheck, IconEye, IconPale
 import { api, type Approval, type GameCard as Game, type Goal } from '../lib/api'
 import { useI18n } from '../lib/i18n'
 import { useLive } from './live'
-import { lanes, progress, workTasks, type Lane, type Role } from './missionModel'
+import { lanes, progress, stepTitle, workTasks, type Lane, type Role } from './missionModel'
 
 export const ROLE_ICON: Record<Role, (p: { size?: number }) => JSX.Element> = {
   designer: IconPalette, engineer: IconBolt, playtester: IconCards, artist: IconSpark, critic: IconEye, coordinator: IconCards,
@@ -29,7 +29,7 @@ export function LaneStrip({ goal, compact }: { goal: Goal; compact?: boolean }) 
   return (
     <div className={`lane-strip ${compact ? 'compact' : ''}`}>
       {ls.map((l) => (
-        <div key={l.role} className={`lane-chip st-${l.state}`} title={l.current?.title || ''}>
+        <div key={l.role} className={`lane-chip st-${l.state}`} title={stepTitle(l.current?.title, t.steps)}>
           <RoleBadge role={l.role} size={compact ? 26 : 30} state={l.state} />
           <div className="lane-text">
             <strong>{t.roles[l.role]}</strong>

@@ -6,7 +6,7 @@ import { useI18n } from '../lib/i18n'
 import { md } from '../lib/md'
 import { LaneStrip, PublishApproval, RoleBadge, StatusPill, useGoal } from './cards'
 import { useLive } from './live'
-import { ago, fmtTime, gameIdOf, progress, roleOf, shownStatus, workTasks, type Shown } from './missionModel'
+import { ago, fmtTime, gameIdOf, progress, roleOf, shownStatus, stepTitle, workTasks, type Shown } from './missionModel'
 import { useToast } from './prefs'
 
 // The mission view answers: who is doing what, what happened and why, what
@@ -142,7 +142,7 @@ export default function Mission() {
             <h3><IconClock size={16} /> {t.mission.next}</h3>
             {(tl?.next || []).length === 0 ? <p className="muted">{t.mission.nothingNext}</p> : (
               <ul className="next-list">
-                {(tl?.next || []).map((n, i) => <li key={i}><StepDot s={n.status === 'leased' ? 'running' : (n.status as Shown)} /><span>{n.title}</span></li>)}
+                {(tl?.next || []).map((n, i) => <li key={i}><StepDot s={n.status === 'leased' ? 'running' : (n.status as Shown)} /><span>{stepTitle(n.title, t.steps)}</span></li>)}
               </ul>
             )}
           </section>
@@ -204,7 +204,7 @@ function Step({ x, byId }: { x: Task; byId: Map<string, Task> }) {
   const s = shownStatus(x)
   const role = roleOf(x)
   const [open, setOpen] = useState(false)
-  const deps = (x.deps || []).map((d) => byId.get(d)?.title).filter(Boolean) as string[]
+  const deps = (x.deps || []).map((d) => stepTitle(byId.get(d)?.title, t.steps)).filter(Boolean) as string[]
   const summary = x.summary ? plain(x.summary) : ''
   return (
     <li className={`step sx-${s}`}>
@@ -212,7 +212,7 @@ function Step({ x, byId }: { x: Task; byId: Map<string, Task> }) {
       <div className="step-body">
         <div className="step-row">
           <RoleBadge role={role} size={22} />
-          <strong>{x.title}</strong>
+          <strong>{stepTitle(x.title, t.steps)}</strong>
           <em className={`st-label sl-${s}`}>{t.mission.task[s] || s}</em>
         </div>
         <div className="step-meta">
@@ -239,7 +239,7 @@ function EventRow({ e, task }: { e: TimelineEvent; task?: Task }) {
   const label = t.mission.events[e.type] || e.type
   const d = e.data || {}
   const role = task ? roleOf(task) : 'coordinator'
-  const detail = [d.task || task?.title, d.tool, d.to && `→ ${d.to}`, d.decision].filter(Boolean).join(' · ')
+  const detail = [stepTitle(d.task || task?.title, t.steps), d.tool, d.to && `→ ${d.to}`, d.decision].filter(Boolean).join(' · ')
   const why = d.why || d.reason || d.error
   const changed = d.changed || d.diff || d.summary
   const next = d.next

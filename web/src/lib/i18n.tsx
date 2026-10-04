@@ -87,6 +87,7 @@ const en = {
     seats: '{min}–{max} players', seatsOne: '{n} players', plays: '{n} plays', loading: 'Loading…', unavailable: 'Not available right now.',
     planning: 'Planning the build…', step: '{done} of {total} steps',
   },
+  steps: { design: 'Design the rules', build: 'Build the game module', cover: 'Illustrate the cover', playtest: 'Playtest hundreds of games', review: 'Independent review', publish: 'Ask the owner to publish', revise: 'Revise the module (round {n})', playtestAgain: 'Playtest again (round {n})', reviewAgain: 'Review again (round {n})' },
   roles: {
     designer: 'Designer', engineer: 'Engineer', playtester: 'Playtester', artist: 'Artist', critic: 'Critic', coordinator: 'Aoi',
     doing: {
@@ -245,6 +246,7 @@ const zh: Dict = {
     seats: '{min}–{max} 人', seatsOne: '{n} 人', plays: '{n} 局', loading: '加载中…', unavailable: '暂时无法获取。',
     planning: '正在规划…', step: '第 {done} / {total} 步',
   },
+  steps: { design: '设计规则', build: '编写游戏模块', cover: '绘制封面', playtest: '模拟试玩数百局', review: '独立评审', publish: '请主人决定是否发布', revise: '修改模块（第 {n} 轮）', playtestAgain: '再次试玩（第 {n} 轮）', reviewAgain: '再次评审（第 {n} 轮）' },
   roles: {
     designer: '设计师', engineer: '工程师', playtester: '试玩员', artist: '画师', critic: '评审', coordinator: '葵',
     doing: {
@@ -401,6 +403,7 @@ const ko: Dict = {
     seats: '{min}–{max}인', seatsOne: '{n}인', plays: '{n}회 플레이', loading: '불러오는 중…', unavailable: '지금은 이용할 수 없어요.',
     planning: '제작 계획 세우는 중…', step: '{total}단계 중 {done}단계',
   },
+  steps: { design: '규칙 설계', build: '게임 모듈 만들기', cover: '표지 그리기', playtest: '수백 판 플레이테스트', review: '독립 리뷰', publish: '주인에게 공개 여부 묻기', revise: '모듈 수정 ({n}차)', playtestAgain: '다시 플레이테스트 ({n}차)', reviewAgain: '다시 리뷰 ({n}차)' },
   roles: {
     designer: '디자이너', engineer: '엔지니어', playtester: '플레이테스터', artist: '아티스트', critic: '크리틱', coordinator: '아오이',
     doing: {
@@ -557,6 +560,7 @@ const ja: Dict = {
     seats: '{min}〜{max}人', seatsOne: '{n}人', plays: '{n}回プレイ', loading: '読み込み中…', unavailable: 'いまは利用できません。',
     planning: '制作プランを立てています…', step: '{done} / {total} ステップ',
   },
+  steps: { design: 'ルールを設計', build: 'ゲームモジュールを作成', cover: 'カバーを描く', playtest: '数百局のテストプレイ', review: '独立レビュー', publish: 'オーナーに公開を確認', revise: 'モジュールを修正（第{n}ラウンド）', playtestAgain: '再テストプレイ（第{n}ラウンド）', reviewAgain: '再レビュー（第{n}ラウンド）' },
   roles: {
     designer: 'デザイナー', engineer: 'エンジニア', playtester: 'テストプレイヤー', artist: 'アーティスト', critic: 'レビュアー', coordinator: '葵',
     doing: {

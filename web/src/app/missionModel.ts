@@ -93,3 +93,26 @@ export function ago(at: string, lang: string) {
   const a = dictFor(lang).common.ago
   return d > 0 ? fmt(a.d, { n: d }) : h > 0 ? fmt(a.h, { n: h }) : m > 0 ? fmt(a.m, { n: m }) : a.now
 }
+
+// Step titles are stored in English when a build starts (they are the plan's
+// own words); show them in the reader's language. Unknown titles pass through.
+const STEP_KEYS: [RegExp, 'design' | 'build' | 'cover' | 'playtest' | 'review' | 'publish' | 'revise' | 'playtestAgain' | 'reviewAgain'][] = [
+  [/^Design the rules$/, 'design'],
+  [/^Build the game module$/, 'build'],
+  [/^Illustrate the cover$/, 'cover'],
+  [/^Playtest hundreds of games$/, 'playtest'],
+  [/^Independent review$/, 'review'],
+  [/^Ask the owner to publish$/, 'publish'],
+  [/^Revise the module \(round (\d+)\)$/, 'revise'],
+  [/^Playtest again \(round (\d+)\)$/, 'playtestAgain'],
+  [/^Review again \(round (\d+)\)$/, 'reviewAgain'],
+]
+
+export function stepTitle(title: string | undefined, steps: Record<string, string>): string {
+  if (!title) return ''
+  for (const [re, key] of STEP_KEYS) {
+    const m = title.match(re)
+    if (m) return (steps[key] || title).replace('{n}', m[1] || '')
+  }
+  return title
+}
