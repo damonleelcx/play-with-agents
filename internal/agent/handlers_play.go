@@ -213,7 +213,16 @@ func (a *Agent) play(ctx context.Context, t *turn) outcome {
 	}
 	want := r.GameID
 	if strings.TrimSpace(want) == "" {
-		want = "holdem"
+		// The router can miss a slot (a long or freshly published name):
+		// the game and the agents named in the message itself still count.
+		if g, ok := gameInText(t.games, t.text); ok {
+			want = g.ID
+		} else {
+			want = "holdem"
+		}
+		if len(r.AgentIDs) == 0 {
+			r.AgentIDs = agentsInText(t.text)
+		}
 	}
 	g, ok := findGame(t.games, want)
 	if !ok {
@@ -547,6 +556,40 @@ func rosterLine(id, lang string) string {
 }
 
 // ── helpers shared by the handlers ─────────────────────────────────────────
+
+// gameInText is the catalog game whose name appears in the message, the
+// longest match winning ("Gem Rush Deluxe" over "Gem Rush").
+func gameInText(games []GameInfo, text string) (GameInfo, bool) {
+	lt := strings.ToLower(text)
+	var best GameInfo
+	for _, g := range games {
+		n := strings.ToLower(strings.TrimSpace(g.Name))
+		if len([]rune(n)) >= 2 && strings.Contains(lt, n) && len(n) > len(best.Name) {
+			best = g
+		}
+	}
+	return best, best.ID != ""
+}
+
+// agentsInText is the roster agents named in the message, in any language.
+// Aoi is the host the player is talking to, not a seat they asked for, and a
+// one-character name (蓮, 琳) is too ambiguous to find in free text.
+func agentsInText(text string) []string {
+	lt := strings.ToLower(text)
+	var ids []string
+	for _, a := range Roster {
+		if a.ID == "aoi" {
+			continue
+		}
+		for _, n := range []string{a.Name, a.NameZH, a.NameKO, a.NameJA} {
+			if len([]rune(n)) >= 2 && strings.Contains(lt, strings.ToLower(n)) {
+				ids = append(ids, a.ID)
+				break
+			}
+		}
+	}
+	return ids
+}
 
 // findGame matches a catalog entry by id, then by name (case-insensitive),
 // then by a name that contains the query ("hold'em" → "Texas Hold'em").
