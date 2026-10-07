@@ -233,12 +233,14 @@ func (c *checker) position(g *Game, st games.State, n int, where string, full bo
 	if o != nil {
 		c.text(where+", outcome.summary", o.Summary)
 	}
+	legalOf := make(map[int][]games.MoveSpec, n)
 	for seat := 0; seat < n; seat++ {
 		specs, err := g.Legal(st, seat)
 		if err != nil {
 			c.errf(where, err)
 			return nil, false
 		}
+		legalOf[seat] = specs
 		mover := slices.Contains(tm, seat)
 		if mover && len(specs) == 0 {
 			c.add(SevError, where, fmt.Sprintf("toMove lists seat %d but legal(state, %d) returned no moves; offer at least a pass", seat, seat))
@@ -267,8 +269,91 @@ func (c *checker) position(g *Game, st games.State, n int, where string, full bo
 			return nil, false
 		}
 		c.text(where+", view.message", v.Status)
+		if s >= 0 {
+			c.hints(fmt.Sprintf("%s, legal(state, %d)", where, s), legalOf[s], v)
+		}
 	}
 	return tm, true
+}
+
+// hints checks that every move's ui hint points at something the mover's
+// own view shows: a hint to a missing zone, card or cell leaves the move
+// unclickable on the board.
+func (c *checker) hints(where string, specs []games.MoveSpec, v games.View) {
+	if len(specs) == 0 {
+		return
+	}
+	raw, ok := v.Data.(json.RawMessage)
+	if !ok {
+		return
+	}
+	var view struct {
+		Board *struct {
+			Rows, Cols int
+			Cells      [][]*struct {
+				Blocked bool `json:"blocked"`
+			}
+		} `json:"board"`
+		Zones []struct {
+			ID    string `json:"id"`
+			Cards []struct {
+				Hidden bool `json:"hidden"`
+			} `json:"cards"`
+		} `json:"zones"`
+	}
+	if json.Unmarshal(raw, &view) != nil {
+		return
+	}
+	cellOK := func(k string, x any) bool {
+		a, _ := x.([]any)
+		if len(a) != 2 {
+			return true // parseUI already reported the shape
+		}
+		r, _ := asInt(a[0])
+		col, _ := asInt(a[1])
+		if view.Board == nil {
+			c.add(SevError, where, fmt.Sprintf("a move has ui.%s %v but the view has no board; add view.board or drop the hint", k, x))
+			return false
+		}
+		if r >= view.Board.Rows || col >= view.Board.Cols {
+			c.add(SevError, where, fmt.Sprintf("a move has ui.%s [%d,%d], outside the %dx%d board; rows and cols are 0-based", k, r, col, view.Board.Rows, view.Board.Cols))
+			return false
+		}
+		if k != "from" && r < len(view.Board.Cells) && col < len(view.Board.Cells[r]) && view.Board.Cells[r][col] != nil && view.Board.Cells[r][col].Blocked {
+			c.add(SevWarn, where, fmt.Sprintf("a move targets ui.%s [%d,%d], which the view marks blocked; players will not expect to play there", k, r, col))
+		}
+		return true
+	}
+	for _, m := range specs {
+		for _, k := range []string{"cell", "from", "to"} {
+			if x, ok := m.UI[k]; ok && !cellOK(k, x) {
+				return
+			}
+		}
+		zid, ok := m.UI["zone"].(string)
+		if !ok {
+			continue
+		}
+		idx, _ := asInt(m.UI["index"])
+		found := false
+		for _, z := range view.Zones {
+			if z.ID != zid {
+				continue
+			}
+			found = true
+			if idx >= len(z.Cards) {
+				c.add(SevError, where, fmt.Sprintf("move %q has ui {zone:%q, index:%d} but that zone shows %d cards in the mover's view; index the cards as the view lists them", m.Label, zid, idx, len(z.Cards)))
+				return
+			}
+			if z.Cards[idx].Hidden {
+				c.add(SevWarn, where, fmt.Sprintf("move %q points at card %d of zone %q, which is hidden in the mover's own view; show the mover their own cards", m.Label, idx, zid))
+			}
+		}
+		if !found {
+			c.add(SevError, where, fmt.Sprintf("move %q has ui.zone %q but the mover's view has no zone with that id", m.Label, zid))
+			return
+		}
+	}
 }
 
 // seatWords catches text that names seats instead of using {s:N}; the

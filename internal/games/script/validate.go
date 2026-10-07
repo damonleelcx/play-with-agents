@@ -306,7 +306,7 @@ func parseUI(fn, path string, v any) (obj, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := keys(fn, path, o, "cell", "from", "to", "zone", "index"); err != nil {
+	if err := keys(fn, path, o, "cell", "from", "to", "zone", "index", "target"); err != nil {
 		return nil, err
 	}
 	for _, k := range []string{"cell", "from", "to"} {
@@ -324,10 +324,16 @@ func parseUI(fn, path string, v any) (obj, error) {
 	}
 	_, hasFrom := o["from"]
 	_, hasTo := o["to"]
+	_, hasCell := o["cell"]
+	_, hasZone := o["zone"]
 	if hasFrom != hasTo {
 		return nil, outErr(fn, path, "needs both from and to (or neither)")
 	}
-	if z, ok := o["zone"]; ok {
+	if hasFrom && (hasCell || hasZone) {
+		return nil, outErr(fn, path, "mixes from/to with cell or zone; use {from,to} to move a piece, {cell} to place, {zone,index} to play a card, {zone,index,cell} to play a card onto a cell")
+	}
+	if hasZone {
+		z := o["zone"]
 		if s, ok := z.(string); !ok || s == "" {
 			return nil, outErr(fn, path+".zone", "must be a non-empty zone id, got %v", z)
 		}
@@ -336,6 +342,18 @@ func parseUI(fn, path string, v any) (obj, error) {
 		}
 	} else if _, ok := o["index"]; ok {
 		return nil, outErr(fn, path, "has index without zone")
+	}
+	if t, ok := o["target"]; ok {
+		s, isStr := t.(string)
+		if !isStr || s == "" || len([]rune(s)) > maxTargetLen {
+			return nil, outErr(fn, path+".target", "must be a non-empty string of at most %d characters (the chooser button), got %v", maxTargetLen, t)
+		}
+		if !hasZone {
+			return nil, outErr(fn, path, "has target without zone; {zone,index,target} plays a card with a named choice")
+		}
+		if hasCell {
+			return nil, outErr(fn, path, "has both cell and target; with {zone,index,cell} the cell already is the card's target")
+		}
 	}
 	return o, nil
 }
@@ -531,7 +549,7 @@ func validateView(raw string, seats, maxBytes int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := keys(fn, "view", o, "title", "board", "zones", "players", "counters", "message"); err != nil {
+	if err := keys(fn, "view", o, "title", "board", "zones", "players", "counters", "message", "story", "prompt"); err != nil {
 		return "", err
 	}
 	if err := optString(fn, "view", o, "title"); err != nil {
@@ -544,8 +562,16 @@ func validateView(raw string, seats, maxBytes int) (string, error) {
 	if err := checkPlaceholders(fn, "view.message", msg, seats); err != nil {
 		return "", err
 	}
+	if err := limitedString(fn, "view.prompt", o["prompt"], maxPromptLen, seats); err != nil {
+		return "", err
+	}
+	if st, ok := o["story"]; ok && st != nil {
+		if err := validateStory(st, seats); err != nil {
+			return "", err
+		}
+	}
 	if b, ok := o["board"]; ok && b != nil {
-		if err := validateBoard(b); err != nil {
+		if err := validateBoard(b, seats); err != nil {
 			return "", err
 		}
 	}
@@ -567,7 +593,7 @@ func validateView(raw string, seats, maxBytes int) (string, error) {
 	return msg, nil
 }
 
-func validateBoard(v any) error {
+func validateBoard(v any, seats int) error {
 	const fn = "view"
 	b, err := object(fn, "view.board", v)
 	if err != nil {
@@ -581,7 +607,7 @@ func validateBoard(v any) error {
 	if !ok1 || !ok2 || rows < 1 || cols < 1 || rows > maxBoardSide || cols > maxBoardSide {
 		return outErr(fn, "view.board", "needs integer rows and cols in 1..%d, got %v and %v", maxBoardSide, b["rows"], b["cols"])
 	}
-	if err := optEnum(fn, "view.board", b, "style", "grid", "checker", "go", "plain"); err != nil {
+	if err := optEnum(fn, "view.board", b, "style", "grid", "checker", "go", "plain", "tiles"); err != nil {
 		return err
 	}
 	cells, err := array(fn, "view.board.cells", b["cells"])
@@ -604,7 +630,7 @@ func validateBoard(v any) error {
 			if cell == nil {
 				continue
 			}
-			if err := validateCell(fmt.Sprintf("%s[%d]", p, c), cell); err != nil {
+			if err := validateCell(fmt.Sprintf("%s[%d]", p, c), cell, seats); err != nil {
 				return err
 			}
 		}
@@ -612,13 +638,13 @@ func validateBoard(v any) error {
 	return nil
 }
 
-func validateCell(path string, v any) error {
+func validateCell(path string, v any, seats int) error {
 	const fn = "view"
 	c, err := object(fn, path, v)
 	if err != nil {
 		return err
 	}
-	if err := keys(fn, path, c, "piece", "mark", "text"); err != nil {
+	if err := keys(fn, path, c, "piece", "card", "mark", "text", "blocked"); err != nil {
 		return err
 	}
 	if err := optString(fn, path, c, "mark"); err != nil {
@@ -627,8 +653,20 @@ func validateCell(path string, v any) error {
 	if err := optString(fn, path, c, "text"); err != nil {
 		return err
 	}
-	pv, ok := c["piece"]
-	if !ok || pv == nil {
+	if bv, ok := c["blocked"]; ok {
+		if _, isBool := bv.(bool); !isBool {
+			return outErr(fn, path+".blocked", "must be true or false, got %s", typeName(bv))
+		}
+	}
+	pv, hasPiece := c["piece"]
+	cv, hasCard := c["card"]
+	if hasPiece && pv != nil && hasCard && cv != nil {
+		return outErr(fn, path, "has both piece and card; a cell shows one or the other")
+	}
+	if hasCard && cv != nil {
+		return validateCard(path+".card", cv, seats)
+	}
+	if !hasPiece || pv == nil {
 		return nil
 	}
 	pp := path + ".piece"
@@ -690,32 +728,139 @@ func validateZones(v any, seats int) error {
 			return err
 		}
 		for j, cv := range cards {
-			cp := fmt.Sprintf("%s.cards[%d]", p, j)
-			c, err := object(fn, cp, cv)
-			if err != nil {
+			if err := validateCard(fmt.Sprintf("%s.cards[%d]", p, j), cv, seats); err != nil {
 				return err
 			}
-			if err := keys(fn, cp, c, "face", "color", "hidden"); err != nil {
+		}
+	}
+	return nil
+}
+
+// Card and story limits: the renderer lays these out as readable cards and
+// a story panel, not documents.
+const (
+	maxCardTitle  = 60
+	maxCardText   = 300
+	maxCardKind   = 24
+	maxCardBadge  = 8
+	maxColorLen   = 64
+	maxStoryLines = 200
+	maxStoryTitle = 60
+	maxPromptLen  = 200
+	maxTargetLen  = 40
+)
+
+// limitedString checks an optional string field: its type, its length in
+// characters and its {s:N} placeholders.
+func limitedString(fn, path string, v any, max, seats int) error {
+	if v == nil {
+		return nil
+	}
+	s, ok := v.(string)
+	if !ok {
+		return outErr(fn, path, "must be a string, got %s", typeName(v))
+	}
+	if n := len([]rune(s)); n > max {
+		return outErr(fn, path, "is %d characters, over the limit of %d; shorten it", n, max)
+	}
+	return checkPlaceholders(fn, path, s, seats)
+}
+
+// validateCard checks one card, in a zone or on a cell. Besides the plain
+// face/color/hidden, a rich story card has title, text (the story line),
+// effect (rules text), kind (a badge: character|place|event|twist|item or
+// any short word), cost/value (small badges), accent (a colour) and seat
+// (who played it; tints the card's frame).
+func validateCard(cp string, cv any, seats int) error {
+	const fn = "view"
+	c, err := object(fn, cp, cv)
+	if err != nil {
+		return err
+	}
+	if err := keys(fn, cp, c, "face", "color", "hidden", "title", "text", "effect", "kind", "cost", "value", "accent", "seat"); err != nil {
+		return err
+	}
+	if err := optString(fn, cp, c, "face"); err != nil {
+		return err
+	}
+	for _, f := range []struct {
+		k   string
+		max int
+	}{{"color", maxColorLen}, {"accent", maxColorLen}, {"title", maxCardTitle}, {"text", maxCardText}, {"effect", maxCardText}, {"kind", maxCardKind}} {
+		if err := limitedString(fn, cp+"."+f.k, c[f.k], f.max, seats); err != nil {
+			return err
+		}
+	}
+	for _, k := range []string{"cost", "value"} {
+		switch x := c[k].(type) {
+		case nil, float64:
+		case string:
+			if len([]rune(x)) > maxCardBadge {
+				return outErr(fn, cp+"."+k, "is a badge: at most %d characters, got %q", maxCardBadge, x)
+			}
+		default:
+			return outErr(fn, cp+"."+k, "must be a number or a short string, got %s", typeName(x))
+		}
+	}
+	if sv, ok := c["seat"]; ok && sv != nil {
+		if _, err := seatValue(fn, cp+".seat", sv, seats, false); err != nil {
+			return err
+		}
+	}
+	hidden := false
+	if hv, ok := c["hidden"]; ok {
+		b, isBool := hv.(bool)
+		if !isBool {
+			return outErr(fn, cp+".hidden", "must be true or false, got %s", typeName(hv))
+		}
+		hidden = b
+	}
+	// The view is sent to this seat's browser as is: a face on a hidden card
+	// is readable by anyone who opens the dev tools.
+	if hidden {
+		if face, _ := c["face"].(string); face != "" {
+			return outErr(fn, cp, "is hidden but has face %q: that leaks hidden information to the client; omit the face", face)
+		}
+		for _, k := range []string{"title", "text", "effect", "kind", "cost", "value", "accent"} {
+			if x, ok := c[k]; ok && x != nil {
+				return outErr(fn, cp, "is hidden but has %s %v: that leaks hidden information to the client; a hidden card is just { hidden: true }", k, x)
+			}
+		}
+	}
+	return nil
+}
+
+// validateStory checks view.story, the ordered "story so far".
+func validateStory(v any, seats int) error {
+	const fn = "view"
+	lines, err := array(fn, "view.story", v)
+	if err != nil {
+		return err
+	}
+	if len(lines) > maxStoryLines {
+		return outErr(fn, "view.story", "has %d lines, over the limit of %d; send only the latest %d", len(lines), maxStoryLines, maxStoryLines)
+	}
+	for i, lv := range lines {
+		p := fmt.Sprintf("view.story[%d]", i)
+		l, err := object(fn, p, lv)
+		if err != nil {
+			return err
+		}
+		if err := keys(fn, p, l, "text", "seat", "title"); err != nil {
+			return err
+		}
+		if _, err := reqString(fn, p, l, "text"); err != nil {
+			return err
+		}
+		if err := limitedString(fn, p+".text", l["text"], maxCardText, seats); err != nil {
+			return err
+		}
+		if err := limitedString(fn, p+".title", l["title"], maxStoryTitle, seats); err != nil {
+			return err
+		}
+		if sv, ok := l["seat"]; ok && sv != nil {
+			if _, err := seatValue(fn, p+".seat", sv, seats, false); err != nil {
 				return err
-			}
-			if err := optString(fn, cp, c, "face"); err != nil {
-				return err
-			}
-			if err := optString(fn, cp, c, "color"); err != nil {
-				return err
-			}
-			hidden := false
-			if hv, ok := c["hidden"]; ok {
-				b, isBool := hv.(bool)
-				if !isBool {
-					return outErr(fn, cp+".hidden", "must be true or false, got %s", typeName(hv))
-				}
-				hidden = b
-			}
-			// The view is sent to this seat's browser as is: a face on a
-			// hidden card is readable by anyone who opens the dev tools.
-			if face, _ := c["face"].(string); hidden && face != "" {
-				return outErr(fn, cp, "is hidden but has face %q: that leaks hidden information to the client; omit the face", face)
 			}
 		}
 	}

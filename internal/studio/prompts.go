@@ -38,7 +38,9 @@ How you work:
 - Every function is pure. apply returns a NEW state (copy arrays you change).
 - Text shown to players refers to seats as {s:N}, never "Player 1".
 - Every game must end: toMove returns [] exactly when outcome returns non-null.
-- Give moves ui hints so the board is clickable: {cell:[r,c]} for placing, {from:[r,c],to:[r,c]} for moving.
+- Give moves ui hints so the board is clickable: {cell:[r,c]} for placing, {from:[r,c],to:[r,c]} for moving, {zone,index} for playing a card, {zone,index,cell:[r,c]} for playing a card onto a square (one legal move per card and square; the board lets the player pick the card, then the square). The index is the card's position in that zone as your view lists it.
+- Card games: give every card a face the renderer can show richly: title (its name), text (one line of flavour or story, shown in italics), effect (its rules text), kind (a one-word badge such as character, place, event, twist or item) and value or cost when it has one. Cards on the board go in cell.card (same shape). A hidden card is exactly { hidden: true }.
+- A game that tells a story: put the story so far in view.story as [{ text, seat, title }] in order (the card's story line, who played it, the card name), and add view.prompt for the mover ("Choose a card, then a square").
 - Add heuristic(state, seat) (-1..1) when there is an obvious evaluation; it makes the AI players better.
 - Keep it efficient: legal() and apply() run thousands of times in playtests (budget 250 ms per call).
 
@@ -113,24 +115,35 @@ const game = {
   "title": "Connect Four",
   "board": {                         // optional
     "rows": 6, "cols": 7,
-    "style": "grid",                 // grid | checker | go | plain
+    "style": "grid",                 // grid | checker | go | plain | tiles (story/card boards)
     "cells": [[ /* row-major; null or Cell */ ]]
   },
   // Cell = { "piece": { "shape": "disc|square|ring|king|text", "color": "p0..p7|#hex|css",
   //                      "glyph": "♛", "label": "K" },
+  //          "card": Card,              instead of piece: a card played on the square
   //          "mark": "#hex|css",        highlight
-  //          "text": "3" }
+  //          "text": "3",
+  //          "blocked": true }          sealed / unusable square
   "zones": [                         // optional: hands, piles, decks
     { "id": "hand-0", "label": "Your hand", "owner": 0, "layout": "row|fan|stack",
-      "cards": [ { "face": "7♥", "color": "#c33", "hidden": false } ] }
+      "cards": [ Card ] }
   ],
+  // Card = { "face": "7♥", "color": "#c33" }                 a plain card, or a rich one:
+  //        { "title": "The Lamplighter", "text": "Every dusk he climbed the hill.",
+  //          "effect": "+1 for each adjacent place.", "kind": "character",
+  //          "value": 1, "cost": 2, "accent": "#e7b75f", "seat": 0 }
+  //        or { "hidden": true } (nothing else: anything more leaks to the client)
+  //        Limits: title 60 chars, text/effect 300, kind 24, cost/value number or ≤8 chars.
+  "story": [ { "text": "Every dusk he climbed the hill.", "seat": 0, "title": "The Lamplighter" } ],
+                                     // optional, ordered, ≤200 lines: the "Story so far" panel
+  "prompt": "Choose a card, then a square",   // optional, shown above the mover's hand
   "players": [ { "seat": 0, "score": 3, "info": "Red", "color": "p0" } ],
   "counters": [ { "label": "Round", "value": "2 / 5" } ],
   "message": "Red to move"
 }
 ` + "```" + `
 
-Move UI hints (move.ui): {cell:[r,c]} (click a cell), {from:[r,c],to:[r,c]} (select a piece, then a target), {zone:"hand-0",index:2} (click a card). Moves without hints render as buttons. Player colours p0..p7.
+Move UI hints (move.ui): {cell:[r,c]} (click a cell), {from:[r,c],to:[r,c]} (select a piece, then a target), {zone:"hand-0",index:2} (click a card), {zone:"hand-0",index:2,cell:[r,c]} (select the card, then a highlighted square; one move per card and square), {zone:"hand-0",index:2,target:"North"} (select the card, then choose among its targets). Every hint must point at a zone, card and cell the mover's own view shows. Moves without hints render as buttons. Player colours p0..p7.
 
 ## Text
 

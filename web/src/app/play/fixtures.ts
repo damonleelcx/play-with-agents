@@ -3,6 +3,7 @@
 // Agents in mock mode play a simple persona-weighted strategy.
 import type {
   Agent,
+  BoardCard,
   BoardCell,
   BoardData,
   ChatLine,
@@ -900,6 +901,152 @@ class CardGameMock extends MockBase {
   }
 }
 
+// A storytelling game mid-play (/play-preview.html?mock=story): a hand of
+// rich story cards, played cards on a 6×6 board, sealed squares and the
+// story panel. Cards go "card, then square" ({zone,index,cell} hints).
+type StoryCardDef = { title: string; kind: string; text: string; effect: string; value: number; cost?: number }
+const STORY_DECK: StoryCardDef[] = [
+  { title: 'The Lighthouse Keeper', kind: 'character', value: 2, text: 'The keeper had not spoken in eleven winters, but she still lit the lamp at dusk.', effect: '+1 for each adjacent place.' },
+  { title: 'Harbour of Glass', kind: 'place', value: 1, text: 'Below the cliffs, the harbour froze into glass that rang when the tide turned.', effect: '+2 on an edge square.' },
+  { title: 'A Ship With No Crew', kind: 'event', value: 2, text: 'At midnight a ship drifted in with every lantern lit and not a soul aboard.', effect: '+2 for each adjacent character.' },
+  { title: 'The Cartographer', kind: 'character', value: 1, cost: 2, text: 'A cartographer stepped off, carrying a map of a town that did not exist yet.', effect: 'Draw a card when an event is played next to it.' },
+  { title: 'The Tide Runs Backwards', kind: 'twist', value: 3, text: 'And then the tide ran backwards, pulling the moon a little closer.', effect: 'Swap two adjacent cards.' },
+  { title: 'The Salt Market', kind: 'place', value: 1, text: 'In the salt market, a woman sold bottled storms by the ounce.', effect: '+1 for each adjacent card.' },
+  { title: 'A Key Made of Bone', kind: 'item', value: 1, cost: 1, text: 'In his coat he found a key made of bone, warm as if just held.', effect: 'Unseal one adjacent square.' },
+  { title: 'The Bells Go Silent', kind: 'event', value: 2, text: 'Every bell in the town went silent at once, mid-swing.', effect: 'Seals the empty squares around it.' },
+  { title: 'The Twin', kind: 'character', value: 2, text: 'Someone with his face was already waiting at the inn, and knew his name.', effect: '+3 if next to another character.' },
+  { title: 'It Was Her Map', kind: 'twist', value: 2, text: 'The map was hers. She had drawn it as a child and thrown it to the sea.', effect: 'Claim the adjacent card of lowest value.' },
+  { title: 'The Drowned Chapel', kind: 'place', value: 2, text: 'Under the water, the old chapel still held its candles upright.', effect: '+1 for each adjacent event.' },
+  { title: 'A Letter in a Bottle', kind: 'item', value: 1, text: 'The bottle held a letter addressed to the keeper, dated tomorrow.', effect: '+2 if the story card before it is a character.' },
+]
+
+class StoryMock extends MockBase {
+  name = 'A tale with Mika and Yuki'
+  game = { id: 'story-tiles', name: 'Story Tiles', kind: 'script' }
+  viewKind = 'board' as const
+  seats = [seatOf('me', 0), seatOf('mika', 1), seatOf('friend', 2)]
+  size = 6
+  board: ({ card: number; seat: number } | 'sealed' | null)[][] = []
+  hands: number[][] = [[], [], []]
+  deck: number[] = []
+  story: { card: number; seat: number }[] = []
+  turn = 0
+  constructor() {
+    super()
+    this.turnSeconds = 60
+    for (let r = 0; r < this.size; r++) this.board.push(Array(this.size).fill(null))
+    // five cards already told, two squares sealed by "The Bells Go Silent"
+    const played: [number, number, number, number][] = [
+      [0, 2, 2, 1], // keeper
+      [1, 2, 3, 2], // harbour
+      [2, 1, 3, 3], // ship
+      [7, 0, 4, 2], // bells
+      [5, 1, 1, 3], // salt market
+    ]
+    played.forEach(([card, seat, r, c]) => {
+      this.board[r][c] = { card, seat }
+      this.story.push({ card, seat })
+    })
+    this.board[4][1] = 'sealed'
+    this.board[5][2] = 'sealed'
+    this.board[4][3] = 'sealed'
+    this.hands = [[3, 4, 6, 8], [9, 10, 11], [-1, -1, -1]]
+    this.deck = []
+    this.version = 14
+    this.touch()
+  }
+  cardView(i: number, seat?: number): BoardCard {
+    const c = STORY_DECK[i]
+    return { title: c.title, kind: c.kind, text: c.text, effect: c.effect, value: c.value, ...(c.cost !== undefined ? { cost: c.cost } : {}), ...(seat !== undefined ? { seat } : {}) }
+  }
+  open() {
+    const out: [number, number][] = []
+    this.board.forEach((row, r) => row.forEach((x, c) => x === null && out.push([r, c])))
+    return out
+  }
+  score(seat: number) {
+    return this.story.filter((s) => s.seat === seat).reduce((n, s) => n + STORY_DECK[s.card].value, 0)
+  }
+  toMove() {
+    return this.status === 'playing' ? [this.turn] : []
+  }
+  statusText() {
+    return this.status === 'playing' ? `${this.name_(this.turn)} continues the story` : this.outcome?.summary || ''
+  }
+  legalFor(seat: number): MoveSpec[] {
+    if (seat !== this.turn || this.status !== 'playing') return []
+    const out: MoveSpec[] = []
+    const open = this.open()
+    this.hands[seat].forEach((card, i) => {
+      for (const [r, c] of open) {
+        const title = card >= 0 ? STORY_DECK[card].title : 'a card'
+        out.push({ type: 'play', label: `${title} → ${'ABCDEF'[r]}${c + 1}`, args: { index: i, r, c }, ui: { zone: `hand-${seat}`, index: i, cell: [r, c] } })
+      }
+    })
+    return out
+  }
+  applyMove(seat: number, move: Move) {
+    if (move.type !== 'play') throw new Error('Unknown move')
+    const i = Number(move.args?.index)
+    const r = Number(move.args?.r)
+    const c = Number(move.args?.c)
+    if (!(i >= 0 && i < this.hands[seat].length) || this.board[r]?.[c] !== null) throw new Error('That square is taken.')
+    let card = this.hands[seat][i]
+    if (card < 0) {
+      // the friend's hidden cards: reveal an unused one
+      const used = new Set([...this.story.map((s) => s.card), ...this.hands.flat()])
+      card = STORY_DECK.findIndex((_, k) => !used.has(k))
+      if (card < 0) card = 0
+    }
+    this.hands[seat].splice(i, 1)
+    this.board[r][c] = { card, seat }
+    this.story.push({ card, seat })
+    this.addLog(seat, `${this.name_(seat)} plays “${STORY_DECK[card].title}”`)
+    this.turn = (this.turn + 1) % 3
+    if (this.hands.every((h) => h.length === 0) || !this.open().length) {
+      this.status = 'finished'
+      const sc = [0, 1, 2].map((s) => this.score(s))
+      const order = [0, 1, 2].sort((a, b) => sc[b] - sc[a])
+      this.outcome = { rank: [0, 1, 2].map((s) => order.indexOf(s) + 1), score: sc, summary: `${this.name_(order[0])} tells the better tale.` }
+    } else if (this.hands[this.turn].length === 0) this.turn = (this.turn + 1) % 3
+  }
+  pending() {
+    return this.status === 'playing' && this.turn !== this.me ? 1800 : null
+  }
+  step() {
+    const seat = this.turn
+    const legal = this.legalFor(seat)
+    if (!legal.length) {
+      this.turn = (this.turn + 1) % 3
+      this.touch()
+      return
+    }
+    this.applyMove(seat, legal[Math.floor(Math.random() * legal.length)])
+    this.maybeBanter(seat, 0.2)
+    this.touch()
+  }
+  data(): BoardData {
+    const cells: BoardCell[][] = this.board.map((row) =>
+      row.map((x) => (x === null ? null : x === 'sealed' ? { blocked: true } : { card: this.cardView(x.card, x.seat) })),
+    )
+    const mine = this.turn === this.me && this.status === 'playing'
+    return {
+      title: 'Story Tiles',
+      board: { rows: this.size, cols: this.size, style: 'tiles', cells },
+      zones: [
+        { id: 'hand-1', label: 'Mika', owner: 1, layout: 'row', cards: this.hands[1].map(() => ({ hidden: true })) },
+        { id: 'hand-2', label: 'Yuki', owner: 2, layout: 'row', cards: this.hands[2].map(() => ({ hidden: true })) },
+        { id: 'hand-0', label: 'Your story cards', owner: 0, layout: 'fan', cards: this.hands[0].map((c) => this.cardView(c)) },
+      ],
+      story: this.story.map((s) => ({ text: STORY_DECK[s.card].text, title: STORY_DECK[s.card].title, seat: s.seat })),
+      prompt: mine ? 'Choose a card, then a square, to continue the story' : undefined,
+      players: [0, 1, 2].map((s) => ({ seat: s, score: this.score(s), info: `${this.hands[s].length} in hand`, color: ['p0', 'p4', 'p3'][s] })),
+      counters: [{ label: 'Story', value: `${this.story.length} / 14` }],
+      message: mine ? 'Your turn to tell' : `${this.name_(this.turn)} is choosing a card…`,
+    }
+  }
+}
+
 // A table in its lobby, to exercise seat swapping and start.
 class LobbyMock implements MockGame {
   version = 3
@@ -1017,6 +1164,8 @@ export function createMock(kind: string | null): MockGame | null {
       return new ConnectFourMock()
     case 'cards':
       return new CardGameMock()
+    case 'story':
+      return new StoryMock()
     case 'checkers':
       return new CheckersMock()
     case 'lobby':

@@ -197,11 +197,7 @@ func engineerContext(ctx context.Context, s *engine.Store, g *engine.Goal, t *en
 
 	w("\n# MODULE CONTRACT (follow exactly)\n%s\n", moduleContract)
 	w("\n# REFERENCE MODULES\n")
-	refs := []string{"tictactoe", "connect_four"}
-	if game.Spec.HiddenInfo || game.Spec.MaxSeats > 2 {
-		refs = []string{"tictactoe", "lantern_market"}
-	}
-	for _, id := range refs {
+	for _, id := range referenceModules(game.Spec, game.RulesMD) {
 		if e, ok := script.ExampleByID(id); ok {
 			w("\n## %s (%s)\n```js\n%s\n```\n", e.ID, e.Summary, e.Source)
 		}
@@ -265,3 +261,33 @@ func coordinatorContext(ctx context.Context, s *engine.Store, g *engine.Goal, t 
 }
 
 func langName(lang string) string { return persona.LangName(lang) }
+
+// storyWords mark a game whose cards go onto the board or that tells a
+// story: its few-shot template is story_tiles (rich cards, card → cell
+// moves, the story panel). Checked in the rules document, any language.
+var storyWords = []string{"story", "stories", "tale", "narrat", "故事", "叙事", "物語", "ストーリー", "이야기", "스토리"}
+
+// cardWords mark a card game in any of the four languages.
+var cardWords = []string{"card", "deck", "hand", "牌", "卡", "手札", "カード", "デッキ", "카드", "덱"}
+
+// referenceModules picks the two bundled modules the Engineer sees in full.
+func referenceModules(spec gameSpec, rules string) []string {
+	low := strings.ToLower(rules)
+	has := func(words []string) bool {
+		for _, w := range words {
+			if strings.Contains(low, w) {
+				return true
+			}
+		}
+		return false
+	}
+	switch {
+	case has(storyWords):
+		return []string{"tictactoe", "story_tiles"}
+	case spec.HiddenInfo && has(cardWords) && strings.Contains(low, "board"):
+		return []string{"lantern_market", "story_tiles"}
+	case spec.HiddenInfo || spec.MaxSeats > 2:
+		return []string{"tictactoe", "lantern_market"}
+	}
+	return []string{"tictactoe", "connect_four"}
+}
