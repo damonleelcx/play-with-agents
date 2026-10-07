@@ -38,7 +38,8 @@ then design it, build it, playtest it and set it on the table.
 
 ```
 User goal (chat with Aoi)
-  ↓ Router (fast model): intent = chat | play | build_game | revise_game | rules | control | preference
+  ↓ Router (fast model): one of 33 intents in 10 areas (docs/01-intents-tools-skills.md)
+  ↓ Handler: chat tools (Tables, Coach, Stats, Catalog, Studio, engine controls); destructive ones confirmed first
   ↓
 Mission Planner (engine.Planner) → task DAG (skills = playbooks)
   ↓
@@ -365,6 +366,8 @@ a draft can be played by its owner at any time (`POST /api/tables` with its id).
 
 ### Chat cards
 Aoi's message `meta.cards`: `[{ kind: "table", table_id } | { kind: "mission", goal_id } | { kind: "game", game_id }]`.
+`meta.pending` (when present) is an action Aoi asked the player to confirm; only
+an explicit yes in the next message runs it (docs/01-intents-tools-skills.md §3).
 
 ## Settings (user_preferences keys)
 

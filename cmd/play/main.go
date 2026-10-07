@@ -187,7 +187,8 @@ func run(mode string) error {
 		// service (tables, catalog) and the studio plug in as
 		// agent.Tables, agent.Catalog and agent.Studio.
 		ag := &agent.Agent{Store: store, Model: model, LLM: cfg.LLMModel, FastLLM: cfg.LLMFastModel, Mailer: mailer,
-			Tables: aoiTables{tables}, Studio: studioSvc, Catalog: aoiCatalog{tables}}
+			Tables: aoiTables{tables}, Studio: studioSvc, Catalog: aoiCatalog{tables}, Coach: aoiTables{tables}, Stats: aoiTables{tables},
+			PublicOrigin: cfg.PublicOrigin}
 		api := &httpapi.Server{Pool: pool, Auth: authSvc, Store: store, Agent: ag, Static: web.FS(), CookieSecure: cfg.CookieSecure,
 			MailEnabled: mailer.Enabled(), Hub: hub, Rooms: tables, Speech: speech,
 			SpeechDailyChars: cfg.TTSDailyChars}
