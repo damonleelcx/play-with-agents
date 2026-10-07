@@ -98,6 +98,15 @@ func revisionRound(n int, findings string, earlier []string) []engine.PlannedTas
 			instr += fmt.Sprintf("\n--- round %d ---\n%s\n", i+2, f)
 		}
 	}
+	// The Critic sees what earlier rounds asked for, so it does not reverse
+	// its own rulings (one round "orthogonal only", the next "too strict").
+	review := "Review the revised, playtested module against the rules and the playtest report, then submit_review."
+	if all := append(append([]string{}, earlier...), findings); len(all) > 0 {
+		review += "\n\nEARLIER REVIEW ROUNDS asked for these changes. Treat them as settled interpretations of the rules: do not ask to undo one unless the rules document plainly says otherwise (quote it). Report only problems that remain.\n"
+		for i, f := range all {
+			review += fmt.Sprintf("\n--- round %d ---\n%s\n", i+1, f)
+		}
+	}
 	return []engine.PlannedTask{
 		{Key: k("revise"), Title: fmt.Sprintf("Revise the module (round %d)", n), Role: RoleEngineer,
 			Tools: []string{ToolSaveModule, ToolReadExample}, Verify: []string{VerifyModuleChecks}, MaxSteps: engineSteps,
@@ -106,7 +115,7 @@ func revisionRound(n int, findings string, earlier []string) []engine.PlannedTas
 			Tool: ToolPlaytest, Verify: []string{VerifyPlaytestPassed}},
 		{Key: k("critic"), Title: fmt.Sprintf("Review again (round %d)", n), Role: RoleCritic, Deps: []string{k("playtest")},
 			Tools: []string{ToolSubmitReview}, Verify: []string{"called:" + ToolSubmitReview, VerifyCriticAccepted}, MaxSteps: criticSteps,
-			Instructions: "Review the revised, playtested module against the rules and the playtest report, then submit_review."},
+			Instructions: review},
 		{Key: k("publish"), Title: "Ask the owner to publish", Role: RoleCoordinator, Deps: []string{k("critic")},
 			Tools: []string{ToolPublish}, Verify: []string{VerifyPublishDecided}, MaxSteps: publishSteps,
 			Instructions: "Ask the owner to publish the reviewed version with publish_game."},
