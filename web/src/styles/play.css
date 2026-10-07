@@ -882,3 +882,75 @@ select.pw-input option { background: var(--navy-800, #111b33); }
    still fit a 360px phone. */
 :lang(ja) .pw-holdem.is-compact .pw-act-btn, :lang(ko) .pw-holdem.is-compact .pw-act-btn { padding: 0 5px; gap: 5px; font-size: 13px; letter-spacing: -0.02em; }
 :lang(ja) .pw-holdem.is-compact .pw-act-btn.is-allin, :lang(ja) .pw-holdem.is-compact .pw-act-btn.is-fold { flex: 1.1; }
+
+/* ── live chat: presence, typing, replies, reactions, whispers, bubbles ── */
+.pw-presence-av { position: relative; display: inline-flex; flex: none; }
+.pw-online { position: absolute; right: -2px; bottom: -2px; width: 9px; height: 9px; border-radius: 50%; background: #4a5470; box-shadow: 0 0 0 2px #0c1428; }
+.pw-online.is-on { background: #3ddc97; }
+.pw-watchers { margin: 6px 8px 0; font-size: 12px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pw-chat-line { position: relative; }
+.pw-chat-line.is-whisper .pw-chat-text { background: rgba(176,124,255,.1); border: 1px dashed rgba(176,124,255,.45); color: var(--text); }
+.pw-whisper-tag { font-style: normal; font-size: 11px; color: #c9a8ff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pw-chat-url { color: var(--text); text-decoration: underline dotted; overflow-wrap: anywhere; }
+.pw-chat-quote { display: block; max-width: 100%; margin-top: 3px; padding: 2px 8px; border: 0; border-left: 2px solid var(--line-strong); background: none; color: var(--text-3); font-size: 12px; text-align: left; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pw-chat-quote b { color: var(--text-2); font-weight: 600; }
+.pw-chat-actions { display: flex; gap: 2px; height: 0; overflow: hidden; opacity: 0; transition: opacity .15s; }
+.pw-chat-line:hover .pw-chat-actions, .pw-chat-line:focus-within .pw-chat-actions { height: auto; opacity: 1; margin-top: 2px; }
+@media (hover: none) { .pw-chat-actions { height: auto; opacity: .75; margin-top: 2px; } }
+.pw-chat-act { border: 0; background: none; padding: 2px 6px; border-radius: 6px; font-size: 11.5px; color: var(--text-3); cursor: pointer; white-space: nowrap; }
+.pw-chat-act:hover { background: rgba(255,255,255,.06); color: var(--text); }
+.pw-reactions { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
+.pw-reaction { display: inline-flex; align-items: center; gap: 3px; height: 22px; padding: 0 7px; border-radius: 999px; border: 1px solid var(--line); background: rgba(255,255,255,.04); cursor: pointer; font-size: 13px; line-height: 1; animation: pw-pop .25s var(--pw-spring); }
+.pw-reaction small { font: 600 11px var(--font-mono); color: var(--text-3); }
+.pw-reaction.is-mine { border-color: rgba(79,214,255,.55); background: rgba(79,214,255,.12); }
+.pw-reaction.is-mine small { color: var(--pw-cyan); }
+.pw-react-pick { display: inline-flex; gap: 2px; margin-top: 4px; padding: 3px; border-radius: 999px; background: #121d38; border: 1px solid var(--line-strong); box-shadow: var(--shadow-lg); animation: pw-rise .15s; }
+.pw-react-pick button { border: 0; background: none; width: 30px; height: 30px; border-radius: 50%; font-size: 17px; cursor: pointer; }
+.pw-react-pick button:hover { background: rgba(255,255,255,.08); transform: scale(1.15); }
+.pw-typing { min-height: 22px; padding: 2px 14px 0; display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-3); font-style: italic; }
+.pw-typing-dots { display: inline-flex; gap: 3px; align-items: center; }
+.pw-typing-dots i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; animation: pw-typing 1.2s infinite ease-in-out; }
+.pw-typing-dots i:nth-child(2) { animation-delay: .15s; }
+.pw-typing-dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes pw-typing { 0%, 60%, 100% { opacity: .3; transform: translateY(0) } 30% { opacity: 1; transform: translateY(-3px) } }
+.pw-chat-mode { display: flex; align-items: center; gap: 8px; margin: 4px 12px 0; padding: 6px 10px; border-radius: 10px; font-size: 12.5px; color: var(--text-2); background: rgba(61,123,255,.1); border: 1px solid rgba(61,123,255,.25); }
+.pw-chat-mode > span { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pw-chat-mode.is-whisper { background: rgba(176,124,255,.1); border-color: rgba(176,124,255,.35); color: #dcc8ff; }
+.pw-chat-mode .pw-link-btn { font-size: 16px; line-height: 1; padding: 0 4px; }
+.pw-whisper-btn { flex: none; width: 38px; height: 38px; font-size: 14px; filter: grayscale(.6); }
+.pw-whisper-btn.on { filter: none; background: rgba(176,124,255,.18); border-color: rgba(176,124,255,.5); }
+.pw-whisper-menu { left: 12px; right: auto; min-width: 200px; }
+.pw-whisper-head { padding: 4px 8px; color: var(--text-3); font: 600 11px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+
+/* speech bubbles on the felt: above the avatar, below it for seats along the top edge */
+.pw-say {
+  left: 0; bottom: calc(var(--av, 60px) / 2 + 12px); transform: translateX(-50%); z-index: 12;
+  width: max-content; max-width: 190px; padding: 6px 11px; border-radius: 14px; font-size: 12.5px; line-height: 1.35; color: #0b1222; text-align: left;
+  background: #f4f7ff; box-shadow: 0 8px 22px rgba(0,0,0,.45); overflow-wrap: anywhere; pointer-events: none;
+  animation: pw-say-in .28s var(--pw-spring);
+}
+.pw-say::after { content: ''; position: absolute; left: 50%; bottom: -5px; width: 10px; height: 10px; background: inherit; transform: translateX(-50%) rotate(45deg); border-radius: 2px; }
+.pw-seat.is-upper .pw-say { bottom: auto; top: calc(var(--av, 60px) / 2 + 40px); }
+.pw-seat.is-upper .pw-say::after { bottom: auto; top: -5px; }
+.pw-say.is-typing { padding: 8px 12px; color: #3b4a6b; }
+.pw-say.is-board { position: absolute; left: 50%; bottom: calc(100% + 10px); }
+@keyframes pw-say-in { from { opacity: 0; scale: .7; } to { opacity: 1; scale: 1; } }
+
+/* the chat drawer is closed: a new line peeks in under the header */
+.pw-chat-peek {
+  position: absolute; left: 50%; top: 62px; transform: translateX(-50%); z-index: 45;
+  display: flex; align-items: center; gap: 10px; width: min(420px, calc(100% - 32px)); padding: 8px 14px 8px 8px; border-radius: 16px;
+  background: rgba(13,21,40,.95); border: 1px solid var(--line-strong); box-shadow: var(--shadow-lg); color: var(--text); text-align: left; cursor: pointer;
+  font-size: 13.5px; animation: pw-rise .25s var(--pw-ease); backdrop-filter: blur(10px);
+}
+.pw-chat-peek > span { min-width: 0; display: grid; gap: 1px; overflow: hidden; }
+.pw-chat-peek b { font: 600 12.5px var(--font-head); }
+.pw-chat-peek.is-whisper { border-color: rgba(176,124,255,.5); }
+.pw-icon-btn .pw-unread-badge { position: absolute; top: 2px; right: 2px; min-width: 16px; height: 16px; font-size: 9.5px; padding: 0 4px; }
+.pw-chat-toggle.is-wide .pw-unread-badge { position: static; }
+/* seats along the sides: the bubble grows inwards so it never leaves the felt */
+.pw-seat.side-left .pw-say { transform: translateX(-26px); }
+.pw-seat.side-left .pw-say::after { left: 26px; }
+.pw-seat.side-right .pw-say { transform: translateX(calc(-100% + 26px)); }
+.pw-seat.side-right .pw-say::after { left: auto; right: 21px; transform: rotate(45deg); }
+.pw-holdem.is-compact .pw-say, .pw-room.is-narrow .pw-say { max-width: 150px; font-size: 12px; padding: 5px 9px; }

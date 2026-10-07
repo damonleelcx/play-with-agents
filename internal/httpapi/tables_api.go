@@ -375,7 +375,7 @@ func (s *Server) tableStream(w http.ResponseWriter, r *http.Request, u *auth.Use
 		roomsErr(w, err)
 		return
 	}
-	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Accel-Buffering", "no")
 	send := func(event string, v any) {

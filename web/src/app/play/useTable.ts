@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ApiError } from '../../lib/api'
-import { playApi, postMove, type ChatLine, type Move, type TableView } from '../../lib/playApi'
+import { playApi, postMove, type ChatLine, type ChatOpts, type Move, type Presence, type Reaction, type TableView, type Typing } from '../../lib/playApi'
 import { createMock, type MockGame } from './fixtures'
 
 export type Conn = 'connecting' | 'live' | 'reconnecting' | 'offline'
 export type Toast = { id: number; kind: 'error' | 'info'; text: string }
+export type TypingNow = Typing & { until: number }
 
 export type TableClient = {
   table: TableView | null
@@ -17,7 +18,14 @@ export type TableClient = {
   dismiss: (id: number) => void
   notify: (kind: Toast['kind'], text: string) => void
   move: (m: Move) => Promise<void>
-  chat: (text: string) => Promise<void>
+  chat: (text: string, opts?: ChatOpts) => Promise<void>
+  // who is writing a line right now (never me), and who has the table open
+  typing: TypingNow[]
+  presence: Presence | null
+  // tell the table I am typing (throttled here and on the server)
+  sendTyping: () => void
+  // toggle one of the quick reactions on a line
+  react: (chatId: string, emoji: string) => Promise<void>
   setSeat: (seat: number, kind: 'agent' | 'open', agentId?: string) => Promise<void>
   start: () => Promise<void>
   leave: () => Promise<boolean>
@@ -40,6 +48,8 @@ export function useTable(id: string, mockKind: string | null, staleText = 'The t
   const [conn, setConn] = useState<Conn>('connecting')
   const [busy, setBusy] = useState(false)
   const [toasts, setToasts] = useState<Toast[]>([])
+  const [typing, setTyping] = useState<TypingNow[]>([])
+  const [presence, setPresence] = useState<Presence | null>(null)
   const versionRef = useRef(-1)
   const mockRef = useRef<MockGame | null>(null)
   const isMock = !!mockKind
@@ -66,6 +76,7 @@ export function useTable(id: string, mockKind: string | null, staleText = 'The t
       versionRef.current = t.version
       markSeen(t)
       setTable(t)
+      if (t.presence) setPresence(t.presence)
     }
   }, [])
 
@@ -136,8 +147,32 @@ export function useTable(id: string, mockKind: string | null, staleText = 'The t
           const line = JSON.parse((ev as MessageEvent).data) as ChatLine
           if (!line?.id || chatSeen.current.has(line.id)) return
           chatSeen.current.add(line.id)
+          // their line is here: they are no longer typing it
+          setTyping((ts) => ts.filter((x) => !(x.seat === line.seat && x.name === line.name)))
           liveSubs.current.forEach((fn) => fn(line))
           setTable((t) => (t && !t.chat.some((c) => c.id === line.id) ? { ...t, chat: [...t.chat, line].slice(-80) } : t))
+        } catch {}
+      })
+      es.addEventListener('typing', (ev) => {
+        try {
+          const t = JSON.parse((ev as MessageEvent).data) as Typing
+          if (!t?.name) return
+          setTyping((ts) => {
+            const rest = ts.filter((x) => !(x.seat === t.seat && x.name === t.name))
+            // an agent's line may take the model a while; a person pings every few seconds
+            return t.stop ? rest : [...rest, { ...t, until: Date.now() + (t.agent ? 12000 : 5000) }]
+          })
+        } catch {}
+      })
+      es.addEventListener('reaction', (ev) => {
+        try {
+          const r = JSON.parse((ev as MessageEvent).data) as { chat_id: number; reactions: Reaction[] }
+          setTable((t) => (t ? { ...t, chat: t.chat.map((c) => (String(c.id) === String(r.chat_id) ? { ...c, reactions: r.reactions } : c)) } : t))
+        } catch {}
+      })
+      es.addEventListener('presence', (ev) => {
+        try {
+          setPresence(JSON.parse((ev as MessageEvent).data) as Presence)
         } catch {}
       })
       es.onerror = () => {
@@ -217,6 +252,48 @@ export function useTable(id: string, mockKind: string | null, staleText = 'The t
     return () => clearTimeout(tm)
   }, [isMock, table?.version, mockTick, syncMock])
 
+  // Typing indicators expire on their own when no line follows.
+  useEffect(() => {
+    if (!typing.length) return
+    const tm = window.setInterval(() => setTyping((ts) => ts.filter((x) => x.until > Date.now())), 1000)
+    return () => clearInterval(tm)
+  }, [typing.length])
+
+  const lastTyping = useRef(0)
+  const sendTyping = useCallback(() => {
+    if (isMock || !table || Date.now() - lastTyping.current < 3000) return
+    lastTyping.current = Date.now()
+    playApi.typing(table.id).catch(() => {})
+  }, [isMock, table])
+
+  const react = useCallback(
+    async (chatId: string, emoji: string) => {
+      if (!table) return
+      const apply = (reactions: Reaction[]) =>
+        setTable((t) => (t ? { ...t, chat: t.chat.map((c) => (String(c.id) === String(chatId) ? { ...c, reactions } : c)) } : t))
+      if (isMock) {
+        const line = table.chat.find((c) => String(c.id) === String(chatId))
+        const cur = line?.reactions || []
+        const had = cur.find((r) => r.emoji === emoji)
+        apply(
+          had?.mine
+            ? cur.map((r) => (r.emoji === emoji ? { ...r, count: r.count - 1, mine: false } : r)).filter((r) => r.count > 0)
+            : had
+              ? cur.map((r) => (r.emoji === emoji ? { ...r, count: r.count + 1, mine: true } : r))
+              : [...cur, { emoji, count: 1, names: ['You'], mine: true }],
+        )
+        return
+      }
+      try {
+        const r = await playApi.react(table.id, chatId, emoji)
+        apply(r.reactions)
+      } catch (e: any) {
+        notify('error', e?.message || 'Could not react')
+      }
+    },
+    [table, isMock, notify],
+  )
+
   // A new version always re-enables the action bar.
   useEffect(() => setBusy(false), [table?.version])
 
@@ -256,7 +333,7 @@ export function useTable(id: string, mockKind: string | null, staleText = 'The t
   )
 
   const chat = useCallback(
-    async (text: string) => {
+    async (text: string, opts?: ChatOpts) => {
       if (!table) return
       if (isMock) {
         mockRef.current!.chat(text)
@@ -265,7 +342,7 @@ export function useTable(id: string, mockKind: string | null, staleText = 'The t
         return
       }
       try {
-        await playApi.chat(table.id, text)
+        await playApi.chat(table.id, text, opts)
       } catch (e: any) {
         notify('error', e?.message || 'Could not send')
       }
@@ -346,5 +423,27 @@ export function useTable(id: string, mockKind: string | null, staleText = 'The t
     }
   }, [table, isMock, syncMock, adopt, notify])
 
-  return { table, loading, notFound, conn, busy, mock: isMock, toasts, dismiss, notify, move, chat, setSeat, start, leave, rematch, back, onLiveChat }
+  return {
+    table,
+    loading,
+    notFound,
+    conn,
+    busy,
+    mock: isMock,
+    toasts,
+    dismiss,
+    notify,
+    move,
+    chat,
+    typing,
+    presence,
+    sendTyping,
+    react,
+    setSeat,
+    start,
+    leave,
+    rematch,
+    back,
+    onLiveChat,
+  }
 }

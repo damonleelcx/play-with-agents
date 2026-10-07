@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { resolveColor, type BoardCell, type BoardData, type BoardPiece, type Move, type MoveSpec, type TableView } from '../../lib/playApi'
+import { SayBubble, type Bubbles } from './Bubbles'
 import { Avatar, TimerRing, VoiceWave, ZoneCard } from './parts'
 import { blip } from './sound'
 import { usePlayT } from './strings'
@@ -15,12 +16,14 @@ export default function BoardView({
   onMove,
   prefs,
   speakingSeat = -1,
+  bubbles,
 }: {
   table: TableView
   busy: boolean
   onMove: (m: Move) => void
   prefs: PlayPrefs
   speakingSeat?: number
+  bubbles?: Bubbles
 }) {
   const { s } = usePlayT()
   const d = (table.view?.data || {}) as BoardData
@@ -135,6 +138,7 @@ export default function BoardView({
                   <Avatar name={info?.name || ''} src={info?.avatar} seat={p.seat} size={36} agent={info?.kind === 'agent'} />
                   {active && <TimerRing deadline={table.deadline} total={table.turn_seconds || 30} size={46} />}
                   {speakingSeat === p.seat && <VoiceWave />}
+                  <SayBubble b={bubbles?.[p.seat]} className="is-board" />
                 </span>
                 <span className="pw-bg-pname">
                   <b>

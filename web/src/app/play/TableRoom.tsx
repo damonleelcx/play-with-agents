@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { playApi, type Agent, type HoldemData, type TableView } from '../../lib/playApi'
+import { playApi, type Agent, type ChatLine, type HoldemData, type TableView } from '../../lib/playApi'
+import { useSeatBubbles } from './Bubbles'
 import BoardView from './BoardView'
 import { ROSTER } from './fixtures'
 import HoldemTable from './HoldemTable'
 import { Avatar, Spinner } from './parts'
 import { fmtChips } from './poker'
-import SidePanel from './SidePanel'
+import SidePanel, { clipText } from './SidePanel'
 import { usePlayT } from './strings'
 import { usePlayPrefs, type PlayPrefs } from './usePrefs'
 import { useAoiVoice } from './useAoiVoice'
@@ -69,6 +70,36 @@ export default function TableRoom({ tableId, mock }: { tableId?: string; mock?: 
   const voiceOn = prefs.table_voice || (client.mock && sp.get('voice') === '1')
   const voice = useAoiVoice(voiceOn, client.onLiveChat, tableRef, client.mock)
   const speakingSeat = voice.seat
+  const bubbles = useSeatBubbles(client.onLiveChat, client.typing)
+  // With the chat in a closed drawer, new lines count as unread and peek
+  // in for a moment at the bottom of the room.
+  const closedRef = useRef(false)
+  closedRef.current = compact && !panelOpen
+  const [unread, setUnread] = useState(0)
+  const [peek, setPeek] = useState<ChatLine | null>(null)
+  useEffect(() => {
+    if (!closedRef.current) setUnread(0)
+  }, [compact, panelOpen])
+  useEffect(() => {
+    let tm: number | undefined
+    const off = client.onLiveChat((l) => {
+      const t = tableRef.current
+      const mine = !!t && t.my_seat >= 0 && l.seat === t.my_seat && !l.agent
+      if (mine || !closedRef.current) return
+      setUnread((n) => n + 1)
+      setPeek(l)
+      clearTimeout(tm)
+      tm = window.setTimeout(() => setPeek(null), 4500)
+    })
+    return () => {
+      off()
+      clearTimeout(tm)
+    }
+  }, [client.onLiveChat])
+  const openChat = () => {
+    setPeek(null)
+    setPanelOpen(true)
+  }
 
   if (client.loading && !table)
     return (
@@ -112,7 +143,19 @@ export default function TableRoom({ tableId, mock }: { tableId?: string; mock?: 
     if (await client.leave()) nav('/app/games')
   }
 
-  const side = <SidePanel table={table} onChat={client.chat} stacks={stacks} speakingSeat={speakingSeat} onClose={compact ? () => setPanelOpen(false) : undefined} />
+  const side = (
+    <SidePanel
+      table={table}
+      onChat={client.chat}
+      stacks={stacks}
+      speakingSeat={speakingSeat}
+      typing={client.typing}
+      presence={client.presence}
+      onTyping={client.sendTyping}
+      onReact={client.react}
+      onClose={compact ? () => setPanelOpen(false) : undefined}
+    />
+  )
 
   return (
     <div ref={setRoomEl} className={`pw-room felt-${prefs.felt} ${compact ? 'is-compact' : ''} ${narrow ? 'is-narrow' : ''}`} data-motion={prefs.motion}>
@@ -135,7 +178,7 @@ export default function TableRoom({ tableId, mock }: { tableId?: string; mock?: 
             <button
               type="button"
               className={`pw-icon-btn pw-chat-toggle ${narrow ? '' : 'is-wide'}`}
-              onClick={() => setPanelOpen(true)}
+              onClick={openChat}
               aria-label={s.room.playersChat}
               aria-expanded={panelOpen}
             >
@@ -143,7 +186,7 @@ export default function TableRoom({ tableId, mock }: { tableId?: string; mock?: 
                 <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
               </svg>
               {!narrow && <span>{s.room.playersChat}</span>}
-              {table.chat.length > 0 && <span className="pw-dot" />}
+              {unread > 0 ? <span className="pw-unread pw-unread-badge">{unread > 99 ? '99+' : unread}</span> : table.chat.length > 0 && <span className="pw-dot" />}
             </button>
           )}
           {!spectator && table.status !== 'finished' && table.status !== 'abandoned' && (
@@ -174,8 +217,8 @@ export default function TableRoom({ tableId, mock }: { tableId?: string; mock?: 
             </div>
           )}
           {table.status === 'lobby' && <LobbyStage table={table} client={client} />}
-          {table.status === 'playing' && table.view?.kind === 'holdem' && <HoldemTable table={table} busy={client.busy} onMove={client.move} prefs={prefs} speakingSeat={speakingSeat} />}
-          {table.status === 'playing' && table.view && table.view.kind !== 'holdem' && <BoardView table={table} busy={client.busy} onMove={client.move} prefs={prefs} speakingSeat={speakingSeat} />}
+          {table.status === 'playing' && table.view?.kind === 'holdem' && <HoldemTable table={table} busy={client.busy} onMove={client.move} prefs={prefs} speakingSeat={speakingSeat} bubbles={bubbles} />}
+          {table.status === 'playing' && table.view && table.view.kind !== 'holdem' && <BoardView table={table} busy={client.busy} onMove={client.move} prefs={prefs} speakingSeat={speakingSeat} bubbles={bubbles} />}
           {table.status === 'finished' && <Finished table={table} client={client} prefs={prefs} />}
           {table.status === 'abandoned' && (
             <div className="pw-center-note">
@@ -193,6 +236,19 @@ export default function TableRoom({ tableId, mock }: { tableId?: string; mock?: 
         <div className={`pw-drawer ${narrow ? '' : 'is-side'}`} onClick={(e) => e.target === e.currentTarget && setPanelOpen(false)}>
           <div className="pw-drawer-sheet">{side}</div>
         </div>
+      )}
+
+      {peek && compact && !panelOpen && (
+        <button type="button" className={`pw-chat-peek ${peek.whisper ? 'is-whisper' : ''}`} onClick={openChat} aria-label={s.room.newMessages}>
+          <Avatar name={peek.name} src={peek.avatar} seat={peek.seat} size={30} agent={peek.agent} />
+          <span>
+            <b>
+              {peek.whisper && '🔒 '}
+              {peek.name}
+            </b>
+            {clipText(peek.text, 80)}
+          </span>
+        </button>
       )}
 
       {voice.blocked && (

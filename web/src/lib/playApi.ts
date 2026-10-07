@@ -79,7 +79,27 @@ export type SeatInfo = {
 }
 
 export type LogEntry = { seq: number; type: string; seat: number; text: string; at: string }
-export type ChatLine = { id: string; seat: number; name: string; avatar: string; text: string; at: string; agent: boolean }
+export type Reaction = { emoji: string; count: number; names: string[]; mine: boolean }
+export type ChatLine = {
+  id: string
+  seat: number
+  name: string
+  avatar: string
+  text: string
+  at: string
+  agent: boolean
+  reply_to?: string | number // the line this one answers
+  whisper?: boolean // private: only the sender and `to` ever receive it
+  to?: string
+  to_seat?: number
+  reactions?: Reaction[]
+}
+// someone is writing a line (agents while the model writes); stop clears it
+export type Typing = { seat: number; name: string; agent?: boolean; stop?: boolean }
+// who has the table open now: seated people by seat, everyone else by name (agents are always here)
+export type Presence = { seats: number[]; watchers: string[] }
+export const REACTIONS = ['👍', '😂', '😮', '🔥', '❤️', '👏', '😢', '🎉']
+export type ChatOpts = { reply_to?: string | number; whisper_seat?: number }
 export type Outcome = { rank: number[]; score: number[]; summary: string }
 
 export type TableView = {
@@ -105,6 +125,7 @@ export type TableView = {
   paused?: boolean
   // why it is paused: 'fault' = a move kept failing; only the host may resume (a second fault closes the table)
   paused_reason?: 'idle' | 'fault'
+  presence?: Presence
 }
 
 // ── Hold'em view data ─────────────────────────────────────────────────────
@@ -182,8 +203,16 @@ export const playApi = {
   start: (id: string) => api.post<TableView>(`/api/tables/${encodeURIComponent(id)}/start`),
   move: (id: string, version: number, move: Move) =>
     api.post<TableView>(`/api/tables/${encodeURIComponent(id)}/moves`, { client_move_id: uid(), version, move }),
-  chat: (id: string, text: string) =>
-    api.post<{ ok: boolean }>(`/api/tables/${encodeURIComponent(id)}/chat`, { text, client_msg_id: uid() }),
+  chat: (id: string, text: string, opts: ChatOpts = {}) =>
+    api.post<{ ok: boolean }>(`/api/tables/${encodeURIComponent(id)}/chat`, {
+      text,
+      client_msg_id: uid(),
+      ...(opts.reply_to ? { reply_to: Number(opts.reply_to) } : {}),
+      ...(opts.whisper_seat !== undefined ? { whisper_seat: opts.whisper_seat } : {}),
+    }),
+  typing: (id: string) => api.post<{ ok: boolean }>(`/api/tables/${encodeURIComponent(id)}/typing`, {}),
+  react: (id: string, chatId: string | number, emoji: string) =>
+    api.post<{ chat_id: number; reactions: Reaction[] }>(`/api/tables/${encodeURIComponent(id)}/chat/${encodeURIComponent(String(chatId))}/react`, { emoji }),
   leave: (id: string) => api.post<{ ok: boolean }>(`/api/tables/${encodeURIComponent(id)}/leave`),
   back: (id: string) => api.post<TableView>(`/api/tables/${encodeURIComponent(id)}/back`),
   rematch: (id: string) => api.post<TableView>(`/api/tables/${encodeURIComponent(id)}/rematch`),
