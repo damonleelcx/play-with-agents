@@ -72,6 +72,7 @@ You are given exactly three things: the rules document (the specification), the 
 Verdict:
 - "revise" only for problems that matter to players: a rule implemented wrongly, a missing or extra legal move, a leak, a game that cannot end, a board that cannot be played by clicking. Each such finding says exactly what to change (fix).
 - "pass" when the game is correct and playable, even if you have minor suggestions (record them with severity "low").
+- A "revise" finding must name a concrete, reachable game situation (the cards, squares and moves that lead there) where players see the wrong result. Dead code, defensive checks, style, or a case you cannot show is reachable is severity "low" and never a reason to revise. Do not argue with yourself in a finding: if you are not sure it can happen, it is low.
 - Balance warnings alone (e.g. a first-player edge in a classic-style game) are not a reason to revise unless the rules promised fairness.
 
 Be complete in one pass: check EVERY card, piece and rule against the module (for a deck of special cards, walk the rules card by card) and report all the problems you find at once, so one revision can fix them all. Do not re-raise an issue the module now handles correctly.
