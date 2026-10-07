@@ -146,16 +146,33 @@ export type HoldemData = {
 // ── Board view data ───────────────────────────────────────────────────────
 
 export type BoardPiece = { shape?: 'disc' | 'square' | 'ring' | 'king' | 'text'; color?: string; glyph?: string; label?: string }
-export type BoardCell = { piece?: BoardPiece | null; mark?: string; text?: string } | null
-export type BoardCard = { face?: string; color?: string; hidden?: boolean }
+export type BoardCell = { piece?: BoardPiece | null; card?: BoardCard | null; mark?: string; text?: string; blocked?: boolean } | null
+// A card: a plain face, a hidden back, or a rich story card (title, story
+// line, effect, kind badge, cost/value badges, accent colour, who played it).
+export type BoardCard = {
+  face?: string
+  color?: string
+  hidden?: boolean
+  title?: string
+  text?: string
+  effect?: string
+  kind?: string
+  cost?: number | string
+  value?: number | string
+  accent?: string
+  seat?: number
+}
+export type StoryLine = { text: string; seat?: number; title?: string }
 export type BoardZone = { id: string; label?: string; owner?: number; layout?: 'row' | 'fan' | 'stack'; cards: BoardCard[] }
 export type BoardData = {
   title?: string
-  board?: { rows: number; cols: number; style?: 'grid' | 'checker' | 'go' | 'plain'; cells: BoardCell[][] }
+  board?: { rows: number; cols: number; style?: 'grid' | 'checker' | 'go' | 'plain' | 'tiles'; cells: BoardCell[][] }
   zones?: BoardZone[]
   players?: { seat: number; score?: number | string; info?: string; color?: string }[]
   counters?: { label: string; value: string | number }[]
   message?: string
+  story?: StoryLine[]
+  prompt?: string
 }
 
 // ── calls ─────────────────────────────────────────────────────────────────

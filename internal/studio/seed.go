@@ -57,6 +57,20 @@ Do one thing: take a market lantern (everyone sees it), draw blind from the deck
 
 ## End
 When the deck and the market are both empty, every other player gets one last chance to sell, then the game ends. Each unsold lantern costs 1 point. Highest score wins.`,
+	"story-tiles": `## Overview
+A storytelling tile game for 2 players with hidden hands. Twelve unique story cards (characters, places, events and twists) are played onto a 5×5 board; the story so far is the story lines of the cards played, in order.
+
+## Components
+12 story cards. Each has a name, one line of story, a value (0–2) and an effect. Each player holds 3 cards; the other 6 form the deck.
+
+## Turns
+A random player starts. On your turn, play one card from your hand onto any open square, then draw a card if the deck has any. "A Storm Rolls In" seals the empty squares around it; "But It Was a Dream" claims the adjacent opponent card of lowest value (the first in reading order on a tie).
+
+## Scoring
+When all 12 cards are played, every card on the board scores its value plus its effect for whoever owns it then. Adjacent means the four orthogonal neighbours. "The story card before it" is the card played just before it.
+
+## End
+Highest total wins; equal totals share the win.`,
 }
 
 // SeedCommunity puts the bundled example modules on the community shelf as

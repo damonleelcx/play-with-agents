@@ -126,26 +126,68 @@ which is why hidden-information games must define it.
   "title": "Connect Four",
   "board": {                         // optional
     "rows": 6, "cols": 7,
-    "style": "grid",                 // grid | checker | go | plain
+    "style": "grid",                 // grid | checker | go | plain | tiles
     "cells": [[ /* row-major; null or Cell */ ]]
   },
   // Cell = { "piece": { "shape": "disc|square|ring|king|text", "color": "p0..p7|#hex|css",
   //                      "glyph": "♛", "label": "K" },
+  //          "card": Card,              alternative to piece: a card on the square
   //          "mark": "#hex|css",        highlight
-  //          "text": "3" }
+  //          "text": "3",
+  //          "blocked": true }          sealed square (hatched; not playable)
   "zones": [                         // optional: hands, piles, decks
     { "id": "hand-0", "label": "Your hand", "owner": 0, "layout": "row|fan|stack",
-      "cards": [ { "face": "7♥", "color": "#c33", "hidden": false } ] }
+      "cards": [ Card ] }
   ],
+  "story": [                         // optional, ordered: the "Story so far" panel
+    { "text": "Every dusk he climbed the hill.", "seat": 0, "title": "The Lamplighter" }
+  ],
+  "prompt": "Choose a card, then a square",   // optional, above the mover's hand
   "players": [ { "seat": 0, "score": 3, "info": "Red", "color": "p0" } ],
   "counters": [ { "label": "Round", "value": "2 / 5" } ],
   "message": "Red to move"
 }
 ```
 
-Move UI hints (`MoveSpec.ui`): `{cell:[r,c]}` (click a cell), `{from:[r,c],to:[r,c]}`
-(select piece, then target), `{zone:"hand-0",index:2}` (click a card). Moves
-without hints render as buttons. A `range` renders as a slider + input.
+`Card` is a plain playing card `{ "face": "7♥", "color": "#c33" }`, a face-down
+card `{ "hidden": true }`, or a rich story card:
+
+| key | type | shown as |
+|---|---|---|
+| `title` | string ≤ 60 | the name, on a title plate |
+| `text` | string ≤ 300 | the story line, italic |
+| `effect` | string ≤ 300 | the rules text, in an effect box |
+| `kind` | string ≤ 24 | a badge and accent colour; `character`, `place`, `event`, `twist`, `item` have preset colours |
+| `cost`, `value` | number or string ≤ 8 | small corner badges (cost top-left, value top-right) |
+| `accent` | colour | overrides the kind colour |
+| `seat` | seat number | who played it: a player-colour frame (on the board) |
+
+A hidden card carries nothing but `hidden` (the validator rejects a hidden card
+with a face, title, text, effect, kind, cost, value or accent: it would leak).
+In hands (`fan`/`row`), rich cards render full size and enlarge on hover; on
+the board, `cell.card` renders as a mini-card (title on the kind colour, framed
+in the player's colour) with the full card on hover, focus or long-press.
+
+`story` holds at most 200 lines, each `text` ≤ 300 characters, `title` ≤ 60,
+optional `seat` (the line takes that player's colour). The newest line is
+highlighted; on narrow screens the panel collapses. `prompt` (≤ 200) is shown
+above the mover's hand only. All strings may use `{s:N}`.
+
+Move UI hints (`MoveSpec.ui`):
+
+- `{cell:[r,c]}`: click a cell.
+- `{from:[r,c],to:[r,c]}`: select a piece, then a target.
+- `{zone:"hand-0",index:2}`: click a card (plays at once).
+- `{zone:"hand-0",index:2,cell:[r,c]}`: play this card onto this cell. One
+  legal move per (card, cell); the renderer groups them: selecting the card
+  highlights its cells, clicking one submits, Esc or the card again cancels.
+- `{zone:"hand-0",index:2,target:"North"}`: select the card, then pick a
+  target (≤ 40 characters) from a small chooser.
+
+`index` is the card's position in that zone as the mover's view lists it.
+`Check` reports hints pointing at a zone, card or cell the mover's view does
+not show (the move could not be clicked). Moves without hints render as
+buttons (a compact list beyond 12). A `range` renders as a slider + input.
 
 Player colours `p0..p7`: `#4f8cff #ff5d73 #ffc04d #3ddc97 #b07cff #ff8f40 #3fd2ff #e6e6e6`.
 
