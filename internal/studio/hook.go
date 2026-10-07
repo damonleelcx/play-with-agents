@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
@@ -62,13 +63,22 @@ func reviseOnFailure(ctx context.Context, p *engine.Planner, g *engine.Goal, t *
 		return false, err
 	}
 	if g.Replans >= g.Limits.MaxReplans {
-		return true, escalate(ctx, p, g, t, tr)
+		extended, err := extendForBigRules(ctx, p, g)
+		if err != nil {
+			return false, err
+		}
+		if !extended {
+			return true, escalate(ctx, p, g, t, tr)
+		}
 	}
 	round := 2
-	var supersede []string
+	var supersede, earlier []string
 	for _, x := range all {
 		if strings.HasPrefix(x.Key, "revise-") {
 			round++
+			if f := findingsOf(x.Spec.Instructions); f != "" {
+				earlier = append(earlier, f)
+			}
 		}
 		// Everything downstream of the failed gate is still blocked on it.
 		if x.Status == "blocked" && x.Kind != "plan" && x.Kind != "finish" {
@@ -78,10 +88,48 @@ func reviseOnFailure(ctx context.Context, p *engine.Planner, g *engine.Goal, t *
 	supersede = append(supersede, tr.task.Key)
 	return true, p.ApplyEdit(ctx, g, t, engine.PlanEdit{
 		Supersede: supersede,
-		Add:       revisionRound(round, tr.findings),
+		Add:       revisionRound(round, tr.findings, earlier),
 		Why:       fmt.Sprintf("%s; revision round %d", tr.short, round),
 		Data:      map[string]any{"round": round, "trigger": tr.task.Key},
 	})
+}
+
+// bigRulesReplans is the revision budget of a big ruleset: a deck of
+// individually written cards fails review one card at a time, and each
+// round fixes a few.
+const (
+	bigRulesReplans = 8
+	bigRulesRunes   = 2500
+)
+
+// extendForBigRules raises the revision limit, once, when the rules
+// document is long enough that four rounds are not a fair test.
+func extendForBigRules(ctx context.Context, p *engine.Planner, g *engine.Goal) (bool, error) {
+	if g.Limits.MaxReplans >= bigRulesReplans {
+		return false, nil
+	}
+	game, err := loadGame(ctx, p.Store.Pool, g.GameID)
+	if err != nil || utf8.RuneCountInString(game.RulesMD) < bigRulesRunes {
+		return false, nil
+	}
+	g.Limits.MaxReplans = bigRulesReplans
+	if need := 6 + 4*bigRulesReplans; g.Limits.MaxTotalTasks < need {
+		g.Limits.MaxTotalTasks = need
+	}
+	return true, p.Store.SetLimits(ctx, g.ID, g.Limits)
+}
+
+// findingsOf is the findings block of an earlier revise task's instructions.
+func findingsOf(instructions string) string {
+	i := strings.Index(instructions, findingsHeader)
+	if i < 0 {
+		return ""
+	}
+	f := instructions[i+len(findingsHeader):]
+	if j := strings.Index(f, earlierHeader); j >= 0 {
+		f = f[:j]
+	}
+	return strings.TrimSpace(f)
 }
 
 // failedGate finds the newest failed playtest or critic task that failed

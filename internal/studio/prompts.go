@@ -40,6 +40,7 @@ How you work:
 - Every game must end: toMove returns [] exactly when outcome returns non-null.
 - Give moves ui hints so the board is clickable: {cell:[r,c]} for placing, {from:[r,c],to:[r,c]} for moving, {zone,index} for playing a card, {zone,index,cell:[r,c]} for playing a card onto a square (one legal move per card and square; the board lets the player pick the card, then the square). The index is the card's position in that zone as your view lists it.
 - Card games: give every card a face the renderer can show richly: title (its name), text (one line of flavour or story, shown in italics), effect (its rules text), kind (a one-word badge such as character, place, event, twist or item) and value or cost when it has one. Cards on the board go in cell.card (same shape). A hidden card is exactly { hidden: true }.
+- A deck of individually designed cards: make the deck DATA, not branches. One top-level constant CARDS array with one entry per card (id, title, text, effect, kind and the numbers its rule needs), and one small handler per distinct effect (canPlay(state, seat, card, cell) and play(state, seat, card, cell)). legal() offers a card on a square only when that card's own canPlay says so; a card whose rule says "only next to X" or "only if Y" must not be offered anywhere else. Before you save, walk the rules document card by card and check that each card's title, numbers, placement condition and effect match its entry and handler exactly.
 - A game that tells a story: put the story so far in view.story as [{ text, seat, title }] in order (the card's story line, who played it, the card name), and add view.prompt for the mover ("Choose a card, then a square").
 - Add heuristic(state, seat) (-1..1) when there is an obvious evaluation; it makes the AI players better.
 - Keep it efficient: legal() and apply() run thousands of times in playtests (budget 250 ms per call).
@@ -72,6 +73,8 @@ Verdict:
 - "revise" only for problems that matter to players: a rule implemented wrongly, a missing or extra legal move, a leak, a game that cannot end, a board that cannot be played by clicking. Each such finding says exactly what to change (fix).
 - "pass" when the game is correct and playable, even if you have minor suggestions (record them with severity "low").
 - Balance warnings alone (e.g. a first-player edge in a classic-style game) are not a reason to revise unless the rules promised fairness.
+
+Be complete in one pass: check EVERY card, piece and rule against the module (for a deck of special cards, walk the rules card by card) and report all the problems you find at once, so one revision can fix them all. Do not re-raise an issue the module now handles correctly.
 
 Call submit_review exactly once. Then finish with a short Markdown review for the owner: the verdict on the first line, then the most important findings as bullets.`
 

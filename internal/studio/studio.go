@@ -35,10 +35,13 @@ const (
 	Domain = "studio"
 )
 
-// Limits bound one build. Four revision rounds, then the owner decides.
+// Limits bound one build. Four revision rounds, then the owner decides; a
+// big ruleset (a deck of individually written cards) earns up to
+// bigRulesReplans rounds first (hook.go). The iteration, token and task
+// budgets are sized for that longer case.
 var Limits = engine.Limits{
-	MaxIterations: 150, MaxToolCalls: 300, MaxTokens: 1_500_000, MaxCostUSD: 10,
-	MaxDays: 2, MaxDepth: 6, MaxTasksPerPlan: 10, MaxReplans: 4, MaxTotalTasks: 40,
+	MaxIterations: 300, MaxToolCalls: 500, MaxTokens: 3_000_000, MaxCostUSD: 15,
+	MaxDays: 2, MaxDepth: 6, MaxTasksPerPlan: 10, MaxReplans: 4, MaxTotalTasks: 48,
 }
 
 // Service starts builds. It implements agent.Studio.

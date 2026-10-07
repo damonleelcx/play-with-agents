@@ -84,12 +84,24 @@ func playbook() *skills.Skill {
 // then the same gates run again. The engineer step has no dependency (all
 // earlier work is finished), which keeps the DAG shallow however many
 // rounds there are.
-func revisionRound(n int, findings string) []engine.PlannedTask {
+//
+// earlier carries the findings of previous rounds, so a fix never quietly
+// undoes the one before it.
+func revisionRound(n int, findings string, earlier []string) []engine.PlannedTask {
 	k := func(s string) string { return fmt.Sprintf("%s-%d", s, n) }
+	instr := "Fix the module so that it addresses every finding below, keep everything that already works, and save it with save_module until the contract check passes. " +
+		"Fix the root cause, not just the example: if one card, piece or rule was wrong, re-check every other card, piece and rule of the same kind against the rules document before you save." +
+		findingsHeader + findings
+	if len(earlier) > 0 {
+		instr += earlierHeader + "These were fixed in earlier rounds. They must STAY fixed; re-check each one before you save:\n"
+		for i, f := range earlier {
+			instr += fmt.Sprintf("\n--- round %d ---\n%s\n", i+2, f)
+		}
+	}
 	return []engine.PlannedTask{
 		{Key: k("revise"), Title: fmt.Sprintf("Revise the module (round %d)", n), Role: RoleEngineer,
 			Tools: []string{ToolSaveModule, ToolReadExample}, Verify: []string{VerifyModuleChecks}, MaxSteps: engineSteps,
-			Instructions: "Fix the module so that it addresses every finding below, keep everything that already works, and save it with save_module until the contract check passes.\n\nFINDINGS\n" + findings},
+			Instructions: instr},
 		{Key: k("playtest"), Title: fmt.Sprintf("Playtest again (round %d)", n), Role: RolePlaytester, Deps: []string{k("revise")},
 			Tool: ToolPlaytest, Verify: []string{VerifyPlaytestPassed}},
 		{Key: k("critic"), Title: fmt.Sprintf("Review again (round %d)", n), Role: RoleCritic, Deps: []string{k("playtest")},
@@ -100,6 +112,11 @@ func revisionRound(n int, findings string) []engine.PlannedTask {
 			Instructions: "Ask the owner to publish the reviewed version with publish_game."},
 	}
 }
+
+const (
+	findingsHeader = "\n\nFINDINGS\n"
+	earlierHeader  = "\n\nEARLIER FINDINGS\n"
+)
 
 // ── Roles: what each specialist sees ───────────────────────────────────────
 
