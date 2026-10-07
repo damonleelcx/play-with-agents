@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
 
@@ -109,7 +108,7 @@ func extendForBigRules(ctx context.Context, p *engine.Planner, g *engine.Goal) (
 		return false, nil
 	}
 	game, err := loadGame(ctx, p.Store.Pool, g.GameID)
-	if err != nil || utf8.RuneCountInString(game.RulesMD) < bigRulesRunes {
+	if err != nil || rulesWeight(game.RulesMD) < bigRulesRunes {
 		return false, nil
 	}
 	g.Limits.MaxReplans = bigRulesReplans
@@ -117,6 +116,21 @@ func extendForBigRules(ctx context.Context, p *engine.Planner, g *engine.Goal) (
 		g.Limits.MaxTotalTasks = need
 	}
 	return true, p.Store.SetLimits(ctx, g.ID, g.Limits)
+}
+
+// rulesWeight is the length of a rules document in Latin-letter terms: a
+// CJK character says about as much as two or three letters, so a Chinese
+// ruleset of 24 cards is as long as an English one of 20.
+func rulesWeight(md string) int {
+	n := 0
+	for _, r := range md {
+		if r >= 0x2E80 {
+			n += 3
+		} else {
+			n++
+		}
+	}
+	return n
 }
 
 // findingsOf is the findings block of an earlier revise task's instructions.
