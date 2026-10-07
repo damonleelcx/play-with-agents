@@ -18,8 +18,10 @@ func (a *Agent) build(ctx context.Context, t *turn) outcome {
 		return outcome{mood: persona.Sad, note: "The player described a game to build, but the game studio is not open yet on this server. Say so honestly, say you love the idea (one specific thing about it), and offer to talk the rules through so they are ready when it opens."}
 	}
 	prompt := strings.TrimSpace(t.r.Prompt)
-	if prompt == "" {
-		prompt = t.text
+	// A pasted design (a long message) goes to the Designer word for word:
+	// the router's slot is a model's retelling and may abridge it.
+	if prompt == "" || (len([]rune(t.text)) > 600 && len(t.text) > len(prompt)) {
+		prompt = strings.TrimSpace(t.text)
 	}
 	base := ""
 	if t.r.BaseGameID != "" {
