@@ -34,7 +34,7 @@ data:
   # Spending ceilings (tokens/day). A public sign-up form sits in front of a
   # paid key: the per-account cap bounds one person, the deployment cap bounds
   # everyone.
-  PLAY_ACCOUNT_DAILY_TOKENS: "1500000"
+  PLAY_ACCOUNT_DAILY_TOKENS: "5000000"
   PLAY_DEPLOYMENT_DAILY_TOKENS: "40000000"
   # Player-written games run in an in-process JS sandbox. Its builtins are
   # size-capped, but string concatenation in a loop can only be stopped by
