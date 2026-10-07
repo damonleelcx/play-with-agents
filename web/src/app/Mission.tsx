@@ -22,6 +22,7 @@ export default function Mission() {
   const [game, setGame] = useState<GameDetail | null>(null)
   const [tab, setTab] = useState<'steps' | 'timeline'>('steps')
   const [busy, setBusy] = useState(false)
+  const [moreObjective, setMoreObjective] = useState(false)
 
   const loadTl = useCallback(() => {
     api.get<Timeline>(`/api/goals/${goalId}/timeline`).then(setTl).catch(() => {})
@@ -72,8 +73,18 @@ export default function Mission() {
       <header className="mission-head">
         <div className="mh-text">
           <div className="mh-meta"><StatusPill status={g.status} /><small>{fmtTime(g.created_at, lang)}</small></div>
-          <h1>{g.title}</h1>
-          {g.objective && g.objective !== g.title && <p>{g.objective}</p>}
+          <h1>{game?.name || g.title}</h1>
+          {g.objective && g.objective !== g.title && (
+            // A pasted design runs to pages: three lines, then "more".
+            <div className={`mh-objective ${moreObjective ? 'is-open' : ''}`}>
+              <p>{g.objective}</p>
+              {g.objective.length > 280 && (
+                <button type="button" className="mh-more" onClick={() => setMoreObjective((x) => !x)}>
+                  {moreObjective ? t.mission.less : t.mission.more}
+                </button>
+              )}
+            </div>
+          )}
         </div>
         <div className="mh-actions">
           {gid && <button className="btn btn-primary btn-sm" onClick={() => nav(`/app/games/${gid}`)}><IconPlay size={14} /> {t.mission.playDraft}</button>}
