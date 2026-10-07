@@ -206,7 +206,10 @@ func (s *Service) assemble(ctx context.Context, t *tableRow, userID string) (*Ta
 	if v.Log, err = s.log(ctx, t.ID, me, names, logWindow); err != nil {
 		return nil, err
 	}
-	if v.Chat, err = s.recentChat(ctx, t.ID, chatWindow); err != nil {
+	if v.Chat, err = s.recentChat(ctx, t, userID, chatWindow); err != nil {
+		return nil, err
+	}
+	if v.Presence, err = s.presence(ctx, t); err != nil {
 		return nil, err
 	}
 	return v, nil
@@ -235,28 +238,57 @@ func (s *Service) log(ctx context.Context, tableID string, seat int, names []str
 	return out, rows.Err()
 }
 
-func (s *Service) recentChat(ctx context.Context, tableID string, n int) ([]ChatLine, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT id, seat, name, coalesce(agent_id,''), text, at FROM table_chat
-		WHERE table_id=$1 ORDER BY id DESC LIMIT $2`, tableID, n)
+// recentChat is the last n lines viewer may see, oldest first, with their
+// reactions: every public line, and the whispers viewer sent or received.
+// viewer "" (an agent's context) gets public lines only.
+func (s *Service) recentChat(ctx context.Context, t *tableRow, viewer string, n int) ([]ChatLine, error) {
+	rows, err := s.Pool.Query(ctx, `SELECT c.id, c.seat, c.name, coalesce(c.agent_id,''), c.text, c.at, coalesce(c.reply_to,0),
+			coalesce(c.whisper_to::text,''), coalesce(w.name,'')
+		FROM table_chat c LEFT JOIN users w ON w.id = c.whisper_to
+		WHERE c.table_id=$1 AND (c.whisper_to IS NULL OR ($3 <> '' AND (c.whisper_to::text=$3 OR c.user_id::text=$3)))
+		ORDER BY c.id DESC LIMIT $2`, t.ID, n, viewer)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	out := []ChatLine{}
+	var ids []int64
 	for rows.Next() {
 		var c ChatLine
-		var agentID string
-		if err := rows.Scan(&c.ID, &c.Seat, &c.Name, &agentID, &c.Text, &c.At); err != nil {
+		var agentID, whisperTo, toName string
+		if err := rows.Scan(&c.ID, &c.Seat, &c.Name, &agentID, &c.Text, &c.At, &c.ReplyTo, &whisperTo, &toName); err != nil {
 			return nil, err
 		}
 		c.Agent = agentID != ""
 		if a, ok := agents.Get(agentID); ok {
 			c.Avatar = a.Avatar
 		}
+		if whisperTo != "" {
+			c.Whisper, c.To = true, toName
+			if seat := t.seatOf(whisperTo); seat >= 0 {
+				c.ToSeat = &seat
+			}
+		}
 		out = append(out, c)
+		ids = append(ids, c.ID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	if viewer != "" {
+		sets, err := loadReactions(ctx, s.Pool, ids)
+		if err != nil {
+			return nil, err
+		}
+		for i := range out {
+			if set := sets[out[i].ID]; set != nil {
+				out[i].Reactions = set.For(viewer)
+			}
+		}
 	}
 	reverse(out)
-	return out, rows.Err()
+	return out, nil
 }
 
 func reverse[T any](s []T) {

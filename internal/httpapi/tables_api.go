@@ -5,6 +5,9 @@ package httpapi
 // call the service and map its errors to status codes.
 
 import (
+	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,7 +41,9 @@ func (s *Server) tableRoutes(m *http.ServeMux) {
 	m.HandleFunc("PUT /api/tables/{id}/seats/{seat}", s.verified(s.setSeat))
 	m.HandleFunc("POST /api/tables/{id}/start", s.verified(s.startTable))
 	m.HandleFunc("POST /api/tables/{id}/moves", s.limit("table-move", 240, s.verified(s.postMove)))
-	m.HandleFunc("POST /api/tables/{id}/chat", s.limit("table-chat", 40, s.verified(s.postTableChat)))
+	m.HandleFunc("POST /api/tables/{id}/chat", s.limit("table-chat", 120, s.verified(s.postTableChat)))
+	m.HandleFunc("POST /api/tables/{id}/typing", s.limit("table-typing", 90, s.verified(s.postTyping)))
+	m.HandleFunc("POST /api/tables/{id}/chat/{chat}/react", s.limit("table-react", 120, s.verified(s.postReaction)))
 	m.HandleFunc("POST /api/tables/{id}/leave", s.authed(s.leaveTable))
 	m.HandleFunc("POST /api/tables/{id}/back", s.limit("table-back", 60, s.authed(s.backTable)))
 	m.HandleFunc("POST /api/tables/{id}/rematch", s.limit("table-create", 20, s.verified(s.rematch)))
@@ -248,19 +253,48 @@ func (s *Server) postMove(w http.ResponseWriter, r *http.Request, u *auth.User) 
 }
 
 func (s *Server) postTableChat(w http.ResponseWriter, r *http.Request, u *auth.User) {
+	var in rooms.ChatInput
+	if err := readJSON(r, &in); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	if err := s.Rooms.ChatWith(r.Context(), u.ID, r.PathValue("id"), in); err != nil {
+		roomsErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// postTyping: the caller is writing a line (the client pings every few
+// seconds while they type; the service drops pings closer than 2s).
+func (s *Server) postTyping(w http.ResponseWriter, r *http.Request, u *auth.User) {
+	if err := s.Rooms.Typing(r.Context(), u.ID, r.PathValue("id")); err != nil {
+		roomsErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// postReaction toggles one of the quick reactions on a chat line.
+func (s *Server) postReaction(w http.ResponseWriter, r *http.Request, u *auth.User) {
+	chatID, err := strconv.ParseInt(r.PathValue("chat"), 10, 64)
+	if err != nil || chatID <= 0 {
+		writeErr(w, http.StatusBadRequest, "bad chat id")
+		return
+	}
 	var in struct {
-		Text        string `json:"text"`
-		ClientMsgID string `json:"client_msg_id"`
+		Emoji string `json:"emoji"`
 	}
 	if err := readJSON(r, &in); err != nil {
 		writeErr(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	if err := s.Rooms.Chat(r.Context(), u.ID, r.PathValue("id"), in.Text, in.ClientMsgID); err != nil {
+	out, err := s.Rooms.React(r.Context(), u.ID, r.PathValue("id"), chatID, in.Emoji)
+	if err != nil {
 		roomsErr(w, err)
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	writeJSON(w, http.StatusOK, map[string]any{"chat_id": chatID, "reactions": out})
 }
 
 // backTable is "I'm back": clears the caller's away mark and resumes a
@@ -293,8 +327,11 @@ func (s *Server) rematch(w http.ResponseWriter, r *http.Request, u *auth.User) {
 
 // tableStream is the table's live feed (SSE):
 //
-//	event: table  {"version": N}   the view changed; refetch it
-//	event: chat   ChatLine         a new chat line
+//	event: table     {"version": N}            the view changed; refetch it
+//	event: chat      ChatLine                  a new chat line (a whisper only to its two people)
+//	event: typing    Typing                    someone is writing (never echoed to the writer)
+//	event: reaction  {chat_id, reactions}      a line's reactions changed
+//	event: presence  Presence                  who has the table open changed
 //
 // plus a comment every 20s so proxies keep the connection open. Table
 // signals are coalesced briefly (one move writes several rows but is one
@@ -307,6 +344,12 @@ func (s *Server) rematch(w http.ResponseWriter, r *http.Request, u *auth.User) {
 // streamRecheck is how stale a table stream's access check may get before
 // the next event re-checks it.
 var streamRecheck = 5 * time.Second
+
+func newConnID() string {
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
 
 func (s *Server) tableStream(w http.ResponseWriter, r *http.Request, u *auth.User) {
 	id := r.PathValue("id")
@@ -341,6 +384,28 @@ func (s *Server) tableStream(w http.ResponseWriter, r *http.Request, u *auth.Use
 		fl.Flush()
 	}
 	send("table", map[string]int64{"version": version})
+	// Presence: this stream counts as "here" while it is open; the
+	// keepalive refreshes it, and re-reads who else is here so a person
+	// whose pod died drops off within PresenceTTL.
+	connID := newConnID()
+	var shown *rooms.Presence
+	sendPresence := func(p *rooms.Presence) {
+		if p != nil && !p.Equal(shown) {
+			shown = p
+			send("presence", p)
+		}
+	}
+	if err := s.Rooms.Here(r.Context(), id, u.ID, connID); err != nil {
+		slog.Warn("presence", "err", err)
+	}
+	defer func() {
+		ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 3*time.Second)
+		defer cancel()
+		_ = s.Rooms.Gone(ctx, id, u.ID, connID)
+	}()
+	if p, err := s.Rooms.Presence(r.Context(), id); err == nil {
+		sendPresence(p)
+	}
 	checked := time.Now()
 	// allowed re-checks access when the last check is older than maxAge
 	// (0: always). A failed check closes the stream rather than keep
@@ -376,12 +441,31 @@ func (s *Server) tableStream(w http.ResponseWriter, r *http.Request, u *auth.Use
 		case sig := <-sub:
 			switch sig.Kind {
 			case "chat":
-				if sig.Chat != nil {
+				if sig.Chat != nil && sig.For(u.ID) {
 					if !allowed(streamRecheck) {
 						return
 					}
 					send("chat", sig.Chat)
 				}
+			case "typing":
+				if sig.Typing != nil && sig.From != u.ID {
+					if !allowed(streamRecheck) {
+						return
+					}
+					send("typing", sig.Typing)
+				}
+			case "reaction":
+				if sig.Reaction != nil && sig.For(u.ID) {
+					if !allowed(streamRecheck) {
+						return
+					}
+					send("reaction", map[string]any{"chat_id": sig.Reaction.ChatID, "reactions": sig.Reaction.For(u.ID)})
+				}
+			case "presence":
+				if !allowed(streamRecheck) {
+					return
+				}
+				sendPresence(sig.Presence)
 			case "table":
 				if pending == 0 {
 					flush.Reset(150 * time.Millisecond)
@@ -400,6 +484,10 @@ func (s *Server) tableStream(w http.ResponseWriter, r *http.Request, u *auth.Use
 		case <-ping.C:
 			if !allowed(0) {
 				return
+			}
+			_ = s.Rooms.Here(r.Context(), id, u.ID, connID)
+			if p, err := s.Rooms.Presence(r.Context(), id); err == nil {
+				sendPresence(p)
 			}
 			fmt.Fprint(w, ": keepalive\n\n")
 			fl.Flush()

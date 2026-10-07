@@ -505,7 +505,7 @@ func TestChatLimitsAndAgentReplies(t *testing.T) {
 	if err := r.svc.Chat(ctx, a, v.ID, "hey @Aoi, ready to lose?", "c0"); err != nil {
 		t.Fatalf("a retried send should be a no-op: %v", err)
 	}
-	for i := 1; i < humanBurst; i++ {
+	for i := 1; i < humanPerWindow; i++ {
 		if err := r.svc.Chat(ctx, a, v.ID, "spam", "s"+itoa(i)); err != nil {
 			t.Fatalf("line %d: %v", i, err)
 		}
@@ -513,10 +513,12 @@ func TestChatLimitsAndAgentReplies(t *testing.T) {
 	if err := r.svc.Chat(ctx, a, v.ID, "one too many", "over"); !errors.Is(err, ErrRateLimit) {
 		t.Fatalf("burst limit: %v", err)
 	}
-	if n := r.count(t, `SELECT count(*) FROM table_chat WHERE table_id=$1 AND user_id=$2`, v.ID, a); n != humanBurst {
-		t.Fatalf("%d lines stored, want %d", n, humanBurst)
+	if n := r.count(t, `SELECT count(*) FROM table_chat WHERE table_id=$1 AND user_id=$2`, v.ID, a); n != humanPerWindow {
+		t.Fatalf("%d lines stored, want %d", n, humanPerWindow)
 	}
 
+	// Only the reply to the mention: the spam may have made Aoi chime in.
+	_, _ = r.pool.Exec(ctx, `DELETE FROM table_jobs WHERE NOT coalesce((payload->>'mention')::bool, false)`)
 	r.dueNow(t)
 	j := r.claim(t, "w")
 	if j == nil || j.Kind != "agent_chat" || j.Seat != 1 || j.StateVersion >= 0 {
@@ -567,7 +569,7 @@ func TestChatLimitsAndAgentReplies(t *testing.T) {
 		t.Fatalf("agent line %q", last)
 	}
 	tv, _ := r.svc.View(ctx, v.ID, a)
-	if n := len(tv.Chat); n != humanBurst+2 || !tv.Chat[n-1].Agent || tv.Chat[n-1].Avatar == "" {
+	if n := len(tv.Chat); n != humanPerWindow+2 || !tv.Chat[n-1].Agent || tv.Chat[n-1].Avatar == "" {
 		t.Fatalf("view chat: %+v", tv.Chat)
 	}
 }

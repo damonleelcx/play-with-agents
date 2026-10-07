@@ -4,17 +4,31 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"slices"
 	"strings"
 	"sync"
 	"time"
 )
 
 // Signal is one thing a table's stream sends: a new version (clients
-// refetch the view) or a chat line.
+// refetch the view), a chat line, someone typing, the reactions on a line,
+// or who is here.
 type Signal struct {
-	Kind    string    // "table" | "chat"
+	Kind    string    // "table" | "chat" | "typing" | "reaction" | "presence"
 	Version int64     // for "table"
 	Chat    *ChatLine // for "chat"
+	// Audience, when set, is everyone who may receive the signal (a
+	// whisper, or a reaction on one); the stream drops it for anyone else.
+	Audience []string
+	Typing   *Typing      // for "typing"
+	From     string       // for "typing": the person typing, who is not told
+	Reaction *ReactionSet // for "reaction"
+	Presence *Presence    // for "presence"
+}
+
+// For reports whether userID may receive the signal.
+func (sig Signal) For(userID string) bool {
+	return len(sig.Audience) == 0 || slices.Contains(sig.Audience, userID)
 }
 
 // Hub fans table notifications out to this process's stream subscribers.
@@ -109,9 +123,25 @@ func (s *Service) dispatch(ctx context.Context, payload string) {
 	s.poke() // a commit elsewhere may have enqueued a job
 	if strings.HasPrefix(payload, "{") {
 		var cn chatNotice
-		if json.Unmarshal([]byte(payload), &cn) == nil && cn.TableID != "" {
-			line := cn.Chat
-			s.hub.Publish(cn.TableID, Signal{Kind: "chat", Chat: &line})
+		if json.Unmarshal([]byte(payload), &cn) != nil || cn.TableID == "" {
+			return
+		}
+		switch {
+		case cn.Chat != nil:
+			s.hub.Publish(cn.TableID, Signal{Kind: "chat", Chat: cn.Chat})
+		case cn.Whisper != nil && len(cn.Audience) > 0:
+			s.hub.Publish(cn.TableID, Signal{Kind: "chat", Chat: cn.Whisper, Audience: cn.Audience})
+		case cn.Typing != nil:
+			s.hub.Publish(cn.TableID, Signal{Kind: "typing", Typing: cn.Typing, From: cn.From})
+		case cn.Reaction != nil:
+			s.hub.Publish(cn.TableID, Signal{Kind: "reaction", Reaction: cn.Reaction, Audience: cn.Audience})
+		case cn.Presence:
+			if !s.hub.has(cn.TableID) {
+				return
+			}
+			if p, err := s.Presence(ctx, cn.TableID); err == nil {
+				s.hub.Publish(cn.TableID, Signal{Kind: "presence", Presence: p})
+			}
 		}
 		return
 	}

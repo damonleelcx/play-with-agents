@@ -49,6 +49,9 @@ type Service struct {
 	Lease time.Duration
 	// Think overrides the agents' thinking delay (tests use it to run fast).
 	Think func(speed string, afterResult bool) time.Duration
+	// TypeTime overrides how long an agent "types" a line of n runes before
+	// it appears (tests set it to zero).
+	TypeTime func(n int) time.Duration
 	// BrainTimeout bounds one Brain.Choose call (default 2s).
 	BrainTimeout time.Duration
 	// IdleAfter is how long without human activity before a table is
