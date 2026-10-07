@@ -586,26 +586,13 @@ func (s *Server) goalAction(w http.ResponseWriter, r *http.Request, u *auth.User
 		writeErr(w, 404, "not found")
 		return
 	}
-	switch r.PathValue("action") {
-	case "pause":
-		if g.Status == "active" || g.Status == "planning" {
-			err = s.Store.SetGoalStatus(r.Context(), g.ID, "paused", "paused by the owner")
-		}
-	case "resume":
-		if g.Status == "paused" || g.Status == "needs_attention" {
-			err = s.Store.SetGoalStatus(r.Context(), g.ID, "active", "resumed by the owner")
-			if err == nil {
-				_, err = s.Store.EnqueuePlan(r.Context(), g.ID, fmt.Sprintf("resume-%d", time.Now().Unix()), "review", "the owner resumed the mission; check the plan still fits")
-			}
-		}
-	case "cancel":
-		if g.Status != "completed" && g.Status != "cancelled" {
-			err = s.Store.SetGoalStatus(r.Context(), g.ID, "cancelled", "cancelled by the owner")
-		}
-	default:
+	action := r.PathValue("action")
+	if action != "pause" && action != "resume" && action != "cancel" {
 		writeErr(w, 404, "unknown action")
 		return
 	}
+	// The same control Aoi uses when the owner asks in chat.
+	err = s.Store.GoalControl(r.Context(), g, action, map[string]string{"pause": "paused by the owner", "resume": "resumed by the owner", "cancel": "cancelled by the owner"}[action])
 	if err != nil {
 		writeErr(w, 500, err.Error())
 		return
@@ -663,23 +650,18 @@ func (s *Server) decide(w http.ResponseWriter, r *http.Request, u *auth.User) {
 		return
 	}
 	id := r.PathValue("id")
-	var owner, gate string
-	if err := s.Pool.QueryRow(r.Context(), `SELECT user_id, gate FROM approvals WHERE id=$1::uuid`, id).Scan(&owner, &gate); err != nil {
+	// Checked on the server, against the stored approval — never against
+	// anything the client sent (engine.DecideAsOwner, the path Aoi's chat
+	// uses too). Someone else's approval is reported as missing, not as
+	// forbidden, so ids reveal nothing.
+	switch err := s.Store.DecideAsOwner(r.Context(), id, u.ID, in.Approve, strings.TrimSpace(in.Note)); {
+	case errors.Is(err, engine.ErrApprovalNotFound):
 		writeErr(w, 404, "not found")
 		return
-	}
-	// Checked here, on the server, against the stored approval — never
-	// against anything the client sent. Someone else's approval is reported
-	// as missing, not as forbidden, so ids reveal nothing.
-	if owner != u.ID {
-		writeErr(w, 404, "not found")
-		return
-	}
-	if gate != "G1" {
+	case errors.Is(err, engine.ErrNotApprovable):
 		writeErr(w, 403, "this action cannot be approved")
 		return
-	}
-	if err := s.Store.Decide(r.Context(), id, u.ID, in.Approve, strings.TrimSpace(in.Note)); err != nil {
+	case err != nil:
 		writeErr(w, 409, err.Error())
 		return
 	}
