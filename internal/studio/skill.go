@@ -108,7 +108,7 @@ func registerRoles() {
 		System:  func(g *engine.Goal, _ *engine.Task) string { return designerSystem(g.Language) },
 		Context: designerContext})
 	engine.RegisterRole(engine.Role{Name: RoleEngineer, Temperature: 0.2,
-		System:  func(*engine.Goal, *engine.Task) string { return engineerSystem },
+		System:  func(g *engine.Goal, _ *engine.Task) string { return engineerSystem + engineerLanguage(g.Language) },
 		Context: engineerContext})
 	engine.RegisterRole(engine.Role{Name: RoleCritic, Temperature: 0.2,
 		System:  func(*engine.Goal, *engine.Task) string { return criticSystem },
