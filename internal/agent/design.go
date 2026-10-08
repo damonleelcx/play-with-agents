@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -127,8 +128,8 @@ func (a *Agent) updateDesign(ctx context.Context, u User, convID, said, reply st
 	if err != nil {
 		return &st.Design, err
 	}
-	var d Design
-	if err := json.Unmarshal([]byte(llm.ExtractJSON(resp.Message.Content)), &d); err != nil {
+	d, err := designFrom([]byte(llm.ExtractJSON(resp.Message.Content)))
+	if err != nil {
 		return &st.Design, err
 	}
 	d.clip()
@@ -138,7 +139,84 @@ func (a *Agent) updateDesign(ctx context.Context, u User, convID, said, reply st
 		convID, raw, truncate(d.Title, 60), truncate(st.Design.Title, 60)); err != nil {
 		return &st.Design, err
 	}
-	return &d, nil
+	return d, nil
+}
+
+// designFrom reads a model-written design document loosely: a model may
+// write a list as one string, a field as a number, or readiness as "65%".
+// One odd field must not throw away the whole update.
+func designFrom(raw []byte) (*Design, error) {
+	var m map[string]any
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return nil, err
+	}
+	text := func(k string) string {
+		switch v := m[k].(type) {
+		case string:
+			return v
+		case float64:
+			return strconv.FormatFloat(v, 'f', -1, 64)
+		case []any:
+			return strings.Join(listOf(v), "; ")
+		case map[string]any:
+			return strings.Join(listOf([]any{v}), "; ")
+		}
+		return ""
+	}
+	list := func(k string) []string {
+		switch v := m[k].(type) {
+		case []any:
+			return listOf(v)
+		case string:
+			var out []string
+			for _, line := range strings.FieldsFunc(v, func(r rune) bool { return r == '\n' || r == ';' || r == '；' }) {
+				if line = strings.TrimSpace(strings.TrimLeft(strings.TrimSpace(line), "-•*")); line != "" {
+					out = append(out, line)
+				}
+			}
+			return out
+		case map[string]any:
+			return listOf([]any{v})
+		}
+		return nil
+	}
+	d := &Design{Title: text("title"), Pitch: text("pitch"), Players: text("players"), Length: text("length"), Board: text("board"),
+		Components: list("components"), Loop: list("loop"), Mechanics: list("mechanics"), Twist: text("twist"), Win: text("win"),
+		OpenQuestions: list("open_questions"), Parked: list("parked")}
+	switch v := m["readiness"].(type) {
+	case float64:
+		d.Readiness = int(v)
+	case string:
+		d.Readiness, _ = strconv.Atoi(strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(v), "%")))
+	}
+	return d, nil
+}
+
+// listOf flattens list items: strings as they are, an object as its values
+// ("name: point"), numbers as text.
+func listOf(xs []any) []string {
+	var out []string
+	for _, x := range xs {
+		switch v := x.(type) {
+		case string:
+			out = append(out, v)
+		case float64:
+			out = append(out, strconv.FormatFloat(v, 'f', -1, 64))
+		case map[string]any:
+			var parts []string
+			for _, k := range []string{"name", "title", "mechanic", "idea", "point", "description", "detail", "count"} {
+				if s, ok := v[k].(string); ok && s != "" {
+					parts = append(parts, s)
+				} else if n, ok := v[k].(float64); ok {
+					parts = append(parts, strconv.FormatFloat(n, 'f', -1, 64))
+				}
+			}
+			if len(parts) > 0 {
+				out = append(out, strings.Join(parts, ": "))
+			}
+		}
+	}
+	return out
 }
 
 // clip keeps a model-written document within the page's limits.
