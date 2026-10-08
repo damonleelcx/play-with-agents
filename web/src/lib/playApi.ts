@@ -102,7 +102,11 @@ export const REACTIONS = ['👍', '😂', '😮', '🔥', '❤️', '👏', '�
 export type ChatOpts = { reply_to?: string | number; whisper_seat?: number }
 export type Outcome = { rank: number[]; score: number[]; summary: string }
 
+// A move as played, with its UI hint: the board replays it (internal/rooms PlayedMove).
+export type PlayedMove = { seq: number; seat: number; version: number; ui: Record<string, any> }
+
 export type TableView = {
+  moves?: PlayedMove[]
   id: string
   name: string
   code: string
