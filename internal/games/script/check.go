@@ -293,6 +293,10 @@ func (c *checker) hints(where string, specs []games.MoveSpec, v games.View) {
 			Cells      [][]*struct {
 				Blocked bool `json:"blocked"`
 			}
+			Spaces []struct {
+				ID      string `json:"id"`
+				Blocked bool   `json:"blocked"`
+			} `json:"spaces"`
 		} `json:"board"`
 		Zones []struct {
 			ID    string `json:"id"`
@@ -305,6 +309,23 @@ func (c *checker) hints(where string, specs []games.MoveSpec, v games.View) {
 		return
 	}
 	cellOK := func(k string, x any) bool {
+		if id, isSpace := x.(string); isSpace {
+			// A map board: the hint names one of its spaces.
+			if view.Board == nil || len(view.Board.Spaces) == 0 {
+				c.add(SevError, where, fmt.Sprintf("a move has ui.%s %q (a space id) but the view has no map board; add view.board.spaces or use [row, col] on a grid", k, id))
+				return false
+			}
+			for _, sp := range view.Board.Spaces {
+				if sp.ID == id {
+					if k != "from" && sp.Blocked {
+						c.add(SevWarn, where, fmt.Sprintf("a move targets space %q, which the view marks blocked; players will not expect to play there", id))
+					}
+					return true
+				}
+			}
+			c.add(SevError, where, fmt.Sprintf("a move has ui.%s %q but the board has no space with that id", k, id))
+			return false
+		}
 		a, _ := x.([]any)
 		if len(a) != 2 {
 			return true // parseUI already reported the shape
@@ -313,6 +334,10 @@ func (c *checker) hints(where string, specs []games.MoveSpec, v games.View) {
 		col, _ := asInt(a[1])
 		if view.Board == nil {
 			c.add(SevError, where, fmt.Sprintf("a move has ui.%s %v but the view has no board; add view.board or drop the hint", k, x))
+			return false
+		}
+		if len(view.Board.Spaces) > 0 {
+			c.add(SevError, where, fmt.Sprintf("a move has ui.%s %v ([row, col]) but the board is a map; name the space by its id instead", k, x))
 			return false
 		}
 		if r >= view.Board.Rows || col >= view.Board.Cols {
