@@ -697,6 +697,8 @@ select.pw-input option { background: var(--navy-800, #111b33); }
 .pw-zones.is-compact .pw-zone-card.is-rich + .pw-zone-card.is-rich { margin-left: -16px; }
 .pw-zones.is-compact .pw-sc-back-medal { display: none; }
 .pw-zones.is-compact .pw-zone-label { white-space: nowrap; }
+/* The side column is narrow: one compact zone per line, so labels and card fans never overlap. */
+.pw-bg-side .pw-zones.is-compact .pw-zone, .pw-free-area .pw-zones.is-compact .pw-zone { flex-basis: 100%; }
 
 /* the story layout: board + side column (other zones, story), hand below */
 .pw-bg-main.is-story { align-items: stretch; gap: 16px; }
