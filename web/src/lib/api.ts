@@ -71,6 +71,24 @@ export type User = {
 
 export type Card = { kind: 'table'; table_id: string } | { kind: 'mission'; goal_id: string } | { kind: 'game'; game_id: string }
 
+// A game-design session's shared notes (internal/agent/design.go).
+export type Design = {
+  title?: string
+  pitch?: string
+  players?: string
+  length?: string
+  board?: string
+  components?: string[]
+  loop?: string[]
+  mechanics?: string[]
+  twist?: string
+  win?: string
+  open_questions?: string[]
+  parked?: string[]
+  readiness?: number
+}
+export type DesignState = { mode: 'chat' | 'design'; design: Design; plan?: string; plan_at?: string; updated_at?: string; goal_id?: string; stale?: boolean }
+
 export type Message = {
   id: number
   role: 'user' | 'assistant' | 'event'
@@ -80,7 +98,7 @@ export type Message = {
   pending?: boolean
 }
 
-export type Conversation = { id: string; title: string; archived: boolean; updated_at: string; last?: string | null }
+export type Conversation = { id: string; title: string; archived: boolean; updated_at: string; last?: string | null; mode?: 'chat' | 'design' }
 
 export type Task = {
   id: string

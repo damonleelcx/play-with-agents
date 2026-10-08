@@ -97,6 +97,9 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("DELETE /api/conversations/{id}", s.verified(s.deleteConversation))
 	m.HandleFunc("GET /api/conversations/{id}/messages", s.verified(s.messages))
 	m.HandleFunc("POST /api/conversations/{id}/messages", s.limit("chat", 30, s.verified(s.postMessage)))
+	m.HandleFunc("GET /api/conversations/{id}/design", s.verified(s.getDesign))
+	m.HandleFunc("POST /api/conversations/{id}/design/plan", s.limit("design-plan", 6, s.verified(s.designPlan)))
+	m.HandleFunc("POST /api/conversations/{id}/design/build", s.limit("studio-build", studioBuildsPerMinute, s.verified(s.designBuild)))
 
 	// Missions (goals), timeline, approvals
 	m.HandleFunc("GET /api/goals", s.verified(s.goals))

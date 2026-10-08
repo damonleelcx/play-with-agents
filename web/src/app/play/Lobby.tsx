@@ -22,6 +22,7 @@ export default function Lobby() {
   const [games, setGames] = useState<GamesList | null>(null)
   const [openTables, setOpenTables] = useState<TableSummary[]>([])
   const [myTables, setMyTables] = useState<TableSummary[]>([])
+  const [refresh, setRefresh] = useState(0)
   const [err, setErr] = useState(false)
   const [dialog, setDialog] = useState<string | null>(null)
   const [code, setCode] = useState('')
@@ -41,8 +42,7 @@ export default function Lobby() {
       return
     }
     playApi.games().then(setGames).catch(() => setErr(true))
-    playApi.tables('open').then((t) => setOpenTables(t || [])).catch(() => {})
-    playApi.tables('mine').then((t) => setMyTables(t || [])).catch(() => {})
+    setRefresh((n) => n + 1) // the table lists fetch their own pages
   }, [mock])
   useEffect(load, [load])
   useEffect(() => {
@@ -145,8 +145,8 @@ export default function Lobby() {
 
       {/* tables */}
       <div className="pw-two">
-        <TableList title={s.lobby.myTables} items={myTables} action={s.lobby.open} onOpen={(t) => nav(`/app/table/${t.id}`)} />
-        <TableList title={s.lobby.openTables} items={openTables} action={s.lobby.join} onOpen={(t) => nav(`/app/join/${t.code}`)} />
+        <TableList title={s.lobby.myTables} scope="mine" mock={mock ? myTables : null} refresh={refresh} action={s.lobby.open} onOpen={(t) => nav(`/app/table/${t.id}`)} />
+        <TableList title={s.lobby.openTables} scope="open" mock={mock ? openTables : null} refresh={refresh} action={s.lobby.join} onOpen={(t) => nav(`/app/join/${t.code}`)} />
       </div>
 
       {otherBuiltins.length > 0 && <GameGrid title={s.lobby.classics} games={otherBuiltins} empty="" onPlay={setDialog} />}
@@ -158,12 +158,49 @@ export default function Lobby() {
   )
 }
 
-function TableList({ title, items, action, onOpen }: { title: string; items: TableSummary[]; action: string; onOpen: (t: TableSummary) => void }) {
-  const { s } = usePlayT()
+const TABLES_PER_PAGE = 5
+
+// A player's tables, a page at a time. Paging is by offset on the server's
+// newest-first order; a refresh keeps the page unless it fell off the end.
+function TableList({ title, scope, mock, refresh, action, onOpen }: {
+  title: string; scope: 'mine' | 'open'; mock: TableSummary[] | null; refresh: number; action: string; onOpen: (t: TableSummary) => void
+}) {
+  const { s, f } = usePlayT()
+  const [page, setPage] = useState(0)
+  const [items, setItems] = useState<TableSummary[] | null>(null)
+  const [total, setTotal] = useState(0)
+  useEffect(() => {
+    if (mock) {
+      setItems(mock.slice(page * TABLES_PER_PAGE, (page + 1) * TABLES_PER_PAGE))
+      setTotal(mock.length)
+      return
+    }
+    let live = true
+    playApi
+      .tablesPage(scope, page * TABLES_PER_PAGE, TABLES_PER_PAGE)
+      .then((pg) => {
+        if (!live) return
+        if (pg.tables.length === 0 && page > 0 && pg.total > 0) setPage(Math.ceil(pg.total / TABLES_PER_PAGE) - 1)
+        setItems(pg.tables)
+        setTotal(pg.total)
+      })
+      .catch(() => live && setItems((x) => x ?? []))
+    return () => {
+      live = false
+    }
+  }, [scope, page, refresh, mock])
+  const pages = Math.max(1, Math.ceil(total / TABLES_PER_PAGE))
+  const from = page * TABLES_PER_PAGE + 1
+  const to = Math.min(total, (page + 1) * TABLES_PER_PAGE)
   return (
     <section className="pw-section">
-      <h3 className="pw-h3">{title}</h3>
-      {items.length === 0 ? (
+      <h3 className="pw-h3">
+        {title}
+        {total > 0 && <small className="pw-h3-count">{total}</small>}
+      </h3>
+      {items === null ? (
+        <div className="pw-empty">…</div>
+      ) : items.length === 0 ? (
         <div className="pw-empty">{s.lobby.noTables}</div>
       ) : (
         <ul className="pw-tables">
@@ -187,6 +224,17 @@ function TableList({ title, items, action, onOpen }: { title: string; items: Tab
             </li>
           ))}
         </ul>
+      )}
+      {pages > 1 && (
+        <nav className="pw-pager" aria-label={title}>
+          <button type="button" className="pw-btn pw-btn-soft pw-btn-sm" disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}>
+            ‹ {s.pager.prev}
+          </button>
+          <span className="pw-pager-info" aria-live="polite">{f(s.pager.range, { from, to, total })}</span>
+          <button type="button" className="pw-btn pw-btn-soft pw-btn-sm" disabled={page >= pages - 1} onClick={() => setPage((p) => Math.min(pages - 1, p + 1))}>
+            {s.pager.next} ›
+          </button>
+        </nav>
       )}
     </section>
   )

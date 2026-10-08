@@ -35,6 +35,16 @@ export default function Studio() {
   }, [])
   useEffect(() => { load() }, [load, tick])
 
+  // A design session: explore the game with Aoi first, build it later.
+  const startDesign = async () => {
+    try {
+      const c = await api.post<{ id: string }>('/api/conversations', { mode: 'design' })
+      nav(`/app/c/${c.id}`)
+    } catch (e: any) {
+      toast(e?.message === 'offline' ? t.common.offline : e?.message || 'error', 'error')
+    }
+  }
+
   const setVis = async (g: Game, visibility: Game['visibility']) => {
     setGames((xs) => xs && xs.map((x) => (x.id === g.id ? { ...x, visibility } : x)))
     try {
@@ -53,7 +63,11 @@ export default function Studio() {
           <span className="app-eyebrow"><IconWand size={14} /> {t.studio.title}</span>
           <h1>{t.studio.heroA}<em>{t.studio.heroEm}</em></h1>
           <p>{t.studio.sub}</p>
-          <button className="btn btn-primary" onClick={() => setDialog(true)}><IconPlus size={18} /> {t.studio.newGame}</button>
+          <div className="sh-cta">
+            <button className="btn btn-primary" onClick={() => setDialog(true)}><IconPlus size={18} /> {t.studio.newGame}</button>
+            <button className="btn btn-soft" onClick={startDesign} title={t.design.startSub}><IconWand size={17} /> {t.design.start}</button>
+          </div>
+          <p className="sh-design-sub">{t.design.startSub}</p>
         </div>
         <div className="sh-team" aria-hidden="true">
           {(['designer', 'engineer', 'playtester', 'critic'] as const).map((r, i) => (

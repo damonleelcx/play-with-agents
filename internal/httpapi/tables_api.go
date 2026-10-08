@@ -33,6 +33,9 @@ func (s *Server) tableRoutes(m *http.ServeMux) {
 	m.HandleFunc("GET /api/games/{id}/cover", s.authed(s.gameCover))
 	m.HandleFunc("PATCH /api/games/{id}", s.verified(s.patchGame))
 	m.HandleFunc("DELETE /api/games/{id}", s.verified(s.deleteGame))
+	m.HandleFunc("GET /api/games/{id}/comments", s.authed(s.gameComments))
+	m.HandleFunc("POST /api/games/{id}/comments", s.limit("game-comment", 20, s.verified(s.postGameComment)))
+	m.HandleFunc("DELETE /api/games/{id}/comments/{cid}", s.verified(s.deleteGameComment))
 
 	m.HandleFunc("POST /api/tables", s.limit("table-create", 20, s.verified(s.createTable)))
 	m.HandleFunc("GET /api/tables", s.authed(s.listTables))
@@ -177,7 +180,21 @@ func (s *Server) createTable(w http.ResponseWriter, r *http.Request, u *auth.Use
 }
 
 func (s *Server) listTables(w http.ResponseWriter, r *http.Request, u *auth.User) {
-	out, err := s.Rooms.List(r.Context(), u.ID, r.URL.Query().Get("scope"))
+	// ?limit= (with ?offset=) asks for a page: {tables, total, offset, limit}.
+	// Without it, the newest 50 as a plain list.
+	q := r.URL.Query()
+	if q.Has("limit") {
+		limit, _ := strconv.Atoi(q.Get("limit"))
+		offset, _ := strconv.Atoi(q.Get("offset"))
+		pg, err := s.Rooms.ListPage(r.Context(), u.ID, q.Get("scope"), offset, limit)
+		if err != nil {
+			roomsErr(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, pg)
+		return
+	}
+	out, err := s.Rooms.List(r.Context(), u.ID, q.Get("scope"))
 	if err != nil {
 		roomsErr(w, err)
 		return
@@ -493,4 +510,45 @@ func (s *Server) tableStream(w http.ResponseWriter, r *http.Request, u *auth.Use
 			fl.Flush()
 		}
 	}
+}
+
+// ── comments under a game ────────────────────────────────────────────────────
+
+func (s *Server) gameComments(w http.ResponseWriter, r *http.Request, u *auth.User) {
+	before, _ := strconv.ParseInt(r.URL.Query().Get("before"), 10, 64)
+	out, err := s.Rooms.Comments(r.Context(), u.ID, r.PathValue("id"), before)
+	if err != nil {
+		roomsErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (s *Server) postGameComment(w http.ResponseWriter, r *http.Request, u *auth.User) {
+	var in struct {
+		Body string `json:"body"`
+	}
+	if err := readJSON(r, &in); err != nil {
+		writeErr(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	c, err := s.Rooms.AddComment(r.Context(), u.ID, r.PathValue("id"), in.Body)
+	if err != nil {
+		roomsErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusCreated, c)
+}
+
+func (s *Server) deleteGameComment(w http.ResponseWriter, r *http.Request, u *auth.User) {
+	id, err := strconv.ParseInt(r.PathValue("cid"), 10, 64)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, "not found")
+		return
+	}
+	if err := s.Rooms.DeleteComment(r.Context(), u.ID, r.PathValue("id"), id); err != nil {
+		roomsErr(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }

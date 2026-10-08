@@ -97,6 +97,13 @@ func (a *Agent) Turn(ctx context.Context, u User, convID, text, clientMsgID stri
 			out = outcome{mood: persona.Neutral, note: "The player said no to: " + pend.Label + ". Nothing was done. Acknowledge in one short line."}
 		}
 	}
+	design := a.conversationMode(ctx, convID) == "design"
+	if design && t.r.Intent == "" {
+		// A design session: Aoi designs with the player; nothing is routed
+		// to tables or builds (the page's buttons make the plan and build).
+		t.r = Route{Intent: IntentDesign, Confidence: 1}
+		out = a.designOutcome(ctx, t)
+	}
 	if t.r.Intent == "" {
 		t.r = a.route(ctx, u, convID, text, lang, t.games, t.open, t.tables)
 		out = a.act(ctx, t)
@@ -126,7 +133,11 @@ func (a *Agent) Turn(ctx context.Context, u User, convID, text, clientMsgID stri
 
 	sys := persona.ChatSystem(lang, p, u.Name, time.Now(), a.chatContext(ctx, u, p, t.open, out.note))
 	msgs := []llm.Message{{Role: "system", Content: sys}}
-	msgs = append(msgs, a.history(ctx, convID, userMsgID, 14)...)
+	depth := 14
+	if design {
+		depth = 30 // a design builds on everything said so far
+	}
+	msgs = append(msgs, a.history(ctx, convID, userMsgID, depth)...)
 	msgs = append(msgs, llm.Message{Role: "user", Content: text})
 	var reply strings.Builder
 	_, err = a.Model.Stream(ctx, engine.CallMeta{Purpose: "chat", UserID: u.ID}, llm.Request{Model: a.LLM, Messages: msgs, Temperature: 0.7},
@@ -163,6 +174,17 @@ func (a *Agent) Turn(ctx context.Context, u User, convID, text, clientMsgID stri
 	if err := a.Store.Pool.QueryRow(context.WithoutCancel(ctx), `INSERT INTO messages (conversation_id, role, content, meta) VALUES ($1,'assistant',$2,$3) RETURNING id`,
 		convID, reply.String(), metaRaw).Scan(&replyID); err != nil {
 		return 0, err
+	}
+	if design && !hasKey(meta, "error") {
+		// The notes catch up with the exchange before the turn ends, so the
+		// page's design panel updates with the reply.
+		dctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 45*time.Second)
+		if d, err := a.updateDesign(dctx, u, convID, text, reply.String()); err == nil {
+			sink.Meta(map[string]any{"design": d})
+		} else {
+			slog.Warn("design doc", "conv", convID, "err", err)
+		}
+		cancel()
 	}
 	go a.afterTurn(context.WithoutCancel(ctx), u, p, convID, text, t.r)
 	return replyID, nil
@@ -410,3 +432,5 @@ func truncate(s string, n int) string {
 	}
 	return string(r[:n]) + "…"
 }
+
+func hasKey(m map[string]any, k string) bool { _, ok := m[k]; return ok }

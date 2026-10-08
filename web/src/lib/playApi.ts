@@ -212,6 +212,10 @@ export type BoardData = {
   prompt?: string
 }
 
+export type TablePage = { tables: TableSummary[]; total: number; offset: number; limit: number }
+export type GameComment = { id: number; name: string; body: string; created_at: string; deleted?: boolean; mine?: boolean; can_delete?: boolean; by_owner?: boolean }
+export type CommentPage = { comments: GameComment[]; total: number; more: boolean }
+
 // ── calls ─────────────────────────────────────────────────────────────────
 
 export type NewSeat = { kind: 'me' | 'agent' | 'open'; agent_id?: string }
@@ -228,6 +232,11 @@ export const playApi = {
   game: (id: string) => api.get<GameDetail>(`/api/games/${encodeURIComponent(id)}`),
   agents: () => api.get<Agent[]>('/api/agents'),
   tables: (scope: 'mine' | 'open') => api.get<TableSummary[]>(`/api/tables?scope=${scope}`),
+  tablesPage: (scope: 'mine' | 'open', offset: number, limit: number) =>
+    api.get<TablePage>(`/api/tables?scope=${scope}&offset=${offset}&limit=${limit}`),
+  comments: (id: string, before?: number) => api.get<CommentPage>(`/api/games/${encodeURIComponent(id)}/comments${before ? `?before=${before}` : ''}`),
+  addComment: (id: string, body: string) => api.post<GameComment>(`/api/games/${encodeURIComponent(id)}/comments`, { body }),
+  deleteComment: (id: string, cid: number) => api.del<{ ok: boolean }>(`/api/games/${encodeURIComponent(id)}/comments/${cid}`),
   table: (id: string) => api.get<TableView>(`/api/tables/${encodeURIComponent(id)}`),
   createTable: (body: NewTable) => api.post<TableView>('/api/tables', body),
   join: (code: string) => api.post<TableView>('/api/tables/join', { code }),

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Navigate, NavLink, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom'
 import { AoiFace } from '../components/Aoi'
 import {
-  IconArchive, IconCards, IconChat, IconChevronL, IconChevronR, IconDots, IconEdit, IconLogout, IconMenu, IconMoon, IconPlus,
+  IconArchive, IconCards, IconChat, IconWand, IconChevronL, IconChevronR, IconDots, IconEdit, IconLogout, IconMenu, IconMoon, IconPlus,
   IconRefresh, IconSettings, IconStudio, IconSun, IconTrash, IconX, LogoMark,
 } from '../components/Icons'
 import LangSwitch from '../components/LangSwitch'
@@ -223,8 +223,9 @@ function ConvItem({ c, onChanged }: { c: Conversation; onChanged: () => void }) 
   return (
     <div className={`conv ${active ? 'active' : ''} ${menu ? 'menu-open' : ''}`} ref={ref}>
       <NavLink to={`/app/c/${c.id}`} className="conv-link" title={label}>
-        <IconChat size={15} />
+        {c.mode === 'design' ? <IconWand size={15} /> : <IconChat size={15} />}
         <span>{label}</span>
+        {c.mode === 'design' && <em className="conv-badge">{t.design.badge}</em>}
       </NavLink>
       <button className="conv-more" onClick={() => setMenu((m) => !m)} aria-label={t.app.more} aria-expanded={menu}><IconDots size={16} /></button>
       {menu && (

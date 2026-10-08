@@ -516,29 +516,54 @@ func (s *Service) Rematch(ctx context.Context, userID, tableID string) (*TableVi
 // lobby or playing, "mine" (default) includes finished ones. Invite codes
 // are private, so there is deliberately no public directory of tables.
 func (s *Service) List(ctx context.Context, userID, scope string) ([]TableSummary, error) {
+	pg, err := s.ListPage(ctx, userID, scope, 0, 50)
+	if err != nil {
+		return nil, err
+	}
+	return pg.Tables, nil
+}
+
+// TablePage is one page of a player's tables, newest activity first.
+type TablePage struct {
+	Tables []TableSummary `json:"tables"`
+	Total  int            `json:"total"`
+	Offset int            `json:"offset"`
+	Limit  int            `json:"limit"`
+}
+
+// ListPage is the player's tables in scope ("open": in the lobby or being
+// played; anything else: those plus finished ones), limit at a time from
+// offset.
+func (s *Service) ListPage(ctx context.Context, userID, scope string, offset, limit int) (*TablePage, error) {
 	statuses := []string{"lobby", "playing", "finished"}
 	if scope == "open" {
 		statuses = []string{"lobby", "playing"}
 	}
+	limit = max(1, min(limit, 50))
+	offset = max(0, offset)
+	const where = `FROM tables t JOIN games g ON g.id=t.game_id
+		WHERE t.status = ANY($2) AND (t.host_id=$1
+			OR EXISTS (SELECT 1 FROM table_seats x WHERE x.table_id=t.id AND x.user_id=$1)
+			OR EXISTS (SELECT 1 FROM table_spectators x WHERE x.table_id=t.id AND x.user_id=$1))`
+	out := &TablePage{Tables: []TableSummary{}, Offset: offset, Limit: limit}
+	if err := s.Pool.QueryRow(ctx, `SELECT count(*) `+where, userID, statuses).Scan(&out.Total); err != nil {
+		return nil, err
+	}
 	rows, err := s.Pool.Query(ctx, `SELECT t.id, t.name, t.code, g.name, t.status,
 			(SELECT count(*) FROM table_seats x WHERE x.table_id=t.id AND x.kind <> 'open'),
 			(SELECT count(*) FROM table_seats x WHERE x.table_id=t.id), t.updated_at
-		FROM tables t JOIN games g ON g.id=t.game_id
-		WHERE t.status = ANY($2) AND (t.host_id=$1
-			OR EXISTS (SELECT 1 FROM table_seats x WHERE x.table_id=t.id AND x.user_id=$1)
-			OR EXISTS (SELECT 1 FROM table_spectators x WHERE x.table_id=t.id AND x.user_id=$1))
-		ORDER BY t.updated_at DESC LIMIT 50`, userID, statuses)
+		`+where+`
+		ORDER BY t.updated_at DESC, t.id LIMIT $3 OFFSET $4`, userID, statuses, limit, offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	out := []TableSummary{}
 	for rows.Next() {
 		var ts TableSummary
 		if err := rows.Scan(&ts.ID, &ts.Name, &ts.Code, &ts.GameName, &ts.Status, &ts.SeatsTaken, &ts.SeatsTotal, &ts.UpdatedAt); err != nil {
 			return nil, err
 		}
-		out = append(out, ts)
+		out.Tables = append(out.Tables, ts)
 	}
 	return out, rows.Err()
 }

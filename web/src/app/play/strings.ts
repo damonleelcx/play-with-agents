@@ -71,6 +71,13 @@ const en = {
     failed: 'That code did not work.',
     back: 'Back to games',
   },
+  comments: {
+    title: 'Comments', count: '{n} comments', one: '1 comment', none: 'No comments yet. Be the first to say what you think.',
+    placeholder: 'Share a strategy, a favourite moment or an idea…', post: 'Post', posting: 'Posting…', remove: 'Remove', removed: 'Comment removed',
+    maker: 'Maker', you: 'You', more: 'Show older comments', failed: 'Could not post: {e}', tooFast: 'Slow down a little — try again in a minute.',
+    draftNote: 'Comments open once the game is published.', confirmRemove: 'Remove this comment?',
+  },
+  pager: { prev: 'Previous', next: 'Next', page: 'Page {n} of {total}', range: '{from}–{to} of {total}' },
   detail: {
     rules: 'Rules',
     versions: 'Versions',
@@ -297,6 +304,13 @@ const zh: Dict = {
     failed: '这个邀请码无效。',
     back: '返回游戏厅',
   },
+  comments: {
+    title: '评论', count: '{n} 条评论', one: '1 条评论', none: '还没有评论，来说说你的看法吧。',
+    placeholder: '分享一个策略、一个精彩瞬间或一个点子……', post: '发布', posting: '发布中……', remove: '删除', removed: '评论已删除',
+    maker: '作者', you: '你', more: '查看更早的评论', failed: '发布失败：{e}', tooFast: '慢一点——过一分钟再试。',
+    draftNote: '游戏发布后才能评论。', confirmRemove: '删除这条评论？',
+  },
+  pager: { prev: '上一页', next: '下一页', page: '第 {n} / {total} 页', range: '第 {from}–{to} 个，共 {total} 个' },
   detail: {
     rules: '规则',
     versions: '版本',
@@ -518,6 +532,13 @@ const ko: Dict = {
     failed: '이 코드는 사용할 수 없어요.',
     back: '게임 목록으로',
   },
+  comments: {
+    title: '댓글', count: '댓글 {n}개', one: '댓글 1개', none: '아직 댓글이 없어요. 첫 감상을 남겨 주세요.',
+    placeholder: '전략, 좋았던 순간, 아이디어를 나눠 주세요…', post: '게시', posting: '게시 중…', remove: '삭제', removed: '삭제된 댓글',
+    maker: '제작자', you: '나', more: '이전 댓글 보기', failed: '게시하지 못했어요: {e}', tooFast: '조금 천천히요 — 1분 뒤에 다시 시도해 주세요.',
+    draftNote: '게임이 공개된 뒤에 댓글을 달 수 있어요.', confirmRemove: '이 댓글을 삭제할까요?',
+  },
+  pager: { prev: '이전', next: '다음', page: '{total}페이지 중 {n}페이지', range: '{total}개 중 {from}–{to}' },
   detail: {
     rules: '규칙',
     versions: '버전',
@@ -740,6 +761,13 @@ const ja: Dict = {
     failed: 'このコードは使えませんでした。',
     back: 'ゲーム一覧へ戻る',
   },
+  comments: {
+    title: 'コメント', count: 'コメント {n} 件', one: 'コメント 1 件', none: 'まだコメントはありません。最初の感想をどうぞ。',
+    placeholder: '作戦やお気に入りの瞬間、アイデアを共有しよう…', post: '投稿', posting: '投稿中…', remove: '削除', removed: '削除されたコメント',
+    maker: '作者', you: 'あなた', more: '以前のコメントを表示', failed: '投稿できませんでした：{e}', tooFast: '少しゆっくり。1分後にもう一度どうぞ。',
+    draftNote: 'ゲームが公開されるとコメントできます。', confirmRemove: 'このコメントを削除しますか？',
+  },
+  pager: { prev: '前へ', next: '次へ', page: '{n} / {total} ページ', range: '{total} 件中 {from}–{to}' },
   detail: {
     rules: 'ルール',
     versions: 'バージョン',
