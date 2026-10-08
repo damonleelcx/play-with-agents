@@ -172,6 +172,20 @@ type TableView struct {
 	PausedReason string `json:"paused_reason,omitempty"`
 	// Presence: who has the table open now. An additive field.
 	Presence *Presence `json:"presence,omitempty"`
+	// Moves: the latest moves played, oldest first, with the UI hint each
+	// was offered under, so the board animates what actually happened.
+	// Another seat's hint in a hidden-information game is shown only once
+	// its result is on the viewer's board. An additive field.
+	Moves []PlayedMove `json:"moves,omitempty"`
+}
+
+// PlayedMove is one applied move as the board animates it. Version is the
+// table version it was applied to (the result is Version+1).
+type PlayedMove struct {
+	Seq     int            `json:"seq"`
+	Seat    int            `json:"seat"`
+	Version int64          `json:"version"`
+	UI      map[string]any `json:"ui"`
 }
 
 type TableSummary struct {

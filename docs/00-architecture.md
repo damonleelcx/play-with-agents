@@ -372,12 +372,22 @@ TableView = {
   "log":  [ { "seq", "type", "seat", "text", "at" } ],      // last 60 visible to me
   "chat": [ ChatLine ],                                       // last 60 the viewer may see
   "presence": { "seats": [int], "watchers": [name] },
+  "moves": [ { "seq", "seat", "version", "ui" } ],         // last 8 hinted moves, oldest first
   "outcome": Outcome | null
 }
 ChatLine = { "id", "seat", "name", "avatar", "text", "at", "agent": true,
              "reply_to"?, "whisper"?, "to"?, "to_seat"?,
              "reactions"?: [{ "emoji", "count", "names", "mine" }] }
 ```
+
+**Animations follow the moves.** Each applied move stores the UI hint it was
+offered under (`table_moves.ui`). The board replays every move since the
+version it last showed, in order: a piece travels from its real origin to
+where it landed (on a map along the links, hop by hop), a placed piece drops
+in, and only what the moves do not explain (captures, effects) falls back to
+a before/after diff. In a hidden-information game another seat's hint is
+sent only once its result is on the viewer's board, and only its board
+places (`from`, `to`, `cell`).
 
 **Away and paused.** After 2 consecutive clock run-outs a person's seat is
 `away`: their turns resolve with the default move after a ~1.5s grace (the

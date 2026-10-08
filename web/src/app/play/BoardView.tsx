@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { isMapBoard, resolveColor, type BoardCard, type BoardCell, type BoardData, type BoardPiece, type Move, type MoveSpec, type TableView } from '../../lib/playApi'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
+import { isMapBoard, resolveColor, type MapBoard as MapData, type BoardCard, type BoardCell, type BoardData, type BoardPiece, type Move, type MoveSpec, type TableView } from '../../lib/playApi'
 import { SayBubble, type Bubbles } from './Bubbles'
 import MapBoard, { stackSlot } from './MapBoard'
 import { Avatar, TimerRing, VoiceWave, ZoneCard } from './parts'
@@ -18,7 +18,7 @@ const piecesOf = (cell: BoardCell): BoardPiece[] => (cell ? cell.pieces || (cell
 const MAX_BUTTONS = 12
 
 type Peek = { card: BoardCard; rect: DOMRect; k: string }
-type Anim = { kind: 'drop' | 'slide' | 'pop' | 'glide'; dx?: number; dy?: number }
+type Anim = { kind: 'path' | 'drop' | 'pop'; path?: string[]; delay?: number; dur?: number; dy?: number }
 
 export default function BoardView({
   table,
@@ -146,19 +146,28 @@ export default function BoardView({
   const cardDest = (selCard && cardCells.get(selCard)) || null
   const preview = (!selCard && hoverCard && cardCells.get(hoverCard)) || null
 
-  // ── piece animations: diff against the previous board ──
-  // A piece that left one place and arrived at another slides (a grid) or
-  // glides (a map) between them; anything new drops in or pops up.
-  const prevPlaces = useRef<typeof places | null>(null)
+  // ── piece animations: replay the moves that were actually played ──
+  // The table view carries the latest moves with the UI hint each was
+  // played under. Every move since the board we last showed is replayed in
+  // order: a piece travels from where it really was to where it landed (on a
+  // map, hop by hop along the paths), a placed piece drops in, one move after
+  // another. What the moves do not explain (a capture, a bump back home, a
+  // card's effect) falls back to a before/after diff, after the moves.
+  const prevPlaces = useRef<{ version: number; places: typeof places } | null>(null)
   const { anims, fresh } = useMemo(() => {
     const out = new Map<string, Map<number, Anim>>()
-    const fresh = new Set<string>()
+    const fresh = new Map<string, number>() // place → delay (ms) of a newly played card
     const prev = prevPlaces.current
-    if (!prev || reduced) return { anims: out, fresh }
-    const vacated: { k: string; sig: string }[] = []
-    const arrived: { k: string; i: number; sig: string }[] = []
+    if (!prev || reduced || prev.version >= table.version) return { anims: out, fresh }
+    const set = (k: string, i: number, a: Anim) => {
+      if (!out.has(k)) out.set(k, new Map())
+      out.get(k)!.set(i, a)
+    }
+    // What changed between the two boards: pieces that arrived, pieces that left.
+    const arrived: { k: string; i: number; sig: string; used?: boolean }[] = []
+    const vacated: { k: string; sig: string; used?: boolean }[] = []
     for (const [k, now] of places) {
-      const was = prev.get(k)
+      const was = prev.places.get(k)
       const before = piecesOf(was?.cell ?? null).map(sig)
       const after = piecesOf(now.cell).map(sig)
       const left = [...before]
@@ -168,26 +177,69 @@ export default function BoardView({
         else arrived.push({ k, i, sig: p })
       })
       for (const p of left) vacated.push({ k, sig: p })
-      if (now.cell?.card && cardSig(now.cell.card) !== cardSig(was?.cell?.card)) fresh.add(k)
     }
+    const takeArrival = (k: string) => arrived.find((a) => !a.used && a.k === k)
+    const takeVacated = (k: string, s?: string) => vacated.find((v) => !v.used && v.k === k && (!s || v.sig === s))
+
+    // The moves played since, in order; a piece moved twice travels both legs.
+    const played = (table.moves || []).filter((m) => m.version >= prev.version && m.version < table.version).sort((a, b) => a.seq - b.seq)
+    type Leg = { path: string[]; dest: string }
+    const legs: Leg[] = []
+    let delay = 0
+    for (const m of played) {
+      const ui = m.ui || {}
+      const from = ui.from !== undefined ? placeOf(ui.from) : null
+      const to = ui.to !== undefined ? placeOf(ui.to) : null
+      const at = placeOf(ui.cell ?? ui.space)
+      if (from && to) {
+        const route = map ? routeOf(map, from, to) : [from, to]
+        const prior = legs.find((l) => l.dest === from)
+        if (prior) {
+          prior.path.push(...route.slice(1))
+          prior.dest = to
+        } else legs.push({ path: route, dest: to })
+      } else if (at) {
+        const a = takeArrival(at)
+        if (a) {
+          a.used = true
+          set(at, a.i, { kind: grid?.style === 'grid' ? 'drop' : 'pop', delay, dy: (places.get(at)?.r ?? 0) + 1 })
+          delay += 380
+        }
+        if (places.get(at)?.cell?.card && cardSig(places.get(at)!.cell!.card) !== cardSig(prev.places.get(at)?.cell?.card)) {
+          fresh.set(at, delay)
+          delay += 260
+        }
+      }
+    }
+    for (const leg of legs) {
+      const a = takeArrival(leg.dest)
+      if (!a) continue // the piece did not stay (captured, sent home): the diff shows that
+      a.used = true
+      const v = takeVacated(leg.path[0], a.sig) || takeVacated(leg.path[0])
+      if (v) v.used = true
+      const hops = leg.path.length - 1
+      const dur = Math.max(360, Math.min(1600, 240 * hops))
+      set(leg.dest, a.i, { kind: 'path', path: leg.path.slice(0, -1), delay, dur })
+      delay += dur + 120
+    }
+    // Whatever the moves did not explain: pair what left with what arrived.
     for (const a of arrived) {
-      let j = vacated.findIndex((v) => v.sig === a.sig)
-      if (j < 0) j = vacated.findIndex((v) => v.sig.split('|')[1] === a.sig.split('|')[1])
-      let anim: Anim
-      if (j >= 0) {
-        const from = places.get(vacated.splice(j, 1)[0].k)!
-        const to = places.get(a.k)!
-        if (map) anim = { kind: 'glide', dx: (((from.x ?? 0) - (to.x ?? 0)) / 100) * mapSize.w, dy: (((from.y ?? 0) - (to.y ?? 0)) / 100) * mapSize.h }
-        else anim = { kind: 'slide', dx: (from.c ?? 0) - (to.c ?? 0), dy: (from.r ?? 0) - (to.r ?? 0) }
-      } else anim = { kind: grid?.style === 'grid' ? 'drop' : 'pop', dy: (places.get(a.k)?.r ?? 0) + 1 }
-      if (!out.has(a.k)) out.set(a.k, new Map())
-      out.get(a.k)!.set(a.i, anim)
+      if (a.used) continue
+      let v = vacated.find((x) => !x.used && x.sig === a.sig)
+      if (!v) v = vacated.find((x) => !x.used && x.sig.split('|')[1] === a.sig.split('|')[1])
+      if (v) {
+        v.used = true
+        set(a.k, a.i, { kind: 'path', path: [v.k], delay, dur: 480 })
+      } else set(a.k, a.i, { kind: grid?.style === 'grid' ? 'drop' : 'pop', delay, dy: (places.get(a.k)?.r ?? 0) + 1 })
+    }
+    for (const [k, now] of places) {
+      if (!fresh.has(k) && now.cell?.card && cardSig(now.cell.card) !== cardSig(prev.places.get(k)?.cell?.card)) fresh.set(k, delay)
     }
     return { anims: out, fresh }
-  }, [places, reduced]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [places, reduced, table.version]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (prevPlaces.current && (anims.size || fresh.size)) blip('chips', prefs.sound)
-    prevPlaces.current = places
+    if (prevPlaces.current && prevPlaces.current.version < table.version && (anims.size || fresh.size)) blip('chips', prefs.sound)
+    prevPlaces.current = { version: table.version, places }
   }, [table.version]) // eslint-disable-line react-hooks/exhaustive-deps
   const wasTurn = useRef(false)
   useEffect(() => {
@@ -323,7 +375,7 @@ export default function BoardView({
         {cell?.mark && <span className="pw-cell-mark" />}
         {cell?.text && <span className="pw-cell-text">{cell.text}</span>}
         {pieces.map((p, i) => (
-          <Piece key={`${k}|${i}|${sig(p)}`} piece={p} anim={placeAnims?.get(i)} slot={stackSlot(i, pieces.length)} />
+          <Piece key={`${k}|${i}|${sig(p)}${placeAnims?.get(i) ? `|v${table.version}` : ''}`} piece={p} anim={placeAnims?.get(i)} slot={stackSlot(i, pieces.length)} />
         ))}
         {cell?.card && <MiniCard key={`${k}|${cardSig(cell.card)}`} card={cell.card} seatColor={cell.card.seat !== undefined ? seatColor(cell.card.seat) : undefined} fresh={fresh.has(k)} />}
         {!selCard && cellMoves.has(k) && myTurn && !pieces.length && <span className="pw-cell-hint" style={{ '--pc': seatColor(table.my_seat) } as CSSProperties} />}
@@ -545,14 +597,43 @@ function Piece({ piece, anim, slot }: { piece: BoardPiece; anim?: Anim; slot?: C
   const shape = piece.shape || 'disc'
   const col = resolveColor(piece.color, '#e6e6e6')
   const fig = FIGURES[shape]
-  const style = {
-    ...slot,
-    '--pc': col,
-    '--dx': anim?.kind === 'glide' ? `${anim.dx ?? 0}px` : (anim?.dx ?? 0),
-    '--dy': anim?.kind === 'glide' ? `${anim.dy ?? 0}px` : (anim?.dy ?? 0),
-  } as CSSProperties
+  const ref = useRef<HTMLSpanElement>(null)
+  // A move replays once, when the piece lands: from each place it passed
+  // through (measured on the board as it is now) to where it stands.
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el || !anim || typeof el.animate !== 'function') return
+    if (anim.kind === 'path' && anim.path?.length) {
+      const board = el.closest('.pw-map, .pw-bg-board')
+      const home = el.closest('[data-k]')
+      if (!board || !home) return
+      const hr = home.getBoundingClientRect()
+      const frames: Keyframe[] = []
+      for (const k of anim.path) {
+        const p = board.querySelector(`[data-k="${CSS.escape(k)}"]`)
+        if (!p) continue
+        const r = p.getBoundingClientRect()
+        const dx = r.left + r.width / 2 - (hr.left + hr.width / 2)
+        const dy = r.top + r.height / 2 - (hr.top + hr.height / 2)
+        frames.push({ transform: `translate(${dx}px, ${dy}px) scale(1.12)` })
+      }
+      if (!frames.length) return
+      frames.push({ transform: 'translate(0, 0) scale(1)' })
+      const a = el.animate(frames, { duration: anim.dur || 480, delay: anim.delay || 0, easing: 'cubic-bezier(.45,.05,.25,1)', fill: 'backwards' })
+      el.style.zIndex = '6'
+      a.onfinish = () => { el.style.zIndex = '' }
+      return () => a.cancel()
+    }
+    if (anim.kind === 'drop') {
+      const a = el.animate([{ transform: `translateY(${-125 * (anim.dy || 1)}%)` }, { transform: 'none' }], { duration: 520, delay: anim.delay || 0, easing: 'cubic-bezier(.5,0,.75,0)', fill: 'backwards' })
+      return () => a.cancel()
+    }
+    const a = el.animate([{ scale: '.4', opacity: 0 }, { scale: '1', opacity: 1 }], { duration: 340, delay: anim.delay || 0, easing: 'cubic-bezier(.34,1.56,.64,1)', fill: 'backwards' })
+    return () => a.cancel()
+  }, [anim])
+  const style = { ...slot, '--pc': col } as CSSProperties
   return (
-    <span className={`pw-piece shape-${shape} ${fig ? 'is-figure' : ''} ${anim ? `anim-${anim.kind}` : ''}`} style={style}>
+    <span ref={ref} className={`pw-piece shape-${shape} ${fig ? 'is-figure' : ''}`} style={style}>
       {fig && (
         <svg viewBox="0 0 100 100" aria-hidden>
           <path d={fig} />
@@ -561,6 +642,38 @@ function Piece({ piece, anim, slot }: { piece: BoardPiece; anim?: Anim; slot?: C
       {(piece.glyph || piece.label) && <span className="pw-piece-glyph">{piece.glyph || piece.label}</span>}
     </span>
   )
+}
+
+// routeOf is the way a piece most likely travelled on a map: the shortest
+// path along the board's links (their direction first, then either way),
+// or straight across when the places are not joined or the way is long.
+function routeOf(b: MapData, from: string, to: string): string[] {
+  if (from === to) return [from]
+  const out = new Map<string, string[]>()
+  const both = new Map<string, string[]>()
+  for (const l of b.links || []) {
+    if (!out.has(l.from)) out.set(l.from, [])
+    out.get(l.from)!.push(l.to)
+    for (const [x, y] of [[l.from, l.to], [l.to, l.from]]) {
+      if (!both.has(x)) both.set(x, [])
+      both.get(x)!.push(y)
+    }
+  }
+  const bfs = (g: Map<string, string[]>) => {
+    const back = new Map<string, string>([[from, '']])
+    const queue = [from]
+    while (queue.length) {
+      const x = queue.shift()!
+      if (x === to) break
+      for (const y of g.get(x) || []) if (!back.has(y)) { back.set(y, x); queue.push(y) }
+    }
+    if (!back.has(to)) return null
+    const path = [to]
+    while (path[0] !== from) path.unshift(back.get(path[0])!)
+    return path
+  }
+  const path = bfs(out) || bfs(both)
+  return path && path.length <= 14 ? path : [from, to]
 }
 
 function Zones({

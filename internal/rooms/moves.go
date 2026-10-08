@@ -44,6 +44,28 @@ type moveRec struct {
 	move         games.Move
 }
 
+// moveUI is the UI hint legal() offered for a move about to be applied
+// (nil when the move matches no hinted spec, e.g. a ranged bet).
+func moveUI(g games.Game, st games.State, seat int, m games.Move) map[string]any {
+	if g == nil || st == nil {
+		return nil
+	}
+	specs, err := g.Legal(st, seat)
+	if err != nil {
+		return nil
+	}
+	want, _ := json.Marshal(m.Args)
+	for _, sp := range specs {
+		if sp.Type != m.Type || len(sp.UI) == 0 {
+			continue
+		}
+		if got, _ := json.Marshal(sp.Args); string(got) == string(want) || (len(sp.Args) == 0 && len(m.Args) == 0) {
+			return sp.UI
+		}
+	}
+	return nil
+}
+
 var errDuplicateMove = errors.New("duplicate client_move_id")
 
 // commit applies c. It returns the new version, errStale when another
@@ -173,9 +195,13 @@ func (s *Service) commit(ctx context.Context, t *tableRow, c change) (int64, err
 			if m.clientMoveID != "" {
 				hash = moveHash(m.move)
 			}
-			_, err := tx.Exec(ctx, `INSERT INTO table_moves (table_id, seq, seat, actor, user_id, client_move_id, move, version, move_hash)
-				VALUES ($1, $2, $3, $4, nullif($5,'')::uuid, nullif($6,''), $7, $8, nullif($9,''))`,
-				t.ID, moveSeq, m.seat, m.actor, m.userID, m.clientMoveID, raw, c.expected, hash)
+			var ui []byte
+			if hint := moveUI(c.g, t.State, m.seat, m.move); hint != nil {
+				ui, _ = json.Marshal(hint)
+			}
+			_, err := tx.Exec(ctx, `INSERT INTO table_moves (table_id, seq, seat, actor, user_id, client_move_id, move, version, move_hash, ui)
+				VALUES ($1, $2, $3, $4, nullif($5,'')::uuid, nullif($6,''), $7, $8, nullif($9,''), $10)`,
+				t.ID, moveSeq, m.seat, m.actor, m.userID, m.clientMoveID, raw, c.expected, hash, ui)
 			if isUniqueViolation(err) {
 				return errDuplicateMove
 			}

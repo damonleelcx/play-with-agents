@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 
 	"github.com/jackc/pgx/v5"
@@ -189,6 +191,9 @@ func (s *Service) assemble(ctx context.Context, t *tableRow, userID string) (*Ta
 		if v.View, err = substView(gv, names); err != nil {
 			return nil, err
 		}
+		if v.Moves, err = s.playedMoves(ctx, t.ID, me, g.Meta().HiddenInfo, v.View); err != nil {
+			return nil, err
+		}
 		// Legal moves only for my own seat and only on my turn: never
 		// another seat's options, which could reveal its hidden state.
 		if me != games.Spectator && t.Status == "playing" && contains(t.ToMove, me) {
@@ -304,4 +309,112 @@ func contains(s []int, x int) bool {
 		}
 	}
 	return false
+}
+
+// movesWindow: how many recent moves a view carries for the board to animate
+// (several can land between two renders: agents answer at once).
+const movesWindow = 8
+
+// playedMoves is the latest hinted moves, oldest first. In a hidden-
+// information game another seat's hint is kept only when its result is on
+// the viewer's own board (a piece or face-up card where it says), and only
+// its board places: a secret choice never reaches another player.
+func (s *Service) playedMoves(ctx context.Context, tableID string, me int, hidden bool, view *games.View) ([]PlayedMove, error) {
+	rows, err := s.Pool.Query(ctx, `SELECT seq, seat, version, ui FROM table_moves
+		WHERE table_id=$1 AND ui IS NOT NULL ORDER BY seq DESC LIMIT $2`, tableID, movesWindow)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PlayedMove
+	shown := shownPlaces(view)
+	for rows.Next() {
+		var m PlayedMove
+		var raw []byte
+		if err := rows.Scan(&m.Seq, &m.Seat, &m.Version, &raw); err != nil {
+			return nil, err
+		}
+		if json.Unmarshal(raw, &m.UI) != nil {
+			continue
+		}
+		if hidden && m.Seat != me {
+			ui := map[string]any{}
+			for _, k := range []string{"from", "to", "cell"} {
+				if x, ok := m.UI[k]; ok {
+					ui[k] = x
+				}
+			}
+			dest := ui["to"]
+			if dest == nil {
+				dest = ui["cell"]
+			}
+			if dest == nil || !shown[placeKey(dest)] {
+				continue
+			}
+			m.UI = ui
+		}
+		out = append(out, m)
+	}
+	slices.Reverse(out)
+	return out, rows.Err()
+}
+
+// placeKey names a board place as the renderer does: "r,c" on a grid, the
+// space id on a map.
+func placeKey(x any) string {
+	switch v := x.(type) {
+	case string:
+		return v
+	case []any:
+		if len(v) == 2 {
+			return fmt.Sprintf("%v,%v", v[0], v[1])
+		}
+	}
+	return ""
+}
+
+// shownPlaces is the board places that show a piece or a face-up card in a
+// view.
+func shownPlaces(view *games.View) map[string]bool {
+	out := map[string]bool{}
+	if view == nil {
+		return out
+	}
+	raw, ok := view.Data.(json.RawMessage)
+	if !ok {
+		raw, _ = json.Marshal(view.Data)
+	}
+	type place struct {
+		ID     string `json:"id"`
+		Piece  any    `json:"piece"`
+		Pieces []any  `json:"pieces"`
+		Card   *struct {
+			Hidden bool `json:"hidden"`
+		} `json:"card"`
+	}
+	var d struct {
+		Board struct {
+			Cells  [][]*place `json:"cells"`
+			Spaces []place    `json:"spaces"`
+		} `json:"board"`
+	}
+	if json.Unmarshal(raw, &d) != nil {
+		return out
+	}
+	has := func(p *place) bool {
+		return p != nil && (p.Piece != nil || len(p.Pieces) > 0 || (p.Card != nil && !p.Card.Hidden))
+	}
+	for r, row := range d.Board.Cells {
+		for c, p := range row {
+			if has(p) {
+				out[fmt.Sprintf("%d,%d", r, c)] = true
+			}
+		}
+	}
+	for i := range d.Board.Spaces {
+		if has(&d.Board.Spaces[i]) {
+			out[d.Board.Spaces[i].ID] = true
+		}
+	}
+	return out
 }

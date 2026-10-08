@@ -11,6 +11,7 @@ import type {
   HoldemPlayer,
   LogEntry,
   MapLink,
+  PlayedMove,
   Move,
   MoveSpec,
   Outcome,
@@ -65,6 +66,7 @@ abstract class MockBase implements MockGame {
   seq = 0
   log: LogEntry[] = []
   chatLines: ChatLine[] = []
+  played: PlayedMove[] = [] // moves with their UI hints, as the server reports them
   status: TableStatus = 'playing'
   outcome: Outcome | null = null
   deadline: string | null = null
@@ -86,6 +88,11 @@ abstract class MockBase implements MockGame {
 
   name_(seat: number) {
     return this.seats[seat]?.name || `Seat ${seat + 1}`
+  }
+  // record notes a hinted move about to be applied to the current version.
+  record(seat: number, m: MoveSpec | Move) {
+    const ui = (m as MoveSpec).ui
+    if (ui) this.played = [...this.played, { seq: this.played.length + 1, seat, version: this.version, ui }].slice(-8)
   }
   addLog(seat: number, text: string, type = 'move') {
     this.log.push({ seq: ++this.seq, type, seat, text, at: iso() })
@@ -135,6 +142,7 @@ abstract class MockBase implements MockGame {
   view(): TableView {
     const tm = this.status === 'playing' ? this.toMove() : []
     return {
+      moves: this.played,
       id: 'demo',
       name: this.name,
       code: this.code,
@@ -730,6 +738,7 @@ class CheckersMock extends MockBase {
     return [...ms, { type: 'resign', label: 'Resign' }]
   }
   doMove(m: MoveSpec | Move) {
+    this.record(this.turn, m)
     if (m.type === 'resign') {
       this.status = 'finished'
       this.outcome = { rank: this.turn === 0 ? [2, 1] : [1, 2], score: [0, 0], summary: `${this.name_(this.turn)} resigns.` }
@@ -1197,6 +1206,7 @@ class MapMock extends MockBase {
     return seat === this.turn ? this.movesFor(seat) : []
   }
   doMove(m: MoveSpec | Move) {
+    this.record(this.turn, m)
     if (m.type === 'fly') {
       const { from, to } = m.args!
       const own = this.ships[this.turn]
@@ -1220,9 +1230,14 @@ class MapMock extends MockBase {
   pending() {
     return this.status === 'playing' && this.turn !== this.me ? 1200 : null
   }
+  batch = false // every agent moves before the board updates (several moves per render)
   step() {
-    const ms = this.movesFor(this.turn)
-    this.doMove(ms[Math.floor(Math.random() * ms.length)])
+    do {
+      const ms = this.movesFor(this.turn)
+      this.doMove(ms[Math.floor(Math.random() * ms.length)])
+      this.version++
+    } while (this.batch && this.turn !== this.me)
+    this.version--
     this.touch()
   }
   data(): BoardData {
@@ -1379,6 +1394,11 @@ export function createMock(kind: string | null): MockGame | null {
       return new CheckersMock()
     case 'map':
       return new MapMock()
+    case 'map-batch': {
+      const m = new MapMock()
+      m.batch = true
+      return m
+    }
     case 'hex':
       return new HexMock()
     case 'view':
