@@ -302,12 +302,17 @@ func TestTableStreamClosesWhenAccessIsLost(t *testing.T) {
 		close(events)
 	}()
 	next := func() (string, bool) {
-		select {
-		case ev, ok := <-events:
-			return ev, ok
-		case <-time.After(5 * time.Second):
-			t.Fatal("timed out waiting for the stream")
-			return "", false
+		for {
+			select {
+			case ev, ok := <-events:
+				if ev == "presence" {
+					continue // who is here: not what this test is about
+				}
+				return ev, ok
+			case <-time.After(5 * time.Second):
+				t.Fatal("timed out waiting for the stream")
+				return "", false
+			}
 		}
 	}
 	if ev, _ := next(); ev != "table" {

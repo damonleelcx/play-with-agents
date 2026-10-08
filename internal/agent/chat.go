@@ -29,55 +29,28 @@ type User struct {
 	Lang            string // the language the player chose in settings
 }
 
-// Intents the router chooses from.
-const (
-	IntentChat       = "chat"
-	IntentPlay       = "play"
-	IntentBuild      = "build_game"
-	IntentRevise     = "revise_game"
-	IntentRules      = "rules"
-	IntentControl    = "control"
-	IntentPreference = "preference"
-)
-
-var intents = []string{IntentChat, IntentPlay, IntentBuild, IntentRevise, IntentRules, IntentControl, IntentPreference}
-
-// Card is an item the app renders under Aoi's message (meta.cards).
-type Card struct {
-	Kind    string `json:"kind"` // table | mission | game
-	TableID string `json:"table_id,omitempty"`
-	GoalID  string `json:"goal_id,omitempty"`
-	GameID  string `json:"game_id,omitempty"`
-}
-
-// Route is the router's reading of one message.
-type Route struct {
-	Intent     string         `json:"intent"`
-	Confidence float64        `json:"confidence"`
-	Clarify    string         `json:"clarify"`
-	Mood       string         `json:"mood"`
-	Title      string         `json:"title"`
-	GameID     string         `json:"game_id"`
-	AgentIDs   strList        `json:"agent_ids"`
-	Seats      flexInt        `json:"seats"`
-	Options    map[string]any `json:"options"`
-	Prompt     string         `json:"prompt"`
-	BaseGameID string         `json:"base_game_id"`
-	GoalID     string         `json:"goal_id"`
-	Action     string         `json:"action"`
-	Preference struct {
-		Key   string `json:"key"`
-		Value any    `json:"value"`
-	} `json:"preference"`
-}
-
 // outcome is what acting on a route produced, for the reply and its meta.
 type outcome struct {
-	note   string // what happened, for the reply prompt ("FOR THIS REPLY")
-	mood   persona.Mood
-	cards  []Card
-	goalID string
-	lang   string // set when the player just changed their language
+	note    string // what happened, for the reply prompt ("FOR THIS REPLY")
+	mood    persona.Mood
+	cards   []Card
+	goalID  string
+	lang    string   // set when the player just changed their language
+	pending *Pending // a confirmation this reply asks for (see confirm.go)
+	prefs   bool     // the player's settings changed: rebuild the persona
+}
+
+// turn is one message as the handlers see it.
+type turn struct {
+	u      User
+	convID string
+	text   string
+	lang   string
+	r      Route
+	games  []GameInfo
+	open   []*engine.Goal
+	tables []TableInfo // open tables (lobby, playing) the player is part of
+	prefs  map[string]any
 }
 
 // Turn handles one player message end to end. Idempotent on clientMsgID: a
@@ -107,29 +80,51 @@ func (a *Agent) Turn(ctx context.Context, u User, convID, text, clientMsgID stri
 
 	prefs := a.prefs(ctx, u.ID)
 	p := persona.PrefsFrom(prefs)
-	games := a.games(ctx, u.ID)
-	open := a.openMissions(ctx, u.ID)
+	t := &turn{u: u, convID: convID, text: text, lang: lang, games: a.games(ctx, u.ID), open: a.openMissions(ctx, u.ID),
+		tables: a.openTables(ctx, u.ID), prefs: prefs}
 
-	route := a.route(ctx, u, convID, text, lang, games, open)
-	out := a.act(ctx, u, convID, text, lang, route, games, open)
+	// A confirmation asked for in the previous reply is answered first, and
+	// only an explicit yes executes it. Anything else drops it and the
+	// message is routed as usual.
+	var out outcome
+	if pend := a.pendingConfirmation(ctx, convID, userMsgID); pend != nil {
+		switch confirmAnswer(text) {
+		case answerYes:
+			t.r = Route{Intent: IntentConfirm, Action: "yes", Confidence: 1}
+			out = a.confirm(ctx, t, pend)
+		case answerNo:
+			t.r = Route{Intent: IntentConfirm, Action: "no", Confidence: 1}
+			out = outcome{mood: persona.Neutral, note: "The player said no to: " + pend.Label + ". Nothing was done. Acknowledge in one short line."}
+		}
+	}
+	if t.r.Intent == "" {
+		t.r = a.route(ctx, u, convID, text, lang, t.games, t.open, t.tables)
+		out = a.act(ctx, t)
+	}
 	if out.lang != "" {
 		lang = out.lang
 	}
-	if route.Intent == IntentPreference {
+	if out.prefs {
 		// "Call me Captain" should already be honoured in this very reply.
 		p = persona.PrefsFrom(a.prefs(ctx, u.ID))
 	}
 
-	meta := map[string]any{"intent": route.Intent, "confidence": route.Confidence, "mood": out.mood}
+	meta := map[string]any{"intent": t.r.Intent, "confidence": t.r.Confidence, "mood": out.mood}
+	if t.r.Action != "" {
+		meta["action"] = t.r.Action
+	}
 	if len(out.cards) > 0 {
 		meta["cards"] = out.cards
 	}
 	if out.goalID != "" {
 		meta["goal_id"] = out.goalID
 	}
+	if out.pending != nil {
+		meta["pending"] = out.pending
+	}
 	sink.Meta(meta)
 
-	sys := persona.ChatSystem(lang, p, u.Name, time.Now(), a.chatContext(ctx, u, p, open, out.note))
+	sys := persona.ChatSystem(lang, p, u.Name, time.Now(), a.chatContext(ctx, u, p, t.open, out.note))
 	msgs := []llm.Message{{Role: "system", Content: sys}}
 	msgs = append(msgs, a.history(ctx, convID, userMsgID, 14)...)
 	msgs = append(msgs, llm.Message{Role: "user", Content: text})
@@ -154,6 +149,10 @@ func (a *Agent) Turn(ctx context.Context, u User, convID, text, clientMsgID stri
 		if reply.Len() > 0 {
 			fallback = "\n\n" + fallback
 		}
+		if out.pending != nil {
+			// The player cannot have read the question; do not leave it armed.
+			delete(meta, "pending")
+		}
 		sink.Delta(fallback)
 		reply.WriteString(fallback)
 		meta["error"], meta["mood"] = true, persona.Sad
@@ -165,7 +164,7 @@ func (a *Agent) Turn(ctx context.Context, u User, convID, text, clientMsgID stri
 		convID, reply.String(), metaRaw).Scan(&replyID); err != nil {
 		return 0, err
 	}
-	go a.afterTurn(context.WithoutCancel(ctx), u, p, convID, text, route)
+	go a.afterTurn(context.WithoutCancel(ctx), u, p, convID, text, t.r)
 	return replyID, nil
 }
 
@@ -223,348 +222,6 @@ func terminal(status string) bool {
 	return status == "completed" || status == "cancelled" || status == "failed"
 }
 
-// ── Routing ────────────────────────────────────────────────────────────────
-
-func (a *Agent) route(ctx context.Context, u User, convID, text, lang string, games []GameInfo, open []*engine.Goal) Route {
-	var roster strings.Builder
-	for _, r := range Roster {
-		fmt.Fprintf(&roster, "- %s: %s / %s / %s / %s (%s)\n", r.ID, r.Name, r.NameZH, r.NameKO, r.NameJA, r.Style)
-	}
-	var catalog strings.Builder
-	for i, g := range games {
-		if i >= 40 {
-			break
-		}
-		mine := ""
-		if g.Mine {
-			mine = " [theirs]"
-		}
-		fmt.Fprintf(&catalog, "- id=%s %q %d-%d seats%s: %s\n", g.ID, g.Name, g.MinSeats, g.MaxSeats, mine, truncate(g.Summary, 100))
-	}
-	var missions strings.Builder
-	for _, g := range open {
-		fmt.Fprintf(&missions, "- goal_id=%s status=%s title=%q\n", g.ID, g.Status, g.Title)
-	}
-	if missions.Len() == 0 {
-		missions.WriteString("(none)\n")
-	}
-	prompt := fmt.Sprintf(`You route messages for Aoi, the AI host of "Play with Agents": play-money Texas Hold'em and custom board games with friends and AI agents. Players can also describe a new game and the studio agents build it.
-
-Classify the player's LATEST MESSAGE into exactly one intent:
-- play: they want to sit down and play now, start a table, be dealt in ("deal me in", "let's play hold'em with Mika", "开一桌", "홀덤 한 판 하자", "ポーカーやろう"). Fill game_id, agent_ids, seats, options.
-- build_game: they describe a NEW game they want made, or ask for one to be made ("let's make a game where…", "can you build a chess variant…"). Fill prompt with the whole idea in their words, and base_game_id only if they want to start from an existing game.
-- revise_game: they want to change a game that is being built or that they own ("change the build to 3 players", "make the board bigger", "把刚才那个游戏改成…", "만들던 게임 3인용으로 바꿔 줘", "さっきのゲームを3人用にして"). Fill goal_id (the open mission it refers to) or game_id (their game), and prompt with the change.
-- rules: a question about how a game is played, its terms or strategy ("how do side pots work?", "what beats a flush?"). Fill game_id when it is about a game in the catalog.
-- control: pause, resume, cancel or check on a running build ("stop the build", "how is my game coming along?"). action = pause|resume|cancel|status; goal_id.
-- preference: they ask to change a setting or how Aoi treats them ("call me Captain", "be quieter", "speak Chinese", "日本語で話して", "한국어로 해 줘", "turn the sound off"). preference.key/value from: %s.
-- chat: anything else — greetings, banter, questions about Aoi, talk about a hand they played, questions about real-money gambling (Aoi steers those back to play money).
-
-Notes:
-- "Deal me in" or "play" with no game named means holdem.
-- agent_ids only from ROSTER ids; map names in any language (Mika/美香/미카/ミカ → mika). seats = total seats including the player, 0 if not stated.
-- options: only what they state, as numbers (hold'em: starting_stack, small_blind, big_blind, blinds_double_every, max_hands).
-- If they say "the build", "my game" or "it" and there is one OPEN MISSION, use its goal_id.
-- mood is the face Aoi shows with her reply: neutral | smile | wink | surprised | angry | sad ("angry" only for playful mock outrage at a tease; "sad" for a disappointment).
-- confidence 0..1. If below 0.5, write clarify: one short question in %s.
-
-ROSTER:
-%sCATALOG:
-%sOPEN MISSIONS:
-%sRECENT CONVERSATION:
-%s
-
-LATEST MESSAGE: %q
-
-Return JSON only: {"intent":"","confidence":0,"clarify":"","mood":"","title":"3-6 word conversation title in %s","game_id":"","agent_ids":[],"seats":0,"options":{},"prompt":"","base_game_id":"","goal_id":"","action":"","preference":{"key":"","value":""}}`,
-		chatPrefKeys(), persona.LangName(lang), roster.String(), catalog.String(), missions.String(),
-		a.Store.RecentConversation(ctx, convID, 6), text, persona.LangName(lang))
-
-	resp, err := a.Model.Chat(ctx, engine.CallMeta{Purpose: "route", UserID: u.ID}, llm.Request{
-		Model: a.FastLLM, JSON: true, Temperature: 0, Messages: []llm.Message{{Role: "user", Content: prompt}}})
-	var r Route
-	if err == nil {
-		err = json.Unmarshal([]byte(llm.ExtractJSON(resp.Message.Content)), &r)
-	}
-	if err != nil {
-		slog.Warn("route failed; answering conversationally", "err", err)
-		return Route{Intent: IntentChat, Confidence: 1}
-	}
-	r.Intent = strings.ToLower(strings.TrimSpace(r.Intent))
-	if !contains(intents, r.Intent) {
-		r.Intent = IntentChat
-	}
-	slog.Info("route", "intent", r.Intent, "confidence", r.Confidence, "game", r.GameID, "agents", r.AgentIDs, "goal_id", r.GoalID)
-	return r
-}
-
-// ── Acting on the route ────────────────────────────────────────────────────
-
-func (a *Agent) act(ctx context.Context, u User, convID, text, lang string, r Route, games []GameInfo, open []*engine.Goal) outcome {
-	// An unsure router does not get to start things: ask instead.
-	if r.Confidence < 0.5 && strings.TrimSpace(r.Clarify) != "" && r.Intent != IntentChat && r.Intent != IntentRules {
-		return outcome{mood: persona.Neutral, note: "You are not sure what the player wants. Ask exactly this, in your own words: " + r.Clarify}
-	}
-	switch r.Intent {
-	case IntentPlay:
-		return a.play(ctx, u, lang, r, games)
-	case IntentBuild:
-		return a.build(ctx, u, convID, text, lang, r, games)
-	case IntentRevise:
-		return a.revise(ctx, u, convID, text, lang, r, games, open)
-	case IntentRules:
-		return a.rules(ctx, u, r, games)
-	case IntentControl:
-		return a.control(ctx, u, r, open)
-	case IntentPreference:
-		return a.preference(ctx, u, r)
-	}
-	mood, ok := persona.ParseMood(r.Mood)
-	if !ok {
-		mood = persona.Smile
-	}
-	return outcome{mood: mood}
-}
-
-func (a *Agent) play(ctx context.Context, u User, lang string, r Route, games []GameInfo) outcome {
-	if a.Tables == nil {
-		return outcome{mood: persona.Sad, note: "The player wants to play, but the tables are not open yet on this server. Say so honestly and briefly, and offer to explain a game or talk strategy meanwhile."}
-	}
-	want := r.GameID
-	if strings.TrimSpace(want) == "" {
-		want = "holdem"
-	}
-	g, ok := findGame(games, want)
-	if !ok {
-		return outcome{mood: persona.Surprised, note: fmt.Sprintf("The player asked to play %q, which is not a game they can play here. Say you couldn't find it and name a few they can play: %s. Offer to build it in the studio if it is a new idea.", want, gameNames(games, 6))}
-	}
-	agents := cleanAgents(r.AgentIDs)
-	seats := int(r.Seats)
-	if seats < 1+len(agents) {
-		seats = 1 + len(agents)
-	}
-	if g.MinSeats > 0 && seats < g.MinSeats {
-		seats = g.MinSeats
-	}
-	if g.MaxSeats > 0 && seats > g.MaxSeats {
-		return outcome{mood: persona.Surprised, note: fmt.Sprintf("%s seats at most %d players, and the player asked for %d (themselves plus %d agents). Nothing was created. Say so and ask who should sit out.", g.Name, g.MaxSeats, seats, len(agents))}
-	}
-	tableID, err := a.Tables.CreateTable(ctx, u.ID, TableRequest{GameID: g.ID, AgentIDs: agents, Seats: seats, Options: r.Options, Lang: lang})
-	if err != nil {
-		if errors.Is(err, ErrRejected) {
-			return outcome{mood: persona.Sad, note: "You tried to set up the table, but it was refused: " + err.Error() + ". Nothing was created. Explain in one line and suggest a fix."}
-		}
-		slog.Error("create table", "user", u.ID, "game", g.ID, "err", err)
-		return outcome{mood: persona.Sad, note: "You tried to set up the table, but something went wrong on the server. Nothing was created. Apologise briefly and suggest trying again in a moment."}
-	}
-	names := make([]string, len(agents))
-	for i, id := range agents {
-		names[i] = agentName(id, lang)
-	}
-	who := "just the player so far"
-	if len(names) > 0 {
-		who = "the player, " + strings.Join(names, ", ")
-	}
-	openSeats := seats - 1 - len(agents)
-	return outcome{mood: persona.Wink, cards: []Card{{Kind: "table", TableID: tableID}},
-		note: fmt.Sprintf("You just created a %s table with %d seats: %s; %d seat(s) open for friends or more agents. The table card is shown under your message. Say it is ready, add one line of banter about the opponents (their styles), and tell them to tap the card to sit down. Don't list the rules unless asked.",
-			g.Name, seats, who, openSeats)}
-}
-
-func (a *Agent) build(ctx context.Context, u User, convID, text, lang string, r Route, games []GameInfo) outcome {
-	if a.Studio == nil {
-		return outcome{mood: persona.Sad, note: "The player described a game to build, but the game studio is not open yet on this server. Say so honestly, say you love the idea (one specific thing about it), and offer to talk the rules through so they are ready when it opens."}
-	}
-	prompt := strings.TrimSpace(r.Prompt)
-	if prompt == "" {
-		prompt = text
-	}
-	base := ""
-	if r.BaseGameID != "" {
-		if g, ok := findGame(games, r.BaseGameID); ok {
-			base = g.ID
-		}
-	}
-	goalID, gameID, err := a.Studio.StartBuild(ctx, u.ID, convID, prompt, base, lang)
-	if err != nil {
-		return a.capabilityError("start the build", u, err)
-	}
-	slog.Info("build started", "user", u.ID, "goal", goalID, "game", gameID)
-	return outcome{mood: persona.Smile, goalID: goalID, cards: []Card{{Kind: "mission", GoalID: goalID}},
-		note: "You just started a build mission for the player's game idea; its card is shown under your message. The studio agents are on it: the rules first, then the game itself, then hundreds of simulated games, then a review. The player approves before it is published, and can play the draft as soon as it is built. React to the idea with real curiosity (one specific detail you like). If one important thing is unclear (player count, how you win), ask exactly one question — their answer will reach the build."}
-}
-
-func (a *Agent) revise(ctx context.Context, u User, convID, text, lang string, r Route, games []GameInfo, open []*engine.Goal) outcome {
-	change := strings.TrimSpace(r.Prompt)
-	if change == "" {
-		change = text
-	}
-	// 1. A build still running: the change goes into its plan.
-	var target *engine.Goal
-	for _, g := range open {
-		if g.ID == r.GoalID {
-			target = g
-		}
-	}
-	if target == nil && r.GoalID == "" && r.GameID == "" && len(open) == 1 {
-		target = open[0]
-	}
-	if target != nil {
-		if target.Status == "paused" || target.Status == "needs_attention" {
-			_ = a.Store.SetGoalStatus(ctx, target.ID, "active", "the owner sent a change")
-		}
-		if _, err := a.Store.EnqueuePlan(ctx, target.ID, fmt.Sprintf("change-%d", time.Now().UnixNano()), "change", "the player said: "+truncate(change, 1500)); err != nil {
-			slog.Error("enqueue change", "goal", target.ID, "err", err)
-			return outcome{mood: persona.Sad, note: "You could not pass the change to the build because of a server error. Apologise and ask them to try again."}
-		}
-		return outcome{mood: persona.Smile, goalID: target.ID, cards: []Card{{Kind: "mission", GoalID: target.ID}},
-			note: fmt.Sprintf("You passed the player's change (%q) to the running build %q; the plan will adapt. Confirm what will change in one line.", truncate(change, 200), target.Title)}
-	}
-	// 2. A game they own that is no longer building: a new build based on it.
-	if r.GameID != "" {
-		g, ok := findGame(games, r.GameID)
-		if !ok || !g.Mine {
-			return outcome{mood: persona.Neutral, note: "The player wants to change a game you could not find among their own games. Ask which of their games they mean."}
-		}
-		if a.Studio == nil {
-			return outcome{mood: persona.Sad, note: "The player wants to change their game, but the game studio is not open yet on this server. Say so honestly."}
-		}
-		goalID, _, err := a.Studio.StartBuild(ctx, u.ID, convID, change, g.ID, lang)
-		if err != nil {
-			return a.capabilityError("start the revision", u, err)
-		}
-		return outcome{mood: persona.Smile, goalID: goalID, cards: []Card{{Kind: "mission", GoalID: goalID}},
-			note: fmt.Sprintf("You started a new build that revises their game %q with this change: %q. Its card is shown under your message. The current version stays playable until they approve the new one.", g.Name, truncate(change, 200))}
-	}
-	return outcome{mood: persona.Neutral, note: "The player wants to change a game, but it is not clear which one. Ask which game (or build) they mean."}
-}
-
-func (a *Agent) rules(ctx context.Context, u User, r Route, games []GameInfo) outcome {
-	out := outcome{mood: persona.Neutral, note: "The player asked about rules or strategy. Answer clearly: the idea in one line, then the details, then a tiny example."}
-	if r.GameID == "" {
-		return out
-	}
-	g, ok := findGame(games, r.GameID)
-	if !ok {
-		return out
-	}
-	out.cards = []Card{{Kind: "game", GameID: g.ID}}
-	if a.Catalog != nil {
-		if text, err := a.Catalog.Rules(ctx, u.ID, g.ID); err == nil && strings.TrimSpace(text) != "" {
-			out.note += fmt.Sprintf("\nThe question is about %s. Base your answer on its rules as written here (they are authoritative for this platform; if they do not cover the question, say so and say how it is usually played):\n<<<RULES\n%s\nRULES>>>", g.Name, truncate(text, 6000))
-			return out
-		}
-	}
-	out.note += "\nThe question is about " + g.Name + "."
-	return out
-}
-
-func (a *Agent) control(ctx context.Context, u User, r Route, open []*engine.Goal) outcome {
-	goalID := r.GoalID
-	if goalID == "" && len(open) == 1 {
-		goalID = open[0].ID
-	}
-	g, err := a.Store.GoalForUser(ctx, goalID, u.ID)
-	if goalID == "" || err != nil {
-		var titles []string
-		for _, x := range open {
-			titles = append(titles, x.Title)
-		}
-		if len(titles) == 0 {
-			return outcome{mood: persona.Neutral, note: "The player referred to a build, but they have no builds running. Say so, and offer to start one."}
-		}
-		return outcome{mood: persona.Neutral, note: "The player referred to a build you could not identify. Ask which one they mean: " + strings.Join(titles, "; ")}
-	}
-	card := []Card{{Kind: "mission", GoalID: g.ID}}
-	switch r.Action {
-	case "pause":
-		if g.Status == "active" || g.Status == "planning" {
-			_ = a.Store.SetGoalStatus(ctx, g.ID, "paused", "the owner asked to pause")
-		}
-		return outcome{mood: persona.Neutral, goalID: g.ID, cards: card, note: "You paused the build " + g.Title + ". Nothing runs until they resume it."}
-	case "resume":
-		if g.Status == "paused" || g.Status == "needs_attention" {
-			_ = a.Store.SetGoalStatus(ctx, g.ID, "active", "the owner asked to resume")
-			_, _ = a.Store.EnqueuePlan(ctx, g.ID, fmt.Sprintf("resume-%d", time.Now().Unix()/60), "review", "the owner resumed the build; check the plan still fits")
-		}
-		return outcome{mood: persona.Smile, goalID: g.ID, cards: card, note: "You resumed the build " + g.Title + " from where it stopped."}
-	case "cancel":
-		if !terminal(g.Status) {
-			_ = a.Store.SetGoalStatus(ctx, g.ID, "cancelled", "the owner cancelled")
-		}
-		return outcome{mood: persona.Sad, goalID: g.ID, cards: card, note: "You cancelled the build " + g.Title + ". Unfinished work stopped and any pending approval was withdrawn. A draft that was already playable stays in their games."}
-	default:
-		return outcome{mood: persona.Neutral, goalID: g.ID, cards: card, note: "The player asked how the build " + g.Title + " is going. Use the MISSIONS section: what is done, what is running, and what waits on them (an approval, an answer)."}
-	}
-}
-
-func (a *Agent) preference(ctx context.Context, u User, r Route) outcome {
-	key := strings.TrimSpace(r.Preference.Key)
-	raw := strings.TrimSpace(fmt.Sprint(r.Preference.Value))
-	if r.Preference.Value == nil {
-		raw = ""
-	}
-	v, err := coercePref(key, raw)
-	if err != nil {
-		return outcome{mood: persona.Neutral, note: "The player asked to change a setting, but it could not be applied (" + err.Error() + "). Tell them what you can change, or point them to Settings."}
-	}
-	patch, _ := json.Marshal(map[string]any{key: v})
-	if _, err := a.Store.Pool.Exec(ctx, `INSERT INTO user_preferences (user_id, data) VALUES ($1, $2)
-		ON CONFLICT (user_id) DO UPDATE SET data = user_preferences.data || EXCLUDED.data, updated_at=now()`, u.ID, patch); err != nil {
-		slog.Error("set preference", "err", err)
-		return outcome{mood: persona.Sad, note: "Saving the setting failed on the server. Apologise and point them to Settings."}
-	}
-	out := outcome{mood: persona.Smile, note: fmt.Sprintf("You changed the player's setting %s to %v (it is saved; they can change it in Settings). Confirm briefly — and from this reply on, behave accordingly.", key, v)}
-	if key == "language" {
-		out.lang = persona.Normalize(fmt.Sprint(v))
-	}
-	return out
-}
-
-// capabilityError turns a Tables/Studio failure into the reply note.
-func (a *Agent) capabilityError(what string, u User, err error) outcome {
-	if errors.Is(err, ErrRejected) {
-		return outcome{mood: persona.Sad, note: "You tried to " + what + ", but it was refused: " + err.Error() + ". Nothing was started. Explain in one line."}
-	}
-	slog.Error(what, "user", u.ID, "err", err)
-	return outcome{mood: persona.Sad, note: "You tried to " + what + ", but something went wrong on the server. Nothing was started. Apologise briefly and suggest trying again in a moment."}
-}
-
-// findGame matches a catalog entry by id, then by name (case-insensitive),
-// then by a name that contains the query ("hold'em" → "Texas Hold'em").
-func findGame(games []GameInfo, q string) (GameInfo, bool) {
-	q = strings.TrimSpace(q)
-	lq := strings.ToLower(q)
-	for _, g := range games {
-		if g.ID == q {
-			return g, true
-		}
-	}
-	for _, g := range games {
-		if strings.ToLower(g.Name) == lq {
-			return g, true
-		}
-	}
-	if len([]rune(lq)) >= 3 {
-		for _, g := range games {
-			if strings.Contains(strings.ToLower(g.Name), lq) {
-				return g, true
-			}
-		}
-	}
-	return GameInfo{}, false
-}
-
-func gameNames(games []GameInfo, n int) string {
-	var out []string
-	for i, g := range games {
-		if i >= n {
-			break
-		}
-		out = append(out, g.Name)
-	}
-	return strings.Join(out, ", ")
-}
-
 // ── Reply context ──────────────────────────────────────────────────────────
 
 // chatContext is what the reply needs from persisted state.
@@ -597,7 +254,7 @@ func (a *Agent) chatContext(ctx context.Context, u User, p persona.Prefs, open [
 	var pending int
 	_ = a.Store.Pool.QueryRow(ctx, `SELECT count(*) FROM approvals WHERE user_id=$1 AND status='pending'`, u.ID).Scan(&pending)
 	if pending > 0 {
-		fmt.Fprintf(&b, "\nWAITING FOR THE PLAYER'S APPROVAL: %d (they approve on the card in the app, so the decision is on record)\n", pending)
+		fmt.Fprintf(&b, "\nWAITING FOR THE PLAYER'S APPROVAL: %d (they approve on the mission card, or by telling you and then confirming; either way the decision is on record)\n", pending)
 	}
 	if note != "" {
 		b.WriteString("\nFOR THIS REPLY: " + note + "\n")

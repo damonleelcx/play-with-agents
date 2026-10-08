@@ -25,3 +25,11 @@ func TestBuildLimitsHonourOwnerCeilingsWithinStudioMaxima(t *testing.T) {
 		}
 	}
 }
+
+func TestRulesWeightCountsCJKAsLongerText(t *testing.T) {
+	en := rulesWeight("Place a card")
+	zh := rulesWeight("放一张牌")
+	if en != 12 || zh != 12 {
+		t.Fatalf("weights: en=%d zh=%d", en, zh)
+	}
+}

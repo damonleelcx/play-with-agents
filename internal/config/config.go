@@ -82,7 +82,7 @@ func Load() (Config, error) {
 		LeaseDuration:         envDur("PLAY_LEASE", 90*time.Second),
 		TableWorkers:          envInt("PLAY_TABLE_WORKERS", 4),
 		TableLease:            envDur("PLAY_TABLE_LEASE", 15*time.Second),
-		AccountDailyTokens:    envInt("PLAY_ACCOUNT_DAILY_TOKENS", 1_500_000),
+		AccountDailyTokens:    envInt("PLAY_ACCOUNT_DAILY_TOKENS", 5_000_000),
 		DeploymentDailyTokens: envInt("PLAY_DEPLOYMENT_DAILY_TOKENS", 40_000_000),
 		TTSAPIKey:             os.Getenv("PLAY_TTS_API_KEY"),
 		TTSVoiceID:            os.Getenv("PLAY_TTS_VOICE_ID"),

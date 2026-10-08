@@ -92,7 +92,7 @@ func testPool(t *testing.T) *pgxpool.Pool {
 	if err := db.Migrate(ctx, pool); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := pool.Exec(ctx, `TRUNCATE table_jobs, table_chat, table_events, table_moves, table_spectators, table_seats, tables,
+	if _, err := pool.Exec(ctx, `TRUNCATE table_jobs, table_chat_reactions, table_presence, table_chat, table_events, table_moves, table_spectators, table_seats, tables,
 		game_versions, games, user_preferences, users CASCADE`); err != nil {
 		t.Fatal(err)
 	}
@@ -111,6 +111,7 @@ func newRig(t *testing.T) *rig {
 	pool := testPool(t)
 	svc := New(pool)
 	svc.Think = func(string, bool) time.Duration { return 0 }
+	svc.TypeTime = func(int) time.Duration { return 0 }
 	return &rig{pool: pool, svc: svc}
 }
 

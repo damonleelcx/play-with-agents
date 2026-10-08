@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import type { HoldemData, HoldemPlayer, Move, MoveSpec, SeatInfo, TableView } from '../../lib/playApi'
+import { SayBubble, type Bubbles, type SeatBubble } from './Bubbles'
 import { Avatar, PlayingCard, TimerRing, VoiceWave } from './parts'
 import { fmtChips } from './poker'
 import { blip } from './sound'
@@ -56,12 +57,14 @@ export default function HoldemTable({
   onMove,
   prefs,
   speakingSeat = -1,
+  bubbles,
 }: {
   table: TableView
   busy: boolean
   onMove: (m: Move) => void
   prefs: PlayPrefs
   speakingSeat?: number
+  bubbles?: Bubbles
 }) {
   const { s, f, handName } = usePlayT()
   const compact = useMediaQuery('(max-width: 720px)')
@@ -294,6 +297,7 @@ export default function HoldemTable({
                 compact={compact}
                 from={fromCenter(g.x, g.y)}
                 speaking={speakingSeat === i}
+                say={bubbles?.[i]}
               />
             )
           })}
@@ -392,6 +396,7 @@ function Seat({
   compact,
   from,
   speaking,
+  say,
 }: {
   g: ReturnType<typeof geom>
   info: SeatInfo
@@ -409,6 +414,7 @@ function Seat({
   compact: boolean
   from: { x: string; y: string }
   speaking: boolean
+  say?: SeatBubble
 }) {
   const { s, handName } = usePlayT()
   if (info.kind === 'open' && !p) {
@@ -475,6 +481,7 @@ function Seat({
         {/* My own cards cover my avatar, so my last action sits by my plate. */}
         {isMe && actBubble}
       </div>
+      <SayBubble b={say} />
       {status === 'allin' && !winner && <span className="pw-badge-allin">{s.holdem.allin}</span>}
       {reveal?.hand && !isMe && <span className={`pw-handname ${winner ? 'is-win' : ''}`}>{handName(reveal.hand)}</span>}
       {winner && reveal && reveal.won > 0 && <span className="pw-won">+{fmtChips(reveal.won)}</span>}

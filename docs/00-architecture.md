@@ -38,7 +38,8 @@ then design it, build it, playtest it and set it on the table.
 
 ```
 User goal (chat with Aoi)
-  ↓ Router (fast model): intent = chat | play | build_game | revise_game | rules | control | preference
+  ↓ Router (fast model): one of 33 intents in 10 areas (docs/01-intents-tools-skills.md)
+  ↓ Handler: chat tools (Tables, Coach, Stats, Catalog, Studio, engine controls); destructive ones confirmed first
   ↓
 Mission Planner (engine.Planner) → task DAG (skills = playbooks)
   ↓
@@ -126,26 +127,68 @@ which is why hidden-information games must define it.
   "title": "Connect Four",
   "board": {                         // optional
     "rows": 6, "cols": 7,
-    "style": "grid",                 // grid | checker | go | plain
+    "style": "grid",                 // grid | checker | go | plain | tiles
     "cells": [[ /* row-major; null or Cell */ ]]
   },
   // Cell = { "piece": { "shape": "disc|square|ring|king|text", "color": "p0..p7|#hex|css",
   //                      "glyph": "♛", "label": "K" },
+  //          "card": Card,              alternative to piece: a card on the square
   //          "mark": "#hex|css",        highlight
-  //          "text": "3" }
+  //          "text": "3",
+  //          "blocked": true }          sealed square (hatched; not playable)
   "zones": [                         // optional: hands, piles, decks
     { "id": "hand-0", "label": "Your hand", "owner": 0, "layout": "row|fan|stack",
-      "cards": [ { "face": "7♥", "color": "#c33", "hidden": false } ] }
+      "cards": [ Card ] }
   ],
+  "story": [                         // optional, ordered: the "Story so far" panel
+    { "text": "Every dusk he climbed the hill.", "seat": 0, "title": "The Lamplighter" }
+  ],
+  "prompt": "Choose a card, then a square",   // optional, above the mover's hand
   "players": [ { "seat": 0, "score": 3, "info": "Red", "color": "p0" } ],
   "counters": [ { "label": "Round", "value": "2 / 5" } ],
   "message": "Red to move"
 }
 ```
 
-Move UI hints (`MoveSpec.ui`): `{cell:[r,c]}` (click a cell), `{from:[r,c],to:[r,c]}`
-(select piece, then target), `{zone:"hand-0",index:2}` (click a card). Moves
-without hints render as buttons. A `range` renders as a slider + input.
+`Card` is a plain playing card `{ "face": "7♥", "color": "#c33" }`, a face-down
+card `{ "hidden": true }`, or a rich story card:
+
+| key | type | shown as |
+|---|---|---|
+| `title` | string ≤ 60 | the name, on a title plate |
+| `text` | string ≤ 300 | the story line, italic |
+| `effect` | string ≤ 300 | the rules text, in an effect box |
+| `kind` | string ≤ 24 | a badge and accent colour; `character`, `place`, `event`, `twist`, `item` have preset colours |
+| `cost`, `value` | number or string ≤ 8 | small corner badges (cost top-left, value top-right) |
+| `accent` | colour | overrides the kind colour |
+| `seat` | seat number | who played it: a player-colour frame (on the board) |
+
+A hidden card carries nothing but `hidden` (the validator rejects a hidden card
+with a face, title, text, effect, kind, cost, value or accent: it would leak).
+In hands (`fan`/`row`), rich cards render full size and enlarge on hover; on
+the board, `cell.card` renders as a mini-card (title on the kind colour, framed
+in the player's colour) with the full card on hover, focus or long-press.
+
+`story` holds at most 200 lines, each `text` ≤ 300 characters, `title` ≤ 60,
+optional `seat` (the line takes that player's colour). The newest line is
+highlighted; on narrow screens the panel collapses. `prompt` (≤ 200) is shown
+above the mover's hand only. All strings may use `{s:N}`.
+
+Move UI hints (`MoveSpec.ui`):
+
+- `{cell:[r,c]}`: click a cell.
+- `{from:[r,c],to:[r,c]}`: select a piece, then a target.
+- `{zone:"hand-0",index:2}`: click a card (plays at once).
+- `{zone:"hand-0",index:2,cell:[r,c]}`: play this card onto this cell. One
+  legal move per (card, cell); the renderer groups them: selecting the card
+  highlights its cells, clicking one submits, Esc or the card again cancels.
+- `{zone:"hand-0",index:2,target:"North"}`: select the card, then pick a
+  target (≤ 40 characters) from a small chooser.
+
+`index` is the card's position in that zone as the mover's view lists it.
+`Check` reports hints pointing at a zone, card or cell the mover's view does
+not show (the move could not be clicked). Moves without hints render as
+buttons (a compact list beyond 12). A `range` renders as a slider + input.
 
 Player colours `p0..p7`: `#4f8cff #ff5d73 #ffc04d #3ddc97 #b07cff #ff8f40 #3fd2ff #e6e6e6`.
 
@@ -261,11 +304,23 @@ seeded examples (`/play/covers/{id}.webp`), else absent.
   A retry with the same `client_move_id` and the same move returns the current view;
   the same id with a different move is `409 { error }`. Only people who may watch the
   table get either answer (403 otherwise).
-- `POST /api/tables/{id}/chat` `{ text, client_msg_id }` → `{ ok }`
+- `POST /api/tables/{id}/chat` `{ text, client_msg_id, reply_to?, whisper_seat? }` → `{ ok }`
+  (≤ 500 characters, control and invisible characters stripped; 20 lines per 30 s per person
+  per table, then 429). `whisper_seat` makes it a whisper to the person in that seat: only the
+  two of them ever receive it (view and stream); agents can't be whispered to, never see one and
+  are never prompted by one.
+- `POST /api/tables/{id}/typing` → `{ ok }`: "I am typing" (the client pings at most every 3 s while
+  the person types; the server drops pings closer than 2 s).
+- `POST /api/tables/{id}/chat/{chat_id}/react` `{ emoji }` → `{ chat_id, reactions }`: toggles one of
+  👍 😂 😮 🔥 ❤️ 👏 😢 🎉 on a line the caller can see.
 - `POST /api/tables/{id}/leave` → `{ ok }` (an agent takes over a seat left mid-game)
 - `POST /api/tables/{id}/back` → `TableView` ("I'm back": clears my seat's `away` and resumes a paused table)
 - `POST /api/tables/{id}/rematch` (host) → `TableView` of the new table
-- `GET /api/tables/{id}/stream` → SSE: `event: table` `{ version }` (refetch), `event: chat` `ChatLine`.
+- `GET /api/tables/{id}/stream` → SSE: `event: table` `{ version }` (refetch), `event: chat` `ChatLine`,
+  `event: typing` `{ seat, name, agent?, stop? }` (never echoed to the typist; an agent "types" while
+  the model writes its line), `event: reaction` `{ chat_id, reactions }`, `event: presence`
+  `{ seats: [int], watchers: [name] }` (sent on open and whenever it changes). An open stream is
+  "here" (`table_presence`, refreshed on every keepalive, 45 s TTL, so it is multi-pod safe).
   Access is re-checked while the stream runs (before an event once the last check is 5s old,
   and on every 20s keepalive); someone who can no longer watch (left as a spectator, signed
   out, account deleted) gets `event: closed` `{ reason: "access" }` and the stream ends.
@@ -289,10 +344,13 @@ TableView = {
   "legal": [ MoveSpec ],                        // only for my seat when it is my turn
   "view": { "kind": "holdem|board", "data": {...}, "status": "..." },
   "log":  [ { "seq", "type", "seat", "text", "at" } ],      // last 60 visible to me
-  "chat": [ ChatLine ],                                       // last 60
+  "chat": [ ChatLine ],                                       // last 60 the viewer may see
+  "presence": { "seats": [int], "watchers": [name] },
   "outcome": Outcome | null
 }
-ChatLine = { "id", "seat", "name", "avatar", "text", "at", "agent": true }
+ChatLine = { "id", "seat", "name", "avatar", "text", "at", "agent": true,
+             "reply_to"?, "whisper"?, "to"?, "to_seat"?,
+             "reactions"?: [{ "emoji", "count", "names", "mine" }] }
 ```
 
 **Away and paused.** After 2 consecutive clock run-outs a person's seat is
@@ -322,11 +380,23 @@ with their versions, unless someone else has a table of them: then the live ones
 are abandoned (`closed` event) and the game is kept hidden and ownerless so those
 records still render. Finished tables keep their seating as a record.
 
+**Who answers whom.** A person's public line *addresses* an agent when it names it (`@id`,
+or its name in any table language as a word: Mika, 美香, 미카, ミカ; one-character names
+like 葵 only on their own or with an honorific), replies to that agent's line, speaks to
+everyone ("everyone", "大家", "여러분", "みんな": one or two agents answer), or asks a
+question when no other person is seated. Addressed agents (up to 3 per line) answer within a
+few seconds in the language the person wrote in, even with `table_talk` "off", within 40
+answers per table per 10 minutes. Otherwise an agent may chime in (unprompted), and an agent
+may answer another agent's line (likelier when named in it); these conversation lines stop
+once 2 agent lines followed the last person's line, so agents never loop. Agents see the
+public table and the last 12 public lines only; their lines are dropped if they name a card
+that is not public or hint at hidden ones ("pocket kings", "我手里有一对A").
+
 **Table talk cadence.** Unprompted agent lines scale with the square of the
 persona's `talk`, so Ren and Lin are rare; pots under 10 big blinds almost
 never prompt a line. Each agent has a cooldown after its own line (45s for the
 chattiest, ~2.5 min for the quietest), a table gets at most 8 unprompted agent
-lines per 10 minutes (replies to @mentions: 20), and a line too close to one
+lines per 10 minutes, 4 s apart (answers to people who addressed an agent: 40), and a line too close to one
 of the agent's own last 5 lines is dropped (silence, not a canned line).
 
 ### Studio (building games)
@@ -338,6 +408,8 @@ a draft can be played by its owner at any time (`POST /api/tables` with its id).
 
 ### Chat cards
 Aoi's message `meta.cards`: `[{ kind: "table", table_id } | { kind: "mission", goal_id } | { kind: "game", game_id }]`.
+`meta.pending` (when present) is an action Aoi asked the player to confirm; only
+an explicit yes in the next message runs it (docs/01-intents-tools-skills.md §3).
 
 ## Settings (user_preferences keys)
 

@@ -131,38 +131,6 @@ func (f *fakeLLM) systemPrompt() string { f.mu.Lock(); defer f.mu.Unlock(); retu
 
 func (f *fakeLLM) setRoute(r map[string]any) { f.mu.Lock(); defer f.mu.Unlock(); f.route = r }
 
-type fakeTables struct {
-	got []TableRequest
-	err error
-}
-
-func (f *fakeTables) CreateTable(_ context.Context, _ string, req TableRequest) (string, error) {
-	f.got = append(f.got, req)
-	return "tbl-1", f.err
-}
-
-type fakeStudio struct {
-	prompt, base string
-	err          error
-}
-
-func (f *fakeStudio) StartBuild(_ context.Context, _, _, prompt, base, _ string) (string, string, error) {
-	f.prompt, f.base = prompt, base
-	return "11111111-1111-1111-1111-111111111111", "my-game", f.err
-}
-
-type fakeCatalog struct{}
-
-func (fakeCatalog) Games(context.Context, string) ([]GameInfo, error) {
-	return []GameInfo{builtinGames[0], {ID: "dragon-chess", Name: "Dragon Chess", MinSeats: 2, MaxSeats: 2, Mine: true}}, nil
-}
-func (fakeCatalog) Rules(_ context.Context, _, id string) (string, error) {
-	if id == "holdem" {
-		return "Side pots: when a player is all-in, later bets go to a side pot they cannot win.", nil
-	}
-	return "", errors.New("no rules")
-}
-
 type sink struct{ metas []map[string]any }
 
 func (s *sink) Meta(v map[string]any) { s.metas = append(s.metas, v) }
@@ -312,9 +280,15 @@ func TestReviseFeedsTheRunningBuildAndControlCancelsIt(t *testing.T) {
 		t.Fatalf("meta %v", meta)
 	}
 
+	// Cancelling is irreversible: Aoi asks first, and only an explicit yes
+	// on the next turn cancels.
 	r.fake.setRoute(map[string]any{"intent": "control", "confidence": 0.9, "action": "cancel", "goal_id": g.ID})
 	meta = r.turn(t, "cancel the build")
-	if st, _ := r.agent.Store.Goal(context.Background(), g.ID); st.Status != "cancelled" || meta["mood"] != "sad" {
+	if st, _ := r.agent.Store.Goal(context.Background(), g.ID); st.Status == "cancelled" || meta["pending"] == nil {
+		t.Fatalf("cancelled without confirmation: status %s meta %v", st.Status, meta)
+	}
+	meta = r.turn(t, "yes")
+	if st, _ := r.agent.Store.Goal(context.Background(), g.ID); st.Status != "cancelled" || meta["mood"] != "sad" || meta["intent"] != "confirm" {
 		t.Fatalf("status %s meta %v", st.Status, meta)
 	}
 }

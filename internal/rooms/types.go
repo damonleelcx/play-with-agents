@@ -94,6 +94,50 @@ type ChatLine struct {
 	Text   string    `json:"text"`
 	At     time.Time `json:"at"`
 	Agent  bool      `json:"agent"`
+	// ReplyTo is the line this one answers (0: none).
+	ReplyTo int64 `json:"reply_to,omitempty"`
+	// Whisper: a private line between the sender and To (a person seated at
+	// the table). Only those two ever receive it.
+	Whisper bool   `json:"whisper,omitempty"`
+	To      string `json:"to,omitempty"`
+	ToSeat  *int   `json:"to_seat,omitempty"`
+	// Reactions on the line, as the viewer sees them.
+	Reactions []Reaction `json:"reactions,omitempty"`
+}
+
+// Reaction is one emoji on a chat line: how many people chose it, who (by
+// name), and whether the viewer is one of them.
+type Reaction struct {
+	Emoji string   `json:"emoji"`
+	Count int      `json:"count"`
+	Names []string `json:"names"`
+	Mine  bool     `json:"mine"`
+}
+
+// Typing says someone is writing a line: a person (throttled pings) or an
+// agent while the model writes its reply. Stop clears it early.
+type Typing struct {
+	Seat  int    `json:"seat"`
+	Name  string `json:"name"`
+	Agent bool   `json:"agent,omitempty"`
+	Stop  bool   `json:"stop,omitempty"`
+}
+
+// Presence is who has the table open right now: seated people (by seat)
+// and the names of everyone else watching. Agents are always there.
+type Presence struct {
+	Seats    []int    `json:"seats"`
+	Watchers []string `json:"watchers"`
+}
+
+// ChatInput is a person's line with its options.
+type ChatInput struct {
+	Text        string `json:"text"`
+	ClientMsgID string `json:"client_msg_id"`
+	ReplyTo     int64  `json:"reply_to,omitempty"`
+	// WhisperSeat, when set, makes the line a whisper to the person in that
+	// seat. Agents cannot be whispered to.
+	WhisperSeat *int `json:"whisper_seat,omitempty"`
 }
 
 type TableView struct {
@@ -126,6 +170,8 @@ type TableView struct {
 	// failed for good; only the host may resume, and a second fault closes
 	// the table). Empty when not paused. An additive field to the contract.
 	PausedReason string `json:"paused_reason,omitempty"`
+	// Presence: who has the table open now. An additive field.
+	Presence *Presence `json:"presence,omitempty"`
 }
 
 type TableSummary struct {
@@ -163,11 +209,15 @@ type ChatRequest struct {
 	AgentName string
 	Voice     string
 	Persona   games.Persona
-	Language  string // en | zh | ko | ja
+	Language  string // en | zh | ko | ja: the language to answer in
 	Trigger   string // agents.Trigger*
-	About     string // the triggering event or message, names substituted
-	Table     string // public summary of the table
-	Recent    []ChatLine
+	// Direct: someone addressed this agent (by name, @, a reply to its line,
+	// or a question to everyone); From is who. The agent answers them.
+	Direct bool
+	From   string
+	About  string // the triggering event or message, names substituted
+	Table  string // public summary of the table
+	Recent []ChatLine
 	// Own is this agent's own last few lines at the table, oldest first, so
 	// the Chatter can avoid repeating itself.
 	Own []string

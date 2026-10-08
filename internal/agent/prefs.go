@@ -38,9 +38,8 @@ type PrefSpec struct {
 	Min     int // PrefRange
 	Max     int // PrefRange
 	Default any
-	// Chat is true when Aoi may change it from conversation. Lists and
-	// anything that only makes sense with the settings page in front of you
-	// stay on the page.
+	// Chat is true when Aoi may change it from conversation. Every setting
+	// can be; favorite_agents (a list) has its own intent, favorite_agents.
 	Chat bool
 }
 
@@ -82,9 +81,10 @@ var PrefSpecs = []PrefSpec{
 	{Key: "font_size", Group: "appearance", Kind: PrefEnum, Values: []string{"small", "medium", "large"}, Default: "medium", Chat: true},
 
 	// Usage & limits: ceilings for one studio build (a mission), on top of
-	// the account and deployment token caps.
-	{Key: "goal_max_cost_usd", Group: "limits", Kind: PrefRange, Min: 1, Max: 200, Default: 20},
-	{Key: "goal_max_days", Group: "limits", Kind: PrefRange, Min: 1, Max: 180, Default: 30},
+	// the account and deployment token caps. They can only lower the studio's
+	// own maxima (studio.buildLimits), so Aoi may set them from chat.
+	{Key: "goal_max_cost_usd", Group: "limits", Kind: PrefRange, Min: 1, Max: 200, Default: 20, Chat: true},
+	{Key: "goal_max_days", Group: "limits", Kind: PrefRange, Min: 1, Max: 180, Default: 30, Chat: true},
 
 	{Key: "email_table_invites", Group: "notifications", Kind: PrefBool, Default: true, Chat: true},
 	{Key: "email_your_turn", Group: "notifications", Kind: PrefBool, Default: true, Chat: true},

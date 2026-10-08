@@ -618,7 +618,7 @@ func TestExamples(t *testing.T) {
 			t.Errorf("%s: Check is not clean:\n%s", e.ID, r)
 		}
 	}
-	for _, want := range []string{"tictactoe", "connect_four", "reversi", "lantern_market"} {
+	for _, want := range []string{"tictactoe", "connect_four", "reversi", "lantern_market", "story_tiles"} {
 		if !ids[want] {
 			t.Errorf("missing example %s", want)
 		}

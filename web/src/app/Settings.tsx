@@ -228,7 +228,7 @@ function TablePrefs() {
         <Choice<number> k="turn_seconds" label={t.settings.turnClock} hint={`${t.settings.turnHint} ${t.settings.noClockHint}`} def={30}
           options={[[15, f(t.settings.secs, { n: 15 })], [30, f(t.settings.secs, { n: 30 })], [60, f(t.settings.secs, { n: 60 })], [0, t.settings.noClock]]} />
         <Choice k="agent_speed" label={t.settings.agentSpeed} def="natural" options={ent(t.settings.speeds)} />
-        <Choice k="table_talk" label={t.settings.tableTalk} def="all" options={ent(t.settings.talkModes)} />
+        <Choice k="table_talk" label={t.settings.tableTalk} hint={t.settings.talkHint} def="all" options={ent(t.settings.talkModes)} />
       </Card>
       <Card>
         <Toggle k="four_color_deck" label={t.settings.fourColor} hint={t.settings.fourColorHint} def={false} />

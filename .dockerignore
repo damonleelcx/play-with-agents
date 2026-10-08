@@ -6,3 +6,6 @@ web/dist
 internal/web/dist
 deploy/deploy.env
 *.test
+.env
+.env.*
+web/.vite

@@ -84,22 +84,48 @@ func playbook() *skills.Skill {
 // then the same gates run again. The engineer step has no dependency (all
 // earlier work is finished), which keeps the DAG shallow however many
 // rounds there are.
-func revisionRound(n int, findings string) []engine.PlannedTask {
+//
+// earlier carries the findings of previous rounds, so a fix never quietly
+// undoes the one before it.
+func revisionRound(n int, findings string, earlier []string) []engine.PlannedTask {
 	k := func(s string) string { return fmt.Sprintf("%s-%d", s, n) }
+	instr := "Fix the module so that it addresses every finding below, keep everything that already works, and save it with save_module until the contract check passes. " +
+		"Fix the root cause, not just the example: if one card, piece or rule was wrong, re-check every other card, piece and rule of the same kind against the rules document before you save." +
+		findingsHeader + findings
+	if len(earlier) > 0 {
+		instr += earlierHeader + "These were fixed in earlier rounds. They must STAY fixed; re-check each one before you save:\n"
+		for i, f := range earlier {
+			instr += fmt.Sprintf("\n--- round %d ---\n%s\n", i+2, f)
+		}
+	}
+	// The Critic sees what earlier rounds asked for, so it does not reverse
+	// its own rulings (one round "orthogonal only", the next "too strict").
+	review := "Review the revised, playtested module against the rules and the playtest report, then submit_review."
+	if all := append(append([]string{}, earlier...), findings); len(all) > 0 {
+		review += "\n\nEARLIER REVIEW ROUNDS asked for these changes. Treat them as settled interpretations of the rules: do not ask to undo one unless the rules document plainly says otherwise (quote it). Report only problems that remain.\n"
+		for i, f := range all {
+			review += fmt.Sprintf("\n--- round %d ---\n%s\n", i+1, f)
+		}
+	}
 	return []engine.PlannedTask{
 		{Key: k("revise"), Title: fmt.Sprintf("Revise the module (round %d)", n), Role: RoleEngineer,
 			Tools: []string{ToolSaveModule, ToolReadExample}, Verify: []string{VerifyModuleChecks}, MaxSteps: engineSteps,
-			Instructions: "Fix the module so that it addresses every finding below, keep everything that already works, and save it with save_module until the contract check passes.\n\nFINDINGS\n" + findings},
+			Instructions: instr},
 		{Key: k("playtest"), Title: fmt.Sprintf("Playtest again (round %d)", n), Role: RolePlaytester, Deps: []string{k("revise")},
 			Tool: ToolPlaytest, Verify: []string{VerifyPlaytestPassed}},
 		{Key: k("critic"), Title: fmt.Sprintf("Review again (round %d)", n), Role: RoleCritic, Deps: []string{k("playtest")},
 			Tools: []string{ToolSubmitReview}, Verify: []string{"called:" + ToolSubmitReview, VerifyCriticAccepted}, MaxSteps: criticSteps,
-			Instructions: "Review the revised, playtested module against the rules and the playtest report, then submit_review."},
+			Instructions: review},
 		{Key: k("publish"), Title: "Ask the owner to publish", Role: RoleCoordinator, Deps: []string{k("critic")},
 			Tools: []string{ToolPublish}, Verify: []string{VerifyPublishDecided}, MaxSteps: publishSteps,
 			Instructions: "Ask the owner to publish the reviewed version with publish_game."},
 	}
 }
+
+const (
+	findingsHeader = "\n\nFINDINGS\n"
+	earlierHeader  = "\n\nEARLIER FINDINGS\n"
+)
 
 // ── Roles: what each specialist sees ───────────────────────────────────────
 
@@ -197,11 +223,7 @@ func engineerContext(ctx context.Context, s *engine.Store, g *engine.Goal, t *en
 
 	w("\n# MODULE CONTRACT (follow exactly)\n%s\n", moduleContract)
 	w("\n# REFERENCE MODULES\n")
-	refs := []string{"tictactoe", "connect_four"}
-	if game.Spec.HiddenInfo || game.Spec.MaxSeats > 2 {
-		refs = []string{"tictactoe", "lantern_market"}
-	}
-	for _, id := range refs {
+	for _, id := range referenceModules(game.Spec, game.RulesMD) {
 		if e, ok := script.ExampleByID(id); ok {
 			w("\n## %s (%s)\n```js\n%s\n```\n", e.ID, e.Summary, e.Source)
 		}
@@ -265,3 +287,33 @@ func coordinatorContext(ctx context.Context, s *engine.Store, g *engine.Goal, t 
 }
 
 func langName(lang string) string { return persona.LangName(lang) }
+
+// storyWords mark a game whose cards go onto the board or that tells a
+// story: its few-shot template is story_tiles (rich cards, card → cell
+// moves, the story panel). Checked in the rules document, any language.
+var storyWords = []string{"story", "stories", "tale", "narrat", "故事", "叙事", "物語", "ストーリー", "이야기", "스토리"}
+
+// cardWords mark a card game in any of the four languages.
+var cardWords = []string{"card", "deck", "hand", "牌", "卡", "手札", "カード", "デッキ", "카드", "덱"}
+
+// referenceModules picks the two bundled modules the Engineer sees in full.
+func referenceModules(spec gameSpec, rules string) []string {
+	low := strings.ToLower(rules)
+	has := func(words []string) bool {
+		for _, w := range words {
+			if strings.Contains(low, w) {
+				return true
+			}
+		}
+		return false
+	}
+	switch {
+	case has(storyWords):
+		return []string{"tictactoe", "story_tiles"}
+	case spec.HiddenInfo && has(cardWords) && strings.Contains(low, "board"):
+		return []string{"lantern_market", "story_tiles"}
+	case spec.HiddenInfo || spec.MaxSeats > 2:
+		return []string{"tictactoe", "lantern_market"}
+	}
+	return []string{"tictactoe", "connect_four"}
+}

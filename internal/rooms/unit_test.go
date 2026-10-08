@@ -61,18 +61,18 @@ func TestRevealsHidden(t *testing.T) {
 
 func TestSanitizeLine(t *testing.T) {
 	names := []string{"Ann", "Mika"}
-	if got := sanitizeLine(`  "Mika: {s:0}, bring it!"  `, "Mika", names, nil); got != "Ann, bring it!" {
+	if got := sanitizeLine(`  "Mika: {s:0}, bring it!"  `, "Mika", names, nil, maxAgentRunes); got != "Ann, bring it!" {
 		t.Fatalf("got %q", got)
 	}
-	if got := sanitizeLine("line one\nline two", "Mika", names, nil); got != "line one line two" {
+	if got := sanitizeLine("line one\nline two", "Mika", names, nil, maxAgentRunes); got != "line one line two" {
 		t.Fatalf("got %q", got)
 	}
 	long := strings.Repeat("word ", 60)
-	got := sanitizeLine(long, "Mika", names, nil)
+	got := sanitizeLine(long, "Mika", names, nil, maxAgentRunes)
 	if n := len([]rune(got)); n > maxAgentRunes || !strings.HasSuffix(got, "…") {
 		t.Fatalf("long line %d runes: %q", n, got)
 	}
-	if got := sanitizeLine("I hold 7c 2d lol", "Mika", names, map[string]bool{}); got != "" {
+	if got := sanitizeLine("I hold 7c 2d lol", "Mika", names, map[string]bool{}, maxAgentRunes); got != "" {
 		t.Fatalf("a hidden card must reject the line, got %q", got)
 	}
 }

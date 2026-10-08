@@ -1,6 +1,6 @@
 // Dev-only scratch entry (web/play-preview.html): renders the play surfaces
 // without the app shell so they can be checked in mock mode.
-//   /play-preview.html?mock=holdem         (holdem-showdown | board | cards | checkers | lobby | finished)
+//   /play-preview.html?mock=holdem         (holdem-showdown | board | cards | story | checkers | lobby | finished)
 //   /play-preview.html?v=lobby&mock=1      the games lobby with mock data
 //   /play-preview.html?v=card              TableCard
 import { StrictMode } from 'react'
