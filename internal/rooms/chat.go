@@ -57,6 +57,12 @@ type talkJob struct {
 	// reply to its line, or a question to everyone). Such replies skip the
 	// per-agent cooldown, the unprompted budget and table_talk "off".
 	Mention bool `json:"mention,omitempty"`
+	// Answer: the table answering a person's line nobody in particular was
+	// asked (a greeting, a line to everyone, a person alone with agents).
+	// Like a mention it skips the cooldown and the unprompted budget, so a
+	// person is never left talking to the void; unlike one, the agent was
+	// not singled out.
+	Answer bool `json:"answer,omitempty"`
 	// Chain: a conversation line nobody asked for (chiming in on people's
 	// chat, answering another agent); dropped once agentStreakMax agent
 	// lines followed the last person's line, so agents never loop.
@@ -404,14 +410,19 @@ func (s *Service) ChatWith(ctx context.Context, userID, tableID string, in ChatI
 	return err
 }
 
-// talkReplies decides which agents answer a person's public line:
+// talkReplies decides which agents answer a person's public line. Agents
+// are people at the table, not a help desk: they answer when spoken to, and
+// they join in on their own when they feel like it.
 //
 //   - every agent it addresses (by @name or name in any table language, or
 //     a reply to that agent's line) answers, up to directPerLine;
-//   - a line to everyone ("everyone", "大家", "여러분", "みんな", ...) gets
-//     an answer from one or two agents, the chattier more likely;
-//   - so does a question when no other person is seated to answer it;
-//   - otherwise an agent may chime in, by its talkiness and table_talk.
+//   - a greeting or a line to everyone ("hi", "大家好", "everyone") gets one
+//     or two answers, the chattier agents more likely;
+//   - a person alone with agents is never left talking to the void: someone
+//     answers every line, and a second may join in;
+//   - with other people seated, a question still draws an agent half the
+//     time, and any other line sometimes does, by talkiness;
+//   - table_talk scales the unprompted ones ("quiet" rarely, "off" never).
 //
 // Addressed agents answer even when table_talk is "off".
 func (s *Service) talkReplies(t *tableRow, userID, from, text string, chatID int64, replySeat int) []talkJob {
@@ -424,37 +435,60 @@ func (s *Service) talkReplies(t *tableRow, userID, from, text string, chatID int
 	if replySeat >= 0 && !slices.Contains(direct, replySeat) {
 		direct = append([]int{replySeat}, direct...)
 	}
-	if len(direct) == 0 {
-		switch {
-		case toEveryone(text):
-			direct = pickSpeakers(ags, min(2, len(ags)))
-		case isQuestion(text) && othersSeated(t, userID) == 0:
-			direct = pickSpeakers(ags, 1)
-		}
-	}
 	about := clip(text, maxChatRunes)
-	if len(direct) > 0 {
+	answer := func(seats []int, mention bool) []talkJob {
 		var out []talkJob
 		delay := directDelay()
-		for _, seat := range direct[:min(len(direct), directPerLine)] {
-			out = append(out, talkJob{Seat: seat, Trigger: agents.TriggerReply, About: about, Mention: true,
+		for _, seat := range seats[:min(len(seats), directPerLine)] {
+			out = append(out, talkJob{Seat: seat, Trigger: agents.TriggerReply, About: about, Mention: mention, Answer: !mention,
 				From: from, Lang: lang, ReplyTo: chatID, key: -chatID, delay: delay})
 			// The next agent answers after this one has had its say.
 			delay += 2500*time.Millisecond + time.Duration(rand.Float64()*1500)*time.Millisecond
 		}
 		return out
 	}
+	if len(direct) > 0 {
+		return answer(direct, true)
+	}
 	factor := talkFactor(t.Settings.TableTalk)
 	if factor == 0 {
 		return nil
 	}
-	pick := ags[rand.IntN(len(ags))]
-	if rand.Float64() >= 0.35*talkiness(agents.Persona(pick.AgentID, "").Talk)*factor {
+	alone := othersSeated(t, userID) == 0
+	n := 0
+	switch {
+	case toEveryone(text) || isGreeting(text):
+		n = 1
+		if len(ags) > 1 && rand.Float64() < 0.6*factor {
+			n = 2
+		}
+	case alone:
+		// A quiet table still answers a person with no one else to talk to.
+		n = 1
+		if len(ags) > 1 && rand.Float64() < 0.25*factor {
+			n = 2
+		}
+	case isQuestion(text):
+		if rand.Float64() < 0.5*factor {
+			n = 1
+		}
+	default:
+		pick := ags[rand.IntN(len(ags))]
+		if rand.Float64() < 0.5*(0.3+talkiness(agents.Persona(pick.AgentID, "").Talk))*factor {
+			return []talkJob{{Seat: pick.Seat, Trigger: agents.TriggerReply, About: about, Chain: true,
+				From: from, Lang: lang, ReplyTo: chatID, key: -chatID, delay: talkDelay()}}
+		}
+	}
+	if n == 0 {
 		return nil
 	}
-	return []talkJob{{Seat: pick.Seat, Trigger: agents.TriggerReply, About: about, Chain: true,
-		From: from, Lang: lang, ReplyTo: chatID, key: -chatID, delay: talkDelay()}}
+	return answer(pickSpeakers(ags, n), false)
 }
+
+var greetingRE = regexp.MustCompile(`(?i)^\W*(hi+|hey+|hello+|yo|sup|hiya|howdy|good (morning|afternoon|evening|night)|gm|gn|what'?s up|wassup|greetings|bye|good ?bye|see (you|ya)|thanks?|thank you|ty|gg|wp|nice|lol|haha+)\b|^\W*(你好|您好|大家好|嗨|哈喽|早上好|晚上好|早安|晚安|再见|拜拜|谢谢|哈哈+)|^\W*(안녕|하이|감사|ㅋㅋ+)|^\W*(こんにちは|こんばんは|おはよう|やあ|ありがとう|またね|よろしく)`)
+
+// isGreeting: hello, goodbye, thanks, gg — the lines a table answers.
+func isGreeting(text string) bool { return greetingRE.MatchString(strings.TrimSpace(text)) }
 
 // directDelay: an addressed agent starts "typing" almost at once.
 func directDelay() time.Duration {
@@ -546,10 +580,12 @@ func (s *Service) chatJob(ctx context.Context, j *job) error {
 		return err
 	}
 	seat := t.seat(j.Seat)
-	direct := tj.Mention
-	if t.Status == "abandoned" || seat == nil || seat.Kind != "agent" || (talkFactor(t.Settings.TableTalk) == 0 && !direct) {
+	addressed := tj.Mention
+	if t.Status == "abandoned" || seat == nil || seat.Kind != "agent" || (talkFactor(t.Settings.TableTalk) == 0 && !addressed) {
 		return s.finish(ctx, j, "done", "stale")
 	}
+	// From here on, an answer to a person's line is as owed as a mention.
+	direct := addressed || tj.Answer
 	// Nobody is there to hear it: no model call for a paused or all-away
 	// table, unless someone just spoke to the agent.
 	if t.Status == "playing" && !direct && (t.PausedAt != nil || allAway(t)) {

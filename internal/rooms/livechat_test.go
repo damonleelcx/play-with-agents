@@ -140,7 +140,8 @@ func TestAddressedAgentsAnswer(t *testing.T) {
 	if err := r.svc.Chat(ctx, a, v.ID, "good luck everyone!", "ev"); err != nil {
 		t.Fatal(err)
 	}
-	if jobs := r.chatJobs(t, v.ID); len(jobs) < 1 || len(jobs) > 2 || !jobs[0].Mention {
+	// Nobody was singled out: an answer, not a mention.
+	if jobs := r.chatJobs(t, v.ID); len(jobs) < 1 || len(jobs) > 2 || jobs[0].Mention || !jobs[0].Answer {
 		t.Fatalf("to everyone: %+v", jobs)
 	}
 
@@ -570,5 +571,34 @@ func TestDetectLangAndNames(t *testing.T) {
 	}
 	if !toEveryone("大家好") || !toEveryone("GG everyone") || !toEveryone("여러분 안녕") || !toEveryone("みんな頑張って") || toEveryone("good game") {
 		t.Error("toEveryone")
+	}
+}
+
+func TestGreetingsAreAnswered(t *testing.T) {
+	for _, s := range []string{"hi", "Hi!", "hello there", "gg", "thanks Ren", "你好", "大家好！", "안녕하세요", "こんにちは"} {
+		if !isGreeting(s) {
+			t.Errorf("%q should read as a greeting", s)
+		}
+	}
+	for _, s := range []string{"history lesson", "this is high", "my turn"} {
+		if isGreeting(s) {
+			t.Errorf("%q is not a greeting", s)
+		}
+	}
+}
+
+func TestAPersonAloneWithAgentsAlwaysGetsAnAnswer(t *testing.T) {
+	s := &Service{}
+	tb := &tableRow{Seats: []seatRow{{Seat: 0, Kind: "human", UserID: "u"}, {Seat: 1, Kind: "agent", AgentID: "ren"}, {Seat: 2, Kind: "agent", AgentID: "lin"}}}
+	for i := 0; i < 50; i++ {
+		for _, line := range []string{"hi", "nice hand", "I'm bored"} {
+			if js := s.talkReplies(tb, "u", "Dee", line, int64(i+1), -1); len(js) == 0 {
+				t.Fatalf("%q at a table of agents got no answer", line)
+			}
+		}
+	}
+	tb.Settings.TableTalk = "off"
+	if js := s.talkReplies(tb, "u", "Dee", "hi", 1, -1); len(js) != 0 {
+		t.Fatalf("table_talk off still chimed in: %v", js)
 	}
 }
