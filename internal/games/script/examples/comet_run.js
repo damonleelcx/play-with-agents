@@ -37,7 +37,9 @@ const TO_DOCK = (() => {
   return d;
 })();
 const SHIPS = 2;
-const DIE = 4;
+// Each player holds thrusters 1-4, spends one per turn and gets all four
+// back once they are used up: every move is a choice, not a roll.
+const THRUST = [1, 2, 3, 4];
 
 // Every space a ship at `from` can end on after exactly `steps` steps (a
 // fork offers both ways). Passing the dock finishes the lap: "home".
@@ -61,9 +63,21 @@ function done(state, seat) {
   return state.ships[seat].every((p) => p === "home");
 }
 
+// Steps a fleet still has to fly (a ship home counts zero).
+function left(state, s) {
+  return state.ships[s].reduce((n, p) => n + (p === "home" ? 0 : TO_DOCK[p]), 0);
+}
+
+// The race ends when a fleet is home, or after ROUNDS rounds; then the fleet
+// with the fewest steps left wins (ties: the earlier seat in turn order).
+const ROUNDS = 60;
+
 function winner(state) {
   for (let s = 0; s < state.ships.length; s++) if (done(state, s)) return s;
-  return null;
+  if (state.moves < ROUNDS * state.ships.length) return null;
+  let best = 0;
+  for (let s = 1; s < state.ships.length; s++) if (left(state, s) < left(state, best)) best = s;
+  return best;
 }
 
 const game = {
@@ -81,29 +95,28 @@ const game = {
   setup(ctx) {
     const ships = [];
     for (let s = 0; s < ctx.seats; s++) ships.push(Array(SHIPS).fill("s0"));
-    return { ships, turn: 0, roll: ctx.randomInt(DIE) + 1 };
+    return { ships, thrust: ships.map(() => THRUST.slice()), turn: 0, moves: 0 };
   },
 
   toMove(state) {
     return winner(state) === null ? [state.turn] : [];
   },
 
-  // One move per (ship space, destination): two ships on the same space
-  // offer the same moves once. A ship that cannot move is skipped; if none
-  // can, the only move is to pass.
+  // One move per (ship space, destination), with the thruster that gets it
+  // there: two ships on the same space offer the same moves once. If no
+  // ship can fly, the only move is to pass.
   legal(state, seat) {
     if (winner(state) !== null || seat !== state.turn) return [];
     const moves = [];
     const seen = {};
     for (const from of state.ships[seat]) {
       if (from === "home") continue;
-      for (const to of destinations(from, state.roll)) {
+      for (const t of state.thrust[seat]) for (const to of destinations(from, t)) {
         const k = from + ">" + to;
         if (seen[k]) continue;
         seen[k] = true;
-        const where = to === "home" ? "home" : to;
         moves.push({
-          type: "fly", label: `Fly ${from} → ${where}`, args: { from, to },
+          type: "fly", label: `Thrust ${t}: ${from} → ${to}`, args: { from, to, thrust: t },
           // Finishing has no space to click on the board: the dock stands in.
           ui: { from, to: to === "home" ? "s0" : to },
         });
@@ -139,7 +152,12 @@ const game = {
     } else {
       events.push({ type: "pass", seat, text: `{s:${seat}} has no ship that can fly` });
     }
-    const next = { ships, turn: (seat + 1) % ships.length, roll: ctx.randomInt(DIE) + 1 };
+    const thrust = state.thrust.map((a) => a.slice());
+    if (move.type === "fly") {
+      thrust[seat].splice(thrust[seat].indexOf(move.args.thrust), 1);
+      if (thrust[seat].length === 0) thrust[seat] = THRUST.slice();
+    }
+    const next = { ships, thrust, turn: (seat + 1) % ships.length, moves: state.moves + 1 };
     if (winner(next) !== null) events.push({ type: "win", seat, text: `{s:${seat}} wins the Comet Run` });
     return { state: next, events };
   },
@@ -174,11 +192,11 @@ const game = {
         ],
       },
       players: state.ships.map((own, s) => ({
-        seat: s, color: `p${s}`, score: own.filter((p) => p === "home").length, info: "ships home",
+        seat: s, color: `p${s}`, score: own.filter((p) => p === "home").length, info: `thrusters ${state.thrust[s].join(" ")}`,
       })),
-      counters: [{ label: "Roll", value: String(state.roll) }],
-      message: w !== null ? `{s:${w}} wins the Comet Run` : `{s:${state.turn}} rolled ${state.roll}: fly a ship`,
-      prompt: "Pick a ship, then where it lands",
+      counters: [{ label: "Thrusters", value: state.thrust[state.turn].join(" · ") }],
+      message: w !== null ? `{s:${w}} wins the Comet Run` : `{s:${state.turn}} to fly: thrusters ${state.thrust[state.turn].join(", ")}`,
+      prompt: "Pick a ship, then where it lands (each landing uses its thruster)",
     };
   },
 
@@ -188,17 +206,16 @@ const game = {
     const home = state.ships.map((own) => own.filter((p) => p === "home").length);
     return {
       rank: home.map((h, s) => (s === w ? 1 : 2)),
-      score: home,
+      score: state.ships.map((own, s) => 2 * TRACK - left(state, s)),
       summary: `{s:${w}} wins the Comet Run`,
     };
   },
 
   // Closer to the dock is better; a ship home counts as zero steps left.
   heuristic(state, seat) {
-    const left = (s) => state.ships[s].reduce((n, p) => n + (p === "home" ? 0 : TO_DOCK[p]), 0);
-    const mine = left(seat);
+    const mine = left(state, seat);
     let best = Infinity;
-    for (let s = 0; s < state.ships.length; s++) if (s !== seat) best = Math.min(best, left(s));
+    for (let s = 0; s < state.ships.length; s++) if (s !== seat) best = Math.min(best, left(state, s));
     return Math.max(-1, Math.min(1, (best - mine) / (2 * TRACK)));
   },
 };

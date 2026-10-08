@@ -700,6 +700,8 @@ select.pw-input option { background: var(--navy-800, #111b33); }
 .pw-bg-main.is-story { align-items: stretch; gap: 16px; }
 .pw-bg-stage { --board-w: min(calc((100dvh - 430px) * var(--cols, 1) / var(--rows, 1)), 600px); flex: 1 0 auto; display: grid; grid-template-columns: minmax(260px, var(--board-w)) minmax(260px, 340px); justify-content: center; gap: 24px; align-items: start; width: 100%; }
 .pw-bg-stage.no-board { grid-template-columns: minmax(0, 1fr); max-width: 640px; }
+.pw-bg-stage.no-side { grid-template-columns: minmax(260px, var(--board-w)); }
+.pw-bg-stage.no-side .pw-bg-side { display: none; }
 .pw-bg-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .is-story .pw-bg-board { width: 100%; min-width: 0; }
 .pw-bg-side .pw-story { max-height: max(220px, calc(100dvh - 520px)); }
@@ -1214,9 +1216,9 @@ select.pw-input option { background: var(--navy-800, #111b33); }
 
 .pw-space-wrap { position: absolute; z-index: 2; width: calc(var(--u) * var(--sz, 1)); height: calc(var(--u) * var(--sz, 1)); transform: translate(-50%, -50%); }
 .pw-space-wrap:has(.is-sel, .is-click:hover, :focus-visible) { z-index: 5; }
-.pw-cell.pw-space { --sc: #9fb4dc; position: absolute; inset: 0; aspect-ratio: auto; display: grid; place-items: center; border-radius: 50%;
-  background: radial-gradient(circle at 40% 32%, color-mix(in srgb, var(--sc) 55%, #fff 0%), color-mix(in srgb, var(--sc) 28%, #0a1226) 75%);
-  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--sc) 70%, transparent), inset 0 -3px 6px rgba(0,0,0,.35), 0 4px 10px rgba(0,0,0,.35);
+.pw-cell.pw-space { position: absolute; inset: 0; aspect-ratio: auto; display: grid; place-items: center; border-radius: 50%;
+  background: radial-gradient(circle at 40% 32%, color-mix(in srgb, var(--sc, #9fb4dc) 55%, #fff 0%), color-mix(in srgb, var(--sc, #9fb4dc) 28%, #0a1226) 75%);
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--sc, #9fb4dc) 70%, transparent), inset 0 -3px 6px rgba(0,0,0,.35), 0 4px 10px rgba(0,0,0,.35);
   transition: transform .15s var(--pw-ease), box-shadow .15s, filter .15s; }
 .pw-space.shape-square { border-radius: 18%; }
 .pw-space.shape-rect { border-radius: 14%; inset: 12% -30%; }

@@ -64,10 +64,10 @@ A race for 2–4 players on a map of space. Each player flies two ships around t
 A loop of 20 spaces around the planet, starting and ending at the Dock. At the Fork (space 5) a shortcut leaves the loop through the Nebula (three spaces) and rejoins it at space 12: four steps instead of seven.
 
 ## Turns
-At the start of your turn you roll a die (1–4). Move one of your ships exactly that many spaces forward along the arrows; at the Fork you choose the loop or the Nebula. Passing or reaching the Dock brings the ship home. If your ship lands on a space with exactly one rival ship, that ship is bumped back to the Dock. If none of your ships can move, you pass.
+Each player holds four thrusters: 1, 2, 3 and 4. On your turn play one of them and move one of your ships exactly that many spaces forward along the arrows; at the Fork you choose the loop or the Nebula. Once you have used all four you get them all back. Passing or reaching the Dock brings the ship home. If your ship lands on a space with exactly one rival ship, that ship is bumped back to the Dock. If none of your ships can move, you pass.
 
 ## End
-The first player with both ships home wins.`,
+The first player with both ships home wins. If nobody has after 60 rounds, the player whose ships have the fewest steps left to the Dock wins (a tie goes to the earlier player in turn order).`,
 	"story-tiles": `## Overview
 A storytelling tile game for 2 players with hidden hands. Twelve unique story cards (characters, places, events and twists) are played onto a 5×5 board; the story so far is the story lines of the cards played, in order.
 

@@ -1306,6 +1306,46 @@ class HexMock extends MockBase {
   }
 }
 
+// Dev: any module's view, from localStorage "preview.view" ({ data, legal,
+// seats }), to look at what the Studio built without a server.
+class StaticViewMock extends MockBase {
+  name = 'Preview'
+  game = { id: 'preview', name: 'Preview', kind: 'script' }
+  viewKind = 'board' as const
+  seats: SeatInfo[] = [seatOf('me', 0), seatOf('nova', 1)]
+  stored: { data: BoardData; legal: MoveSpec[] } = { data: {}, legal: [] }
+  constructor() {
+    super()
+    try {
+      const v = JSON.parse(localStorage.getItem('preview.view') || '{}')
+      this.stored = { data: v.data || {}, legal: v.legal || [] }
+      this.name = v.data?.title || 'Preview'
+      const n = v.seats || 2
+      this.seats = Array.from({ length: n }, (_, i) => (i === 0 ? seatOf('me', 0) : seatOf(['nova', 'mika', 'ren'][(i - 1) % 3], i)))
+    } catch {
+      /* no preview view stored */
+    }
+    this.touch()
+  }
+  toMove() {
+    return [0]
+  }
+  statusText() {
+    return ''
+  }
+  legalFor(seat: number) {
+    return seat === 0 ? this.stored.legal : []
+  }
+  applyMove() {}
+  pending() {
+    return null
+  }
+  step() {}
+  data(): BoardData {
+    return this.stored.data
+  }
+}
+
 export function createMock(kind: string | null): MockGame | null {
   const many = /^holdem-([2-9])$/.exec(kind || '')
   if (many) return seatCountFixture(Number(many[1]))
@@ -1341,6 +1381,8 @@ export function createMock(kind: string | null): MockGame | null {
       return new MapMock()
     case 'hex':
       return new HexMock()
+    case 'view':
+      return new StaticViewMock()
     case 'lobby':
       return new LobbyMock()
     case 'finished':

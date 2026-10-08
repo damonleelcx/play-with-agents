@@ -260,6 +260,8 @@ export default function BoardView({
   const seatName = (seat: number) => table.seats[seat]?.name || `Seat ${seat + 1}`
   const anyRich = !!d.zones?.some((z) => z.cards.some(isRich)) || [...places.values()].some((p) => isRich(p.cell?.card))
   const storyMode = !!d.story || anyRich
+  // An empty story panel only makes sense where cards are played onto the board.
+  const cardsOnBoard = cardCells.size > 0 || [...places.values()].some((p) => !!p.cell?.card)
   const selCardData = selCard ? cardAt(d, selCard) : null
   const area = (z: NonNullable<BoardData['zones']>[number]) => z.area || (z.owner !== undefined && z.owner === table.my_seat ? 'bottom' : 'top')
   const myZones = d.zones?.filter((z) => z.owner !== undefined && z.owner === table.my_seat && area(z) === 'bottom') || []
@@ -424,11 +426,11 @@ export default function BoardView({
 
       {storyMode ? (
         <div className="pw-bg-main is-story">
-          <div className={`pw-bg-stage ${b ? '' : 'no-board'}`} style={dims ? ({ '--rows': dims.rows, '--cols': dims.cols } as CSSProperties) : undefined}>
+          <div className={`pw-bg-stage ${b ? '' : 'no-board'} ${otherZones.length === 0 && !(d.story && (d.story.length > 0 || cardsOnBoard)) ? 'no-side' : ''}`} style={dims ? ({ '--rows': dims.rows, '--cols': dims.cols } as CSSProperties) : undefined}>
             <div className="pw-bg-center">{boardEl}</div>
             <aside className="pw-bg-side">
               {otherZones.length > 0 && <Zones zones={otherZones} {...zoneProps} compact />}
-              {d.story && <StoryPanel story={d.story} seatColor={seatColor} seatName={seatName} reduced={reduced} />}
+              {d.story && (d.story.length > 0 || cardsOnBoard) && <StoryPanel story={d.story} seatColor={seatColor} seatName={seatName} reduced={reduced} />}
             </aside>
           </div>
           {myZones.length > 0 && (
