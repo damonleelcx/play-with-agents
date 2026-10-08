@@ -19,7 +19,7 @@ Principles:
 - Everything must be decidable by a program: exact board size, exact move legality, exact scoring, exact end condition, exact tie-breaks. No "roughly", no table talk rules, no real money, no dexterity or timing.
 - Turn-based only. 1 to 8 seats.
 - The board follows the design, not the other way round. Use whatever this game needs: a square grid, a hex grid, a track or loop of spaces, a map of named places joined by paths (rivers, roads, rails, star lanes), islands or regions, a network of rooms, or no board at all (cards on a table, a market row, piles). Never force a grid on a game that is really a race, a journey or a map. Describe the board exactly: every space (or place) by name or number, which ones connect to which, where each player starts, and any special spaces.
-- Describe the table too: what is shared in the middle (decks, markets, piles), what each player keeps in front of them, and what is hidden.
+- Describe the table too: what is shared in the middle (decks, markets, piles), what each player keeps in front of them, and what is hidden. Picture the layout as a player sees it: where the board sits and how much of the table it takes (usually most of it), and where hands, markets, piles, tracks and the story go around it.
 - Today is %s (UTC).
 
 Save the document with save_rules, then finish with a two-sentence summary of the game in %s. The rules document itself is written in %s (the player's language); tool argument names stay in English.`,
@@ -41,7 +41,8 @@ How you work:
 - Text shown to players refers to seats as {s:N}, never "Player 1".
 - Every game must end: toMove returns [] exactly when outcome returns non-null. Never leave the mover stuck: whenever toMove lists a seat, legal(state, seat) must return at least one move. If the rules allow nothing (no playable card, every square sealed), offer a pass move (or end the game, if the rules say so), and check the blocked case explicitly: a hand of only conditional cards on a crowded board.
 - Draw the board the rules describe, not a grid by default. A square board is a grid (board.rows/cols/cells; style "hex" for a hex grid). Anything else — a track, a loop, a map of places and paths, islands, a network — is a map board: board.spaces with x, y in percent, links for the paths (style arrow for one-way, dashed, road, rail, river, bridge), regions for areas, a theme for the table (wood, felt, parchment, space, ocean, forest, ...). Several pieces on one space go in pieces: [...]. See the comet_run reference.
-- Lay out the table: zones carry area "top" | "bottom" | "left" | "right" | "center" (a shared market or discard pile in the center, each player's tableau around the board), and layout "grid" for a market of face-up cards.
+- Lay the table out the way the design pictures it with view.layout: a floor plan of named areas (CSS grid areas). areas: rows of area names ("." for an empty cell), columns/rows: CSS track sizes, place: what goes where (board, story, hand = the viewer's own cards, others = everyone else's zones, or any zone by id), board: fill | large | medium | small, hand: tray (a fan along the bottom edge, the default) or area. The board is the centre of the table: give it the biggest area unless the game is mostly cards. Without a layout the renderer puts the board first with a narrow side column. See the story_tiles reference.
+- Within a layout or without one: zones carry area "top" | "bottom" | "left" | "right" | "center" (a shared market or discard pile in the center, each player's tableau around the board), and layout "grid" for a market of face-up cards.
 - Give moves ui hints so the board is clickable: {cell:[r,c]} for placing, {from:[r,c],to:[r,c]} for moving, {zone,index} for playing a card, {zone,index,cell:[r,c]} for playing a card onto a square (one legal move per card and square; the board lets the player pick the card, then the square). On a map board, name spaces by id instead: {space:"s4"}, {from:"s4",to:"n2"}, {zone,index,space:"s4"}. The index is the card's position in that zone as your view lists it.
 - Card games: give every card a face the renderer can show richly: title (its name), text (one line of flavour or story, shown in italics), effect (its rules text), kind (a one-word badge such as character, place, event, twist or item) and value or cost when it has one. Cards on the board go in cell.card (same shape). A hidden card is exactly { hidden: true }.
 - A deck of individually designed cards: make the deck DATA, not branches. One top-level constant CARDS array with one entry per card (id, title, text, effect, kind and the numbers its rule needs), and one small handler per distinct effect (canPlay(state, seat, card, cell) and play(state, seat, card, cell)). legal() offers a card on a square only when that card's own canPlay says so; a card whose rule says "only next to X" or "only if Y" must not be offered anywhere else. Before you save, walk the rules document card by card and check that each card's title, numbers, placement condition and effect match its entry and handler exactly.
@@ -157,6 +158,13 @@ const game = {
   "story": [ { "text": "Every dusk he climbed the hill.", "seat": 0, "title": "The Lamplighter" } ],
                                      // optional, ordered, ≤200 lines: the "Story so far" panel
   "prompt": "Choose a card, then a square",   // optional, shown above the mover's hand
+  "layout": {                                  // optional: the game's own table (else board-first default)
+    "areas": ["rival board story", "deck board story"],   // ≤8 rows × ≤6 names; "." = empty
+    "columns": "200px minmax(0, 1fr) 280px", "rows": "auto 1fr",
+    "place": { "story": "story", "deck": "deck", "hand-1": "rival" },  // board | story | hand | others | a zone id
+    "board": "fill",                            // fill | large | medium | small
+    "hand": "tray"                              // tray (bottom fan) | area (placed by place.hand)
+  },
   "players": [ { "seat": 0, "score": 3, "info": "Red", "color": "p0" } ],
   "counters": [ { "label": "Round", "value": "2 / 5" } ],
   "message": "Red to move"

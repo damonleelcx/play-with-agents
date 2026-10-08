@@ -239,6 +239,16 @@ const game = {
       players: [0, 1].map((p) => ({ seat: p, score: sc[p], info: `${state.hands[p].length} in hand`, color: `p${p}` })),
       counters: [{ label: "Cards played", value: `${state.story.length} / ${CARDS.length}` }],
       message,
+      // The table as this game pictures it: the rival's hand and the deck on
+      // the left, the board large in the middle, the story on the right; your
+      // own hand stays the tray along the bottom edge.
+      layout: {
+        areas: ["rival board story", "deck board story"],
+        columns: "minmax(150px, 200px) minmax(0, 1fr) minmax(240px, 300px)",
+        rows: "auto 1fr",
+        place: { "hand-0": "rival", "hand-1": "rival", deck: "deck", story: "story" },
+        board: "fill",
+      },
     };
     if (!state.over && seat === state.turn) v.prompt = "Choose a card, then a square, to continue the story";
     return v;
