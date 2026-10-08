@@ -306,14 +306,21 @@ func parseUI(fn, path string, v any) (obj, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := keys(fn, path, o, "cell", "from", "to", "zone", "index", "target"); err != nil {
+	if err := keys(fn, path, o, "cell", "space", "from", "to", "zone", "index", "target"); err != nil {
 		return nil, err
 	}
+	// A place on the board: [row, col] on a grid, a space id on a map.
 	for _, k := range []string{"cell", "from", "to"} {
 		if c, ok := o[k]; ok {
+			if id, isStr := c.(string); isStr {
+				if id == "" {
+					return nil, outErr(fn, path+"."+k, "must be [row, col] or a non-empty space id")
+				}
+				continue
+			}
 			a, isArr := c.([]any)
 			if !isArr || len(a) != 2 {
-				return nil, outErr(fn, path+"."+k, "must be [row, col], got %v", c)
+				return nil, outErr(fn, path+"."+k, "must be [row, col] (a grid) or a space id string (a map), got %v", c)
 			}
 			for _, x := range a {
 				if n, ok := asInt(x); !ok || n < 0 {
@@ -321,6 +328,17 @@ func parseUI(fn, path string, v any) (obj, error) {
 				}
 			}
 		}
+	}
+	if sp, ok := o["space"]; ok {
+		if id, isStr := sp.(string); !isStr || id == "" {
+			return nil, outErr(fn, path+".space", "must be a non-empty space id, got %v", sp)
+		}
+		if _, both := o["cell"]; both {
+			return nil, outErr(fn, path, "has both cell and space; use {cell:[r,c]} on a grid, {space:id} on a map")
+		}
+		// One name for "the place clicked" from here on.
+		o["cell"] = o["space"]
+		delete(o, "space")
 	}
 	_, hasFrom := o["from"]
 	_, hasTo := o["to"]
@@ -330,7 +348,7 @@ func parseUI(fn, path string, v any) (obj, error) {
 		return nil, outErr(fn, path, "needs both from and to (or neither)")
 	}
 	if hasFrom && (hasCell || hasZone) {
-		return nil, outErr(fn, path, "mixes from/to with cell or zone; use {from,to} to move a piece, {cell} to place, {zone,index} to play a card, {zone,index,cell} to play a card onto a cell")
+		return nil, outErr(fn, path, "mixes from/to with cell or zone; use {from,to} to move a piece, {cell} or {space} to place, {zone,index} to play a card, {zone,index,cell|space} to play a card onto the board")
 	}
 	if hasZone {
 		z := o["zone"]
@@ -599,15 +617,21 @@ func validateBoard(v any, seats int) error {
 	if err != nil {
 		return err
 	}
-	if err := keys(fn, "view.board", b, "rows", "cols", "style", "cells"); err != nil {
+	if _, isMap := b["spaces"]; isMap {
+		return validateMap(b, seats)
+	}
+	if err := keys(fn, "view.board", b, "rows", "cols", "style", "cells", "theme"); err != nil {
 		return err
 	}
 	rows, ok1 := asInt(b["rows"])
 	cols, ok2 := asInt(b["cols"])
 	if !ok1 || !ok2 || rows < 1 || cols < 1 || rows > maxBoardSide || cols > maxBoardSide {
-		return outErr(fn, "view.board", "needs integer rows and cols in 1..%d, got %v and %v", maxBoardSide, b["rows"], b["cols"])
+		return outErr(fn, "view.board", "needs integer rows and cols in 1..%d, got %v and %v (a board that is not a grid uses spaces: [...] instead)", maxBoardSide, b["rows"], b["cols"])
 	}
-	if err := optEnum(fn, "view.board", b, "style", "grid", "checker", "go", "plain", "tiles"); err != nil {
+	if err := optEnum(fn, "view.board", b, "style", "grid", "checker", "go", "plain", "tiles", "hex"); err != nil {
+		return err
+	}
+	if err := optEnum(fn, "view.board", b, "theme", themes...); err != nil {
 		return err
 	}
 	cells, err := array(fn, "view.board.cells", b["cells"])
@@ -638,14 +662,212 @@ func validateBoard(v any, seats int) error {
 	return nil
 }
 
+// Map limits: a board of places a person can read and click.
+const (
+	maxSpaces     = 200
+	maxLinks      = 400
+	maxRegions    = 24
+	maxLabelLen   = 40
+	maxPieceStack = 12
+)
+
+// themes are the board backgrounds the renderer paints.
+var themes = []string{"plain", "wood", "felt", "parchment", "stone", "night", "space", "ocean", "forest", "desert", "snow", "neon"}
+
+// validateMap checks a free-form board: places anywhere (x, y in percent of
+// the board), the paths between them and the regions under them.
+func validateMap(b obj, seats int) error {
+	const fn = "view"
+	if err := keys(fn, "view.board", b, "spaces", "links", "regions", "theme", "aspect", "grid"); err != nil {
+		return err
+	}
+	if err := optEnum(fn, "view.board", b, "theme", themes...); err != nil {
+		return err
+	}
+	if av, ok := b["aspect"]; ok {
+		a, isNum := av.(float64)
+		if !isNum || a < 0.4 || a > 3 {
+			return outErr(fn, "view.board.aspect", "must be a number in 0.4..3 (width / height), got %v", av)
+		}
+	}
+	if gv, ok := b["grid"]; ok {
+		if _, isBool := gv.(bool); !isBool {
+			return outErr(fn, "view.board.grid", "must be true or false (faint guide lines), got %s", typeName(gv))
+		}
+	}
+	spaces, err := array(fn, "view.board.spaces", b["spaces"])
+	if err != nil {
+		return err
+	}
+	if len(spaces) == 0 || len(spaces) > maxSpaces {
+		return outErr(fn, "view.board.spaces", "has %d spaces; a map board needs 1..%d", len(spaces), maxSpaces)
+	}
+	ids := map[string]bool{}
+	for i, sv := range spaces {
+		p := fmt.Sprintf("view.board.spaces[%d]", i)
+		sp, err := object(fn, p, sv)
+		if err != nil {
+			return err
+		}
+		if err := keys(fn, p, sp, "id", "x", "y", "shape", "size", "label", "color",
+			"piece", "pieces", "card", "mark", "text", "blocked"); err != nil {
+			return err
+		}
+		id, err := reqString(fn, p, sp, "id")
+		if err != nil {
+			return err
+		}
+		if ids[id] {
+			return outErr(fn, p+".id", "duplicates space id %q", id)
+		}
+		ids[id] = true
+		for _, k := range []string{"x", "y"} {
+			n, isNum := sp[k].(float64)
+			if !isNum || n < 0 || n > 100 {
+				return outErr(fn, p+"."+k, "must be a number in 0..100 (percent across the board), got %v", sp[k])
+			}
+		}
+		if err := optEnum(fn, p, sp, "shape", "circle", "square", "hex", "diamond", "star", "rect", "pill", "none"); err != nil {
+			return err
+		}
+		if zv, ok := sp["size"]; ok {
+			z, isNum := zv.(float64)
+			if !isNum || z < 0.3 || z > 4 {
+				return outErr(fn, p+".size", "must be a number in 0.3..4 (1 = a standard space), got %v", zv)
+			}
+		}
+		if err := limitedString(fn, p+".label", sp["label"], maxLabelLen, seats); err != nil {
+			return err
+		}
+		if err := optColor(fn, p, sp, "color"); err != nil {
+			return err
+		}
+		place := obj{}
+		for _, k := range []string{"piece", "pieces", "card", "mark", "text", "blocked"} {
+			if x, ok := sp[k]; ok {
+				place[k] = x
+			}
+		}
+		if err := validateCell(p, place, seats); err != nil {
+			return err
+		}
+	}
+	if lv, ok := b["links"]; ok && lv != nil {
+		links, err := array(fn, "view.board.links", lv)
+		if err != nil {
+			return err
+		}
+		if len(links) > maxLinks {
+			return outErr(fn, "view.board.links", "has %d links, over the limit of %d", len(links), maxLinks)
+		}
+		for i, xv := range links {
+			p := fmt.Sprintf("view.board.links[%d]", i)
+			l, err := object(fn, p, xv)
+			if err != nil {
+				return err
+			}
+			if err := keys(fn, p, l, "from", "to", "style", "color", "label"); err != nil {
+				return err
+			}
+			for _, k := range []string{"from", "to"} {
+				id, err := reqString(fn, p, l, k)
+				if err != nil {
+					return err
+				}
+				if !ids[id] {
+					return outErr(fn, p+"."+k, "names space %q, which board.spaces does not have", id)
+				}
+			}
+			if err := optEnum(fn, p, l, "style", "line", "dashed", "dotted", "arrow", "road", "rail", "river", "bridge"); err != nil {
+				return err
+			}
+			if err := optColor(fn, p, l, "color"); err != nil {
+				return err
+			}
+			if err := limitedString(fn, p+".label", l["label"], maxLabelLen, seats); err != nil {
+				return err
+			}
+		}
+	}
+	if rv, ok := b["regions"]; ok && rv != nil {
+		regions, err := array(fn, "view.board.regions", rv)
+		if err != nil {
+			return err
+		}
+		if len(regions) > maxRegions {
+			return outErr(fn, "view.board.regions", "has %d regions, over the limit of %d", len(regions), maxRegions)
+		}
+		for i, xv := range regions {
+			p := fmt.Sprintf("view.board.regions[%d]", i)
+			r, err := object(fn, p, xv)
+			if err != nil {
+				return err
+			}
+			if err := keys(fn, p, r, "x", "y", "w", "h", "shape", "color", "label"); err != nil {
+				return err
+			}
+			for _, k := range []string{"x", "y", "w", "h"} {
+				n, isNum := r[k].(float64)
+				if !isNum || n < 0 || n > 100 {
+					return outErr(fn, p+"."+k, "must be a number in 0..100 (percent of the board), got %v", r[k])
+				}
+			}
+			if err := optEnum(fn, p, r, "shape", "rect", "ellipse", "blob"); err != nil {
+				return err
+			}
+			if err := optColor(fn, p, r, "color"); err != nil {
+				return err
+			}
+			if err := limitedString(fn, p+".label", r["label"], maxLabelLen, seats); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// optColor checks an optional colour: p0..p7, #hex or a short CSS colour.
+func optColor(fn, path string, o obj, k string) error {
+	v, ok := o[k]
+	if !ok || v == nil {
+		return nil
+	}
+	s, isStr := v.(string)
+	if !isStr || s == "" || len(s) > maxColorLen {
+		return outErr(fn, path+"."+k, "must be a colour (p0..p7, #hex or a CSS colour name), got %v", v)
+	}
+	return nil
+}
+
 func validateCell(path string, v any, seats int) error {
 	const fn = "view"
 	c, err := object(fn, path, v)
 	if err != nil {
 		return err
 	}
-	if err := keys(fn, path, c, "piece", "card", "mark", "text", "blocked"); err != nil {
+	if err := keys(fn, path, c, "piece", "pieces", "card", "mark", "text", "blocked"); err != nil {
 		return err
+	}
+	if sv, ok := c["pieces"]; ok && sv != nil {
+		// Several pieces on one place (tokens sharing a track space, a stack).
+		if pv, ok := c["piece"]; ok && pv != nil {
+			return outErr(fn, path, "has both piece and pieces; use pieces for several")
+		}
+		if cv, ok := c["card"]; ok && cv != nil {
+			return outErr(fn, path, "has both pieces and card; a place shows one or the other")
+		}
+		ps, err := array(fn, path+".pieces", sv)
+		if err != nil {
+			return err
+		}
+		if len(ps) > maxPieceStack {
+			return outErr(fn, path+".pieces", "has %d pieces, over the limit of %d; show a count in text instead", len(ps), maxPieceStack)
+		}
+		for i, pv := range ps {
+			if err := validatePiece(fmt.Sprintf("%s.pieces[%d]", path, i), pv); err != nil {
+				return err
+			}
+		}
 	}
 	if err := optString(fn, path, c, "mark"); err != nil {
 		return err
@@ -669,7 +891,11 @@ func validateCell(path string, v any, seats int) error {
 	if !hasPiece || pv == nil {
 		return nil
 	}
-	pp := path + ".piece"
+	return validatePiece(path+".piece", pv)
+}
+
+func validatePiece(pp string, pv any) error {
+	const fn = "view"
 	p, err := object(fn, pp, pv)
 	if err != nil {
 		return err
@@ -677,7 +903,7 @@ func validateCell(path string, v any, seats int) error {
 	if err := keys(fn, pp, p, "shape", "color", "glyph", "label"); err != nil {
 		return err
 	}
-	if err := optEnum(fn, pp, p, "shape", "disc", "square", "ring", "king", "text"); err != nil {
+	if err := optEnum(fn, pp, p, "shape", "disc", "square", "ring", "king", "text", "pawn", "meeple", "cube", "ship", "star", "hex"); err != nil {
 		return err
 	}
 	for _, k := range []string{"color", "glyph", "label"} {
@@ -701,7 +927,7 @@ func validateZones(v any, seats int) error {
 		if err != nil {
 			return err
 		}
-		if err := keys(fn, p, z, "id", "label", "owner", "layout", "cards"); err != nil {
+		if err := keys(fn, p, z, "id", "label", "owner", "layout", "cards", "area"); err != nil {
 			return err
 		}
 		id, err := reqString(fn, p, z, "id")
@@ -720,7 +946,11 @@ func validateZones(v any, seats int) error {
 				return err
 			}
 		}
-		if err := optEnum(fn, p, z, "layout", "row", "fan", "stack"); err != nil {
+		if err := optEnum(fn, p, z, "layout", "row", "fan", "stack", "grid"); err != nil {
+			return err
+		}
+		// Where the zone sits at the table: around the board, or in the middle.
+		if err := optEnum(fn, p, z, "area", "top", "bottom", "left", "right", "center"); err != nil {
 			return err
 		}
 		cards, err := array(fn, p+".cards", z["cards"])
