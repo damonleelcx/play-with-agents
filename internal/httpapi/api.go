@@ -320,7 +320,7 @@ func (s *Server) clearMemories(w http.ResponseWriter, r *http.Request, u *auth.U
 func (s *Server) conversations(w http.ResponseWriter, r *http.Request, u *auth.User) {
 	archived := r.URL.Query().Get("archived") == "1"
 	rows, err := s.Pool.Query(r.Context(), `SELECT c.id, c.title, c.archived, c.updated_at,
-		(SELECT left(content, 120) FROM messages m WHERE m.conversation_id=c.id ORDER BY id DESC LIMIT 1)
+		(SELECT left(content, 120) FROM messages m WHERE m.conversation_id=c.id ORDER BY id DESC LIMIT 1), c.mode
 		FROM conversations c WHERE c.user_id=$1 AND c.archived=$2 ORDER BY c.updated_at DESC LIMIT 200`, u.ID, archived)
 	if err != nil {
 		writeErr(w, 500, "error")
@@ -333,20 +333,97 @@ func (s *Server) conversations(w http.ResponseWriter, r *http.Request, u *auth.U
 		var arch bool
 		var at time.Time
 		var last *string
-		if rows.Scan(&id, &title, &arch, &at, &last) == nil {
-			out = append(out, map[string]any{"id": id, "title": title, "archived": arch, "updated_at": at, "last": last})
+		var mode string
+		if rows.Scan(&id, &title, &arch, &at, &last, &mode) == nil {
+			out = append(out, map[string]any{"id": id, "title": title, "archived": arch, "updated_at": at, "last": last, "mode": mode})
 		}
 	}
 	writeJSON(w, 200, out)
 }
 
 func (s *Server) newConversation(w http.ResponseWriter, r *http.Request, u *auth.User) {
+	// An optional body {"mode":"design"} opens a game-design session.
+	var in struct {
+		Mode string `json:"mode"`
+	}
+	if r.ContentLength > 0 {
+		_ = readJSON(r, &in)
+	}
 	var id string
-	if err := s.Pool.QueryRow(r.Context(), `INSERT INTO conversations (user_id) VALUES ($1) RETURNING id`, u.ID).Scan(&id); err != nil {
+	var err error
+	if in.Mode == "design" {
+		id, err = s.Agent.NewDesign(r.Context(), u.ID)
+	} else {
+		err = s.Pool.QueryRow(r.Context(), `INSERT INTO conversations (user_id) VALUES ($1) RETURNING id`, u.ID).Scan(&id)
+	}
+	if err != nil {
 		writeErr(w, 500, "error")
 		return
 	}
-	writeJSON(w, 201, map[string]string{"id": id})
+	writeJSON(w, 201, map[string]string{"id": id, "mode": map[bool]string{true: "design", false: "chat"}[in.Mode == "design"]})
+}
+
+// ── game-play design mode ───────────────────────────────────────────────────
+
+func (s *Server) getDesign(w http.ResponseWriter, r *http.Request, u *auth.User) {
+	id, ok := s.ownConversation(r, u)
+	if !ok {
+		writeErr(w, 404, "not found")
+		return
+	}
+	st, err := s.Agent.ConversationDesign(r.Context(), id)
+	if err != nil {
+		writeErr(w, 500, "error")
+		return
+	}
+	writeJSON(w, 200, st)
+}
+
+func (s *Server) designPlan(w http.ResponseWriter, r *http.Request, u *auth.User) {
+	id, ok := s.ownConversation(r, u)
+	if !ok {
+		writeErr(w, 404, "not found")
+		return
+	}
+	// Writing the plan takes a while; it is stored even if the page goes away.
+	ctx, cancel := contextDetached(r, 4*time.Minute)
+	defer cancel()
+	st, err := s.Agent.DesignPlan(ctx, agent.User{ID: u.ID, Email: u.Email, Name: u.Name, Lang: s.lang(r, u)}, id)
+	if errors.Is(err, agent.ErrNoDesign) {
+		writeErr(w, 400, "this conversation is not a design session")
+		return
+	}
+	if err != nil {
+		slog.Error("design plan", "conv", id, "err", err)
+		writeErr(w, 502, "the plan could not be written right now; try again in a moment")
+		return
+	}
+	writeJSON(w, 200, st)
+}
+
+func (s *Server) designBuild(w http.ResponseWriter, r *http.Request, u *auth.User) {
+	id, ok := s.ownConversation(r, u)
+	if !ok {
+		writeErr(w, 404, "not found")
+		return
+	}
+	st, err := s.Agent.DesignBuild(r.Context(), agent.User{ID: u.ID, Email: u.Email, Name: u.Name, Lang: s.lang(r, u)}, id)
+	if errors.Is(err, agent.ErrNoDesign) {
+		writeErr(w, 400, "this conversation is not a design session")
+		return
+	}
+	if err != nil {
+		// The player-facing reasons are the design's own; anything else is
+		// logged, not shown.
+		if msg := err.Error(); msg == "make the build plan first" || strings.Contains(msg, "studio is not open") {
+			writeErr(w, 400, msg)
+			return
+		}
+		slog.Error("design build", "conv", id, "err", err)
+		writeErr(w, 502, "the build could not start right now; try again in a moment")
+		return
+	}
+	writeJSON(w, 200, st)
 }
 
 func (s *Server) ownConversation(r *http.Request, u *auth.User) (string, bool) {

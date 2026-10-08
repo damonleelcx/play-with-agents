@@ -2,12 +2,13 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { AoiFace, Img, guessMood, type Mood } from '../components/Aoi'
 import { IconAlert, IconChevronD, IconRefresh, IconSend, IconSpeaker, IconStop } from '../components/Icons'
-import { api, streamMessage, uid, type Card, type Message } from '../lib/api'
+import { api, streamMessage, uid, type Card, type DesignState, type Message } from '../lib/api'
 import { useI18n } from '../lib/i18n'
 import { md } from '../lib/md'
 import { useSession } from '../lib/session'
 import { speakMessage, stop as stopVoice, useVoice } from '../lib/voice'
 import { CardBoundary, GameCard, MissionCard } from './cards'
+import DesignPanel from './DesignPanel'
 import { useLive } from './live'
 import { TableCard } from './play'
 import { usePrefs } from './prefs'
@@ -39,6 +40,9 @@ export default function Chat({ onChanged }: { onChanged: () => void }) {
   const [text, setText] = useState('')
   const [streaming, setStreaming] = useState(false)
   const [pinnedView, setPinnedView] = useState(true)
+  // A game-design session: the notes panel and its plan/build flow.
+  const [design, setDesign] = useState<DesignState | null>(null)
+  const isDesign = design?.mode === 'design'
   const abort = useRef<AbortController | null>(null)
   const list = useRef<HTMLDivElement>(null)
   const box = useRef<HTMLTextAreaElement>(null)
@@ -93,6 +97,16 @@ export default function Chat({ onChanged }: { onChanged: () => void }) {
   useEffect(() => {
     if (!streamingRef.current) load()
   }, [load, tick])
+
+  const loadDesign = useCallback(async () => {
+    if (!convId) return setDesign(null)
+    try {
+      setDesign(await api.get<DesignState>(`/api/conversations/${convId}/design`))
+    } catch {
+      /* the chat works without it */
+    }
+  }, [convId])
+  useEffect(() => { loadDesign() }, [loadDesign, tick])
 
   // Stay pinned to the bottom unless the reader scrolled up.
   useLayoutEffect(() => {
@@ -154,7 +168,15 @@ export default function Chat({ onChanged }: { onChanged: () => void }) {
       const ctl = new AbortController()
       abort.current = ctl
       await streamMessage(id!, body, clientId, {
-        meta: (meta) => patch((m) => ({ ...m, meta: { ...m.meta, ...meta } })),
+        meta: (meta) => {
+          // The design notes catch up with each exchange.
+          if (meta && typeof meta.design === 'object') {
+            const doc = meta.design
+            setDesign((d) => (d ? { ...d, design: doc, stale: !!d.plan, updated_at: new Date().toISOString() } : d))
+            return
+          }
+          patch((m) => ({ ...m, meta: { ...m.meta, ...meta } }))
+        },
         delta: (d) => { full += d; patch((m) => ({ ...m, content: m.content + d })) },
         done: (mid) => {
           if (typeof mid === 'number' && mid > 0) finalId = mid
@@ -174,6 +196,7 @@ export default function Chat({ onChanged }: { onChanged: () => void }) {
       if (!failed && full.trim() && autoplay.current && finalId > 0) speakMessage(finalId, `m${finalId}`)
       if (created && id && !failed) nav(`/app/c/${id}`, { replace: true })
       else if (!failed) window.setTimeout(load, 400) // the server now holds the authoritative copy (and its cards)
+      if (!failed && isDesign) window.setTimeout(loadDesign, 600)
     }
   }
 
@@ -199,13 +222,13 @@ export default function Chat({ onChanged }: { onChanged: () => void }) {
   const empty = loaded && messages.length === 0 && !loadErr
   const firstName = (user?.name || '').trim().split(/\s+/)[0]
 
-  return (
+  const chat = (
     <div className="aoi-chat">
       <header className="aoi-chat-head">
         <AoiFace mood={headMood} size={38} ring pulse={streaming && !voice.speaking} speaking={voice.speaking} />
         <div className="ch-text">
-          <strong>Aoi <span className="ch-zh">葵</span></strong>
-          <small className={streaming || voice.speaking ? 'typing-label' : ''}>{streaming ? t.chat.typing + '…' : voice.speaking ? t.chat.speaking + '…' : t.chat.role}</small>
+          <strong>Aoi <span className="ch-zh">葵</span>{isDesign && <span className="ch-badge">{t.design.badge}</span>}</strong>
+          <small className={streaming || voice.speaking ? 'typing-label' : ''}>{streaming ? t.chat.typing + '…' : voice.speaking ? t.chat.speaking + '…' : isDesign ? t.design.role : t.chat.role}</small>
         </div>
       </header>
 
@@ -220,12 +243,12 @@ export default function Chat({ onChanged }: { onChanged: () => void }) {
                 fallback={<span className="ce-fallback">葵</span>} />
               <span className="ce-face"><AoiFace mood="smile" size={44} /></span>
             </div>
-            <h1>{firstName ? f(t.chat.hello, { name: firstName }) : t.chat.helloAnon}</h1>
-            <p>{t.chat.intro}</p>
+            <h1>{isDesign ? t.design.emptyTitle : firstName ? f(t.chat.hello, { name: firstName }) : t.chat.helloAnon}</h1>
+            <p>{isDesign ? t.design.emptyIntro : t.chat.intro}</p>
             <div className="ce-suggest">
-              {t.chat.suggestions.map((s, i) => (
+              {(isDesign ? t.design.suggestions : t.chat.suggestions).map((s, i) => (
                 <button key={s} className="chip-btn" style={{ animationDelay: `${120 + i * 70}ms` }} onClick={() => send(s)}>
-                  <span className="chip-emoji" aria-hidden="true">{['🂡', '🎓', '🛠️', '👋'][i]}</span>{s}
+                  <span className="chip-emoji" aria-hidden="true">{(isDesign ? ['🎲', '☕', '♟️', '🎭'] : ['🂡', '🎓', '🛠️', '👋'])[i]}</span>{s}
                 </button>
               ))}
             </div>
@@ -251,7 +274,7 @@ export default function Chat({ onChanged }: { onChanged: () => void }) {
         )}
         <div className={`composer ${streaming ? 'busy' : ''}`}>
           <textarea ref={box} rows={1} value={text} onChange={(e) => setText(e.target.value)} onKeyDown={onKey}
-            placeholder={t.chat.placeholder} aria-label={t.chat.placeholder} maxLength={12000} />
+            placeholder={isDesign ? t.design.placeholder : t.chat.placeholder} aria-label={isDesign ? t.design.placeholder : t.chat.placeholder} maxLength={12000} />
           {streaming ? (
             <button className="send stop" onClick={stop} aria-label={t.chat.stop} title={t.chat.stop}><IconStop size={16} /></button>
           ) : (
@@ -260,6 +283,13 @@ export default function Chat({ onChanged }: { onChanged: () => void }) {
         </div>
         <p className="composer-note"><span className="hide-sm">{t.chat.hint} · </span>{t.chat.note}</p>
       </div>
+    </div>
+  )
+  if (!isDesign) return chat
+  return (
+    <div className="design-wrap">
+      {chat}
+      <DesignPanel convId={convId} state={design} onState={setDesign} busy={streaming} />
     </div>
   )
 }

@@ -114,6 +114,12 @@ func newFakeLLM(t *testing.T, route map[string]any) *fakeLLM {
 			return
 		}
 		content := `{"facts":[]}`
+		switch {
+		case strings.Contains(req.Messages[0].Content, "maintain the shared design notes"):
+			content = `{"title":"Tide Lords","pitch":"Steer the tide to strand rivals.","players":"2-4","mechanics":["tide dial: shifts every boat"],"open_questions":["how many islands?"],"readiness":45}`
+		case strings.Contains(req.Messages[0].Content, "BUILD PLAN"):
+			content = "# Tide Lords\nSteer the tide.\n\n## Build plan for the studio\n1. Designer: write the rules."
+		}
 		if strings.Contains(req.Messages[0].Content, "You route messages") {
 			f.mu.Lock()
 			b, _ := json.Marshal(f.route)

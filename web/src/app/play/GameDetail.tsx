@@ -5,6 +5,7 @@ import { uiLocale } from '../../lib/i18n'
 import { md } from '../../lib/md'
 import { playApi, type GameCard, type GameDetail as Detail } from '../../lib/playApi'
 import { MOCK_GAMES } from './fixtures'
+import Comments from './Comments'
 import NewTableDialog from './NewTableDialog'
 import { Spinner } from './parts'
 import { usePlayT } from './strings'
@@ -87,10 +88,13 @@ export default function GameDetail() {
         </div>
       </header>
       <div className="pw-detail-grid">
-        <section className="pw-card-panel">
-          <h3 className="pw-h3">{s.detail.rules}</h3>
-          {html ? <div className="pw-md" dangerouslySetInnerHTML={{ __html: html }} /> : <p className="pw-muted">{s.detail.noRules}</p>}
-        </section>
+        <div className="pw-detail-main">
+          <section className="pw-card-panel">
+            <h3 className="pw-h3">{s.detail.rules}</h3>
+            {html ? <div className="pw-md" dangerouslySetInnerHTML={{ __html: html }} /> : <p className="pw-muted">{s.detail.noRules}</p>}
+          </section>
+          <Comments gameId={g.id} published={g.status === 'published'} />
+        </div>
         <aside className="pw-detail-side">
           {latest && (
             <section className="pw-card-panel">

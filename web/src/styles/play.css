@@ -1309,3 +1309,36 @@ select.pw-input option { background: var(--navy-800, #111b33); }
   .pw-map { min-width: 0; width: 100%; }
   .pw-space-label { font-size: 9px; }
 }
+
+/* ── comments under a game ──────────────────────────────────────────────── */
+.pw-detail-main { display: grid; gap: 20px; min-width: 0; }
+.pw-comments .pw-h3 { display: flex; align-items: baseline; gap: 10px; }
+.pw-comments .pw-h3 small { font: 500 12px var(--font-mono); color: var(--text-3); letter-spacing: .04em; text-transform: none; }
+.pw-comment-compose { display: grid; gap: 8px; margin-bottom: 18px; }
+.pw-comment-compose textarea { width: 100%; min-height: 64px; resize: vertical; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line-strong); background: color-mix(in srgb, var(--bg) 70%, transparent); color: var(--text); font: 400 14px/1.5 var(--font-body); }
+.pw-comment-compose textarea:focus { outline: none; border-color: var(--accent); box-shadow: var(--focus); }
+.pw-comment-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.pw-comment-bar small { font: 500 11px var(--font-mono); color: var(--text-3); }
+.pw-comment-bar small.is-near { color: var(--warm); }
+.pw-comment-err { margin: 0; font-size: 13px; color: var(--red-400); }
+.pw-comment-none { margin: 4px 0 0; }
+.pw-comment-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.pw-comment { display: grid; grid-template-columns: 32px minmax(0, 1fr); gap: 12px; padding: 14px 0; border-top: 1px solid var(--line); }
+.pw-comment:first-child { border-top: 0; }
+.pw-comment.is-deleted { grid-template-columns: 1fr; }
+.pw-comment.is-deleted p { margin: 0; font-style: italic; font-size: 13px; }
+.pw-comment-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 10px; }
+.pw-comment-meta b { font: 600 14px var(--font-head); color: var(--text); }
+.pw-comment-meta time { font: 400 12px var(--font-mono); color: var(--text-3); }
+.pw-comment-tag { font: 600 10px/1.6 var(--font-mono); font-style: normal; letter-spacing: .08em; text-transform: uppercase; padding: 0 7px; border-radius: 999px; color: var(--warm); background: color-mix(in srgb, var(--warm) 14%, transparent); }
+.pw-comment-tag.is-you { color: var(--accent-2); background: color-mix(in srgb, var(--accent-2) 12%, transparent); }
+.pw-comment-del { margin-left: auto; font-size: 12px; color: var(--text-3); }
+.pw-comment-del:hover { color: var(--red-400); }
+.pw-comment-text { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-2); font-size: 14px; line-height: 1.55; }
+.pw-comment-more { margin-top: 10px; }
+
+/* ── paging a list of tables ────────────────────────────────────────────── */
+.pw-h3-count { margin-left: 8px; padding: 1px 8px; border-radius: 999px; font: 600 11px/1.5 var(--font-mono); color: var(--text-2); background: var(--line); letter-spacing: 0; vertical-align: 1px; }
+.pw-pager { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; }
+.pw-pager-info { font: 500 12px var(--font-mono); color: var(--text-3); }
+.pw-pager .pw-btn:disabled { opacity: .4; cursor: default; }

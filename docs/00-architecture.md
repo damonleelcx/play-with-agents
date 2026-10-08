@@ -288,6 +288,10 @@ New:
 - `GET /api/games/{id}` → `GameCard & { rules_md, versions: [{version, created_at, report}] , goal_id? }`
 - `PATCH /api/games/{id}` `{ name?, summary?, visibility? }` (owner)
 - `DELETE /api/games/{id}` (owner; drafts only)
+- `GET /api/games/{id}/comments?before=ID` → `{ comments: [{id, name, body, created_at, deleted?, mine?, can_delete?, by_owner?}], total, more }`
+  (published games the viewer can see; newest first, 30 a page)
+- `POST /api/games/{id}/comments` `{ body }` (≤1000 chars; 5 a minute, 200 a day per person)
+- `DELETE /api/games/{id}/comments/{cid}` (the author or the game's owner; the row stays, its text goes)
 
 `GameCard = { id, kind: "builtin"|"script", name, summary, min_seats, max_seats, hidden_info,
 status: "building"|"draft"|"published", visibility: "private"|"unlisted"|"public",
@@ -316,6 +320,7 @@ seeded examples (`/play/covers/{id}.webp`), else absent.
 ### Tables
 - `POST /api/tables` `{ game_id, name?, options?, turn_seconds?, seats: [{ kind: "me"|"agent"|"open", agent_id? }] }` → `TableView`
 - `GET /api/tables?scope=mine|open` → `TableSummary[]` (`{ id, name, code, game_name, status, seats_taken, seats_total, updated_at }`)
+  With `&limit=N&offset=M`: a page, `{ tables, total, offset, limit }` (newest activity first, N ≤ 50).
 - `GET /api/tables/{id}` → `TableView`
 - `POST /api/tables/join` `{ code }` → `TableView` (takes the first open seat, or spectates if full)
 - `PUT /api/tables/{id}/seats/{seat}` `{ kind: "agent", agent_id } | { kind: "open" }` (host, lobby only)
@@ -508,3 +513,21 @@ so; switch PLAY_TTS_MODEL to `s2.1-pro` if that must change).
   messages), `voice_autoplay` bool (default false: read her new chat replies
   aloud), `table_voice` bool (default false: read Aoi's table-talk lines aloud
   at tables), `voice_volume` 0..100 (default 80).
+
+## Game-play design mode
+
+A conversation created with `POST /api/conversations {"mode":"design"}` is a
+design session: Aoi works as the player's game-design partner (explores
+directions, stress-tests, asks one question at a time) and nothing is routed
+to tables or builds. After every exchange a fast model folds it into the
+conversation's living design document (`conversations.design`: title,
+pitch, players, length, board, components, loop, mechanics, twist, win,
+open questions, parked ideas, readiness 0–100), streamed to the page as a
+`design` meta event.
+
+- `GET /api/conversations/{id}/design` → `{ mode, design, plan?, plan_at?, updated_at?, goal_id?, stale? }`
+- `POST /api/conversations/{id}/design/plan` → writes the build plan (Markdown: what is new, components,
+  board and table, setup, a turn, scoring and the end, edge cases, the studio's build steps, decisions
+  made) from the notes and the conversation; `stale` once the design changes after it.
+- `POST /api/conversations/{id}/design/build` → the player's go: the plan becomes the studio build's
+  prompt; the mission card is posted in the design conversation.
