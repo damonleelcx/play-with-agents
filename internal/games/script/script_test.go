@@ -224,8 +224,14 @@ func TestMalformedOutputsAreReported(t *testing.T) {
 		{"board dims", `view(s) { return { board: { rows: 2, cols: 2, cells: [[null, null], [null]] } }; },`, "cells[1] has 1 cells, but board.cols is 2", callView},
 		{"unknown view key", `view(s) { return { title: "x", colour: "red" }; },`, "unknown key(s) colour", callView},
 		{"bad piece colour", `view(s) { return { board: { rows: 1, cols: 1, cells: [[{ piece: { shape: "disc", color: 3 } }]] } }; },`, "piece.color must be a string", callView},
-		{"bad shape", `view(s) { return { board: { rows: 1, cols: 1, cells: [[{ piece: { shape: "star" } }]] } }; },`, "shape must be one of", callView},
+		{"bad shape", `view(s) { return { board: { rows: 1, cols: 1, cells: [[{ piece: { shape: "dragon" } }]] } }; },`, "shape must be one of", callView},
 		{"hidden face", `view(s) { return { zones: [{ id: "h", cards: [{ face: "7♥", hidden: true }] }] }; },`, "leaks hidden information", callView},
+		{"map space off board", `view(s) { return { board: { spaces: [{ id: "a", x: 120, y: 5 }] } }; },`, "must be a number in 0..100", callView},
+		{"map duplicate space", `view(s) { return { board: { spaces: [{ id: "a", x: 1, y: 5 }, { id: "a", x: 2, y: 5 }] } }; },`, "duplicates space id", callView},
+		{"map link to nowhere", `view(s) { return { board: { spaces: [{ id: "a", x: 1, y: 5 }], links: [{ from: "a", to: "b" }] } }; },`, "names space \"b\"", callView},
+		{"map bad theme", `view(s) { return { board: { theme: "lava", spaces: [{ id: "a", x: 1, y: 5 }] } }; },`, "theme must be one of", callView},
+		{"too many pieces", `view(s) { return { board: { spaces: [{ id: "a", x: 1, y: 5, pieces: Array(13).fill({ shape: "pawn" }) }] } }; },`, "over the limit of 12", callView},
+		{"zone area", `view(s) { return { zones: [{ id: "m", area: "ceiling", cards: [] }] }; },`, "area must be one of", callView},
 		{"zone owner", `view(s) { return { zones: [{ id: "h", owner: 5, cards: [] }] }; },`, "owner must be a seat number", callView},
 		{"bad placeholder", `view(s) { return { message: "{s:7} wins" }; },`, "{s:7}", callView},
 		{"view undefined", `view(s) { },`, "returned undefined", callView},
@@ -618,7 +624,7 @@ func TestExamples(t *testing.T) {
 			t.Errorf("%s: Check is not clean:\n%s", e.ID, r)
 		}
 	}
-	for _, want := range []string{"tictactoe", "connect_four", "reversi", "lantern_market", "story_tiles"} {
+	for _, want := range []string{"tictactoe", "connect_four", "reversi", "lantern_market", "story_tiles", "comet_run"} {
 		if !ids[want] {
 			t.Errorf("missing example %s", want)
 		}
@@ -635,6 +641,8 @@ func TestCheckCatchesBrokenModules(t *testing.T) {
 		{"too many seats", baseSrc + `const game = Object.assign({}, base, { meta: { name: "x", minSeats: 2, maxSeats: 40 } });`, "maxSeats <= 12", SevError},
 		{"legal out of turn", module(`legal(s, seat) { return base.legal(Object.assign({}, s, { turn: seat }), seat); },`), "is not in toMove", SevError},
 		{"view dims", module(`view(s) { return { board: { rows: 3, cols: 3, cells: [] } }; },`), "has 0 rows, but board.rows is 3", SevError},
+		{"hint to a missing space", module(`view(s) { return { board: { spaces: [{ id: "a", x: 10, y: 10 }] } }; }, legal(s, seat) { return base.legal(s, seat).map((m) => Object.assign({}, m, { ui: { space: "zz" } })); },`), "no space with that id", SevError},
+		{"grid hint on a map", module(`view(s) { return { board: { spaces: [{ id: "a", x: 10, y: 10 }] } }; }, legal(s, seat) { return base.legal(s, seat).map((m) => Object.assign({}, m, { ui: { cell: [0, 0] } })); },`), "the board is a map", SevError},
 		{"no outcome", module(`outcome(s) { return null; },`), "outcome returned null", SevError},
 		{"Math.random", module(`apply(s, seat, m) { return { n: s.n + Math.random(), turn: 1 - seat }; },`), "use ctx.random()", SevError},
 		{"module state", "let calls = 0;\n" + module(`setup(ctx) { calls++; return { n: 0, turn: 0, calls }; },`), "module-level variable calls changed during setup", SevError},

@@ -10,6 +10,7 @@ import type {
   HoldemData,
   HoldemPlayer,
   LogEntry,
+  MapLink,
   Move,
   MoveSpec,
   Outcome,
@@ -1137,6 +1138,214 @@ function seatCountFixture(n: number): HoldemMock {
   return m
 }
 
+// A race on a map board (the Comet Run reference): spaces on an oval around a
+// planet, a nebula shortcut, two ships each, bumping.
+class MapMock extends MockBase {
+  name = 'Comet Run with Nova'
+  game = { id: 'comet', name: 'Comet Run', kind: 'script' }
+  viewKind = 'board' as const
+  seats = [seatOf('me', 0), seatOf('nova', 1), seatOf('mika', 2)]
+  ships: string[][] = [['s0', 's3'], ['s7', 'n2'], ['s0', 's11']]
+  turn = 0
+  roll = 3
+  spaces: { id: string; x: number; y: number }[] = []
+  next: Record<string, string[]> = {}
+  constructor() {
+    super()
+    for (let i = 0; i < 20; i++) {
+      const a = -Math.PI / 2 + (2 * Math.PI * i) / 20
+      this.spaces.push({ id: `s${i}`, x: 50 + 42 * Math.cos(a), y: 50 + 40 * Math.sin(a) })
+      this.next[`s${i}`] = [`s${(i + 1) % 20}`]
+    }
+    this.spaces.push({ id: 'n1', x: 64, y: 40 }, { id: 'n2', x: 58, y: 54 }, { id: 'n3', x: 48, y: 66 })
+    this.next.s5 = ['s6', 'n1']
+    this.next.n1 = ['n2']
+    this.next.n2 = ['n3']
+    this.next.n3 = ['s12']
+    this.version = 5
+    this.touch()
+  }
+  dests(from: string, steps: number) {
+    let f = [from]
+    for (let k = 0; k < steps; k++) {
+      const n: string[] = []
+      for (const p of f) if (p !== 'home') for (const q of this.next[p]) { const r = q === 's0' ? 'home' : q; if (!n.includes(r)) n.push(r) }
+      f = n
+    }
+    return f
+  }
+  movesFor(seat: number): MoveSpec[] {
+    const out: MoveSpec[] = []
+    const seen = new Set<string>()
+    for (const from of this.ships[seat]) {
+      if (from === 'home') continue
+      for (const to of this.dests(from, this.roll)) {
+        if (seen.has(from + to)) continue
+        seen.add(from + to)
+        out.push({ type: 'fly', label: `Fly ${from} → ${to}`, args: { from, to }, ui: { from, to: to === 'home' ? 's0' : to } })
+      }
+    }
+    return out.length ? out : [{ type: 'pass', label: 'Pass' }]
+  }
+  toMove() {
+    return this.status === 'playing' ? [this.turn] : []
+  }
+  statusText() {
+    return `${this.name_(this.turn)} rolled ${this.roll}`
+  }
+  legalFor(seat: number) {
+    return seat === this.turn ? this.movesFor(seat) : []
+  }
+  doMove(m: MoveSpec | Move) {
+    if (m.type === 'fly') {
+      const { from, to } = m.args!
+      const own = this.ships[this.turn]
+      own[own.indexOf(from)] = to
+      this.ships.forEach((o, s) => {
+        if (s !== this.turn && to !== 'home' && o.filter((p) => p === to).length === 1) {
+          o[o.indexOf(to)] = 's0'
+          this.addLog(this.turn, `${this.name_(this.turn)} bumps ${this.name_(s)} back to the dock`)
+        }
+      })
+      this.addLog(this.turn, `${this.name_(this.turn)} flies to ${to}`)
+    }
+    this.turn = (this.turn + 1) % this.ships.length
+    this.roll = 1 + Math.floor(Math.random() * 4)
+  }
+  applyMove(seat: number, move: Move) {
+    const ok = this.legalFor(seat).find((m) => m.type === move.type && JSON.stringify(m.args) === JSON.stringify(move.args))
+    if (!ok) throw new Error('That move is not legal.')
+    this.doMove(ok)
+  }
+  pending() {
+    return this.status === 'playing' && this.turn !== this.me ? 1200 : null
+  }
+  step() {
+    const ms = this.movesFor(this.turn)
+    this.doMove(ms[Math.floor(Math.random() * ms.length)])
+    this.touch()
+  }
+  data(): BoardData {
+    const links: MapLink[] = []
+    for (const [from, tos] of Object.entries(this.next)) for (const to of tos) links.push({ from, to, style: from.startsWith('n') || to.startsWith('n') ? 'dashed' : 'arrow' })
+    return {
+      title: 'Comet Run',
+      board: {
+        theme: 'space',
+        aspect: 1.25,
+        spaces: this.spaces.map((sp) => {
+          const pieces = this.ships.flatMap((o, s) => o.filter((p) => p === sp.id).map(() => ({ shape: 'ship' as const, color: `p${s}` })))
+          return {
+            ...sp,
+            shape: sp.id === 's0' ? 'hex' : sp.id.startsWith('n') ? 'star' : 'circle',
+            size: sp.id === 's0' ? 1.6 : undefined,
+            label: sp.id === 's0' ? 'Dock' : sp.id === 's5' ? 'Fork' : undefined,
+            pieces: pieces.length ? pieces : undefined,
+          }
+        }),
+        links,
+        regions: [
+          { x: 34, y: 34, w: 32, h: 32, shape: 'ellipse', color: '#3b5bdb', label: 'Planet Vesta' },
+          { x: 44, y: 32, w: 28, h: 40, shape: 'blob', color: '#9c36b5', label: 'Nebula' },
+        ],
+      },
+      players: this.ships.map((o, s) => ({ seat: s, color: `p${s}`, score: o.filter((p) => p === 'home').length, info: 'ships home' })),
+      counters: [{ label: 'Roll', value: String(this.roll) }],
+      message: this.turn === this.me ? `You rolled ${this.roll}: pick a ship, then where it lands` : `${this.name_(this.turn)} is flying…`,
+    }
+  }
+}
+
+// Stones on a hex grid (style "hex"), on a wooden table.
+class HexMock extends MockBase {
+  name = 'Hex with Ren'
+  game = { id: 'hex', name: 'Hex', kind: 'script' }
+  viewKind = 'board' as const
+  seats = [seatOf('me', 0), seatOf('ren', 1)]
+  g: (number | null)[][] = Array.from({ length: 7 }, () => Array(7).fill(null))
+  turn = 0
+  constructor() {
+    super()
+    this.g[3][3] = 1
+    this.g[2][4] = 0
+    this.version = 2
+    this.touch()
+  }
+  toMove() {
+    return this.status === 'playing' ? [this.turn] : []
+  }
+  statusText() {
+    return `${this.name_(this.turn)} to move`
+  }
+  legalFor(seat: number): MoveSpec[] {
+    if (seat !== this.turn) return []
+    const out: MoveSpec[] = []
+    this.g.forEach((row, r) => row.forEach((v, c) => v === null && out.push({ type: 'place', label: `${r},${c}`, args: { r, c }, ui: { cell: [r, c] } })))
+    return out
+  }
+  applyMove(seat: number, move: Move) {
+    this.g[move.args!.r][move.args!.c] = seat
+    this.turn = 1 - this.turn
+  }
+  pending() {
+    return this.status === 'playing' && this.turn !== this.me ? 900 : null
+  }
+  step() {
+    const ms = this.legalFor(this.turn)
+    const m = ms[Math.floor(Math.random() * ms.length)]
+    this.applyMove(this.turn, m)
+    this.touch()
+  }
+  data(): BoardData {
+    return {
+      title: 'Hex',
+      board: { rows: 7, cols: 7, style: 'hex', theme: 'wood', cells: this.g.map((row) => row.map((v) => (v === null ? null : { piece: { shape: 'disc', color: `p${v}` } }))) },
+      players: [{ seat: 0, color: 'p0', info: 'Blue' }, { seat: 1, color: 'p1', info: 'Red' }],
+      message: this.turn === this.me ? 'Place a stone' : 'Ren is thinking…',
+    }
+  }
+}
+
+// Dev: any module's view, from localStorage "preview.view" ({ data, legal,
+// seats }), to look at what the Studio built without a server.
+class StaticViewMock extends MockBase {
+  name = 'Preview'
+  game = { id: 'preview', name: 'Preview', kind: 'script' }
+  viewKind = 'board' as const
+  seats: SeatInfo[] = [seatOf('me', 0), seatOf('nova', 1)]
+  stored: { data: BoardData; legal: MoveSpec[] } = { data: {}, legal: [] }
+  constructor() {
+    super()
+    try {
+      const v = JSON.parse(localStorage.getItem('preview.view') || '{}')
+      this.stored = { data: v.data || {}, legal: v.legal || [] }
+      this.name = v.data?.title || 'Preview'
+      const n = v.seats || 2
+      this.seats = Array.from({ length: n }, (_, i) => (i === 0 ? seatOf('me', 0) : seatOf(['nova', 'mika', 'ren'][(i - 1) % 3], i)))
+    } catch {
+      /* no preview view stored */
+    }
+    this.touch()
+  }
+  toMove() {
+    return [0]
+  }
+  statusText() {
+    return ''
+  }
+  legalFor(seat: number) {
+    return seat === 0 ? this.stored.legal : []
+  }
+  applyMove() {}
+  pending() {
+    return null
+  }
+  step() {}
+  data(): BoardData {
+    return this.stored.data
+  }
+}
+
 export function createMock(kind: string | null): MockGame | null {
   const many = /^holdem-([2-9])$/.exec(kind || '')
   if (many) return seatCountFixture(Number(many[1]))
@@ -1168,6 +1377,12 @@ export function createMock(kind: string | null): MockGame | null {
       return new StoryMock()
     case 'checkers':
       return new CheckersMock()
+    case 'map':
+      return new MapMock()
+    case 'hex':
+      return new HexMock()
+    case 'view':
+      return new StaticViewMock()
     case 'lobby':
       return new LobbyMock()
     case 'finished':

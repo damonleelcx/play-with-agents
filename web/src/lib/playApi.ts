@@ -166,8 +166,24 @@ export type HoldemData = {
 
 // ── Board view data ───────────────────────────────────────────────────────
 
-export type BoardPiece = { shape?: 'disc' | 'square' | 'ring' | 'king' | 'text'; color?: string; glyph?: string; label?: string }
-export type BoardCell = { piece?: BoardPiece | null; card?: BoardCard | null; mark?: string; text?: string; blocked?: boolean } | null
+export type PieceShape = 'disc' | 'square' | 'ring' | 'king' | 'text' | 'pawn' | 'meeple' | 'cube' | 'ship' | 'star' | 'hex'
+export type BoardPiece = { shape?: PieceShape; color?: string; glyph?: string; label?: string }
+export type BoardCell = { piece?: BoardPiece | null; pieces?: BoardPiece[]; card?: BoardCard | null; mark?: string; text?: string; blocked?: boolean } | null
+export type BoardTheme = 'plain' | 'wood' | 'felt' | 'parchment' | 'stone' | 'night' | 'space' | 'ocean' | 'forest' | 'desert' | 'snow' | 'neon'
+export type GridBoard = { rows: number; cols: number; style?: 'grid' | 'checker' | 'go' | 'plain' | 'tiles' | 'hex'; theme?: BoardTheme; cells: BoardCell[][] }
+export type MapSpace = NonNullable<BoardCell> & {
+  id: string
+  x: number
+  y: number
+  shape?: 'circle' | 'square' | 'hex' | 'diamond' | 'star' | 'rect' | 'pill' | 'none'
+  size?: number
+  label?: string
+  color?: string
+}
+export type MapLink = { from: string; to: string; style?: 'line' | 'dashed' | 'dotted' | 'arrow' | 'road' | 'rail' | 'river' | 'bridge'; color?: string; label?: string }
+export type MapRegion = { x: number; y: number; w: number; h: number; shape?: 'rect' | 'ellipse' | 'blob'; color?: string; label?: string }
+export type MapBoard = { spaces: MapSpace[]; links?: MapLink[]; regions?: MapRegion[]; theme?: BoardTheme; aspect?: number; grid?: boolean }
+export const isMapBoard = (b: GridBoard | MapBoard | undefined | null): b is MapBoard => !!b && Array.isArray((b as MapBoard).spaces)
 // A card: a plain face, a hidden back, or a rich story card (title, story
 // line, effect, kind badge, cost/value badges, accent colour, who played it).
 export type BoardCard = {
@@ -184,10 +200,10 @@ export type BoardCard = {
   seat?: number
 }
 export type StoryLine = { text: string; seat?: number; title?: string }
-export type BoardZone = { id: string; label?: string; owner?: number; layout?: 'row' | 'fan' | 'stack'; cards: BoardCard[] }
+export type BoardZone = { id: string; label?: string; owner?: number; layout?: 'row' | 'fan' | 'stack' | 'grid'; area?: 'top' | 'bottom' | 'left' | 'right' | 'center'; cards: BoardCard[] }
 export type BoardData = {
   title?: string
-  board?: { rows: number; cols: number; style?: 'grid' | 'checker' | 'go' | 'plain' | 'tiles'; cells: BoardCell[][] }
+  board?: GridBoard | MapBoard
   zones?: BoardZone[]
   players?: { seat: number; score?: number | string; info?: string; color?: string }[]
   counters?: { label: string; value: string | number }[]

@@ -18,6 +18,8 @@ Principles:
 - Keep the player's idea. Fill every gap with the simplest choice that keeps it fun, and say so in the rules ("If ... then ...").
 - Everything must be decidable by a program: exact board size, exact move legality, exact scoring, exact end condition, exact tie-breaks. No "roughly", no table talk rules, no real money, no dexterity or timing.
 - Turn-based only. 1 to 8 seats.
+- The board follows the design, not the other way round. Use whatever this game needs: a square grid, a hex grid, a track or loop of spaces, a map of named places joined by paths (rivers, roads, rails, star lanes), islands or regions, a network of rooms, or no board at all (cards on a table, a market row, piles). Never force a grid on a game that is really a race, a journey or a map. Describe the board exactly: every space (or place) by name or number, which ones connect to which, where each player starts, and any special spaces.
+- Describe the table too: what is shared in the middle (decks, markets, piles), what each player keeps in front of them, and what is hidden.
 - Today is %s (UTC).
 
 Save the document with save_rules, then finish with a two-sentence summary of the game in %s. The rules document itself is written in %s (the player's language); tool argument names stay in English.`,
@@ -38,7 +40,9 @@ How you work:
 - Every function is pure. apply returns a NEW state (copy arrays you change).
 - Text shown to players refers to seats as {s:N}, never "Player 1".
 - Every game must end: toMove returns [] exactly when outcome returns non-null. Never leave the mover stuck: whenever toMove lists a seat, legal(state, seat) must return at least one move. If the rules allow nothing (no playable card, every square sealed), offer a pass move (or end the game, if the rules say so), and check the blocked case explicitly: a hand of only conditional cards on a crowded board.
-- Give moves ui hints so the board is clickable: {cell:[r,c]} for placing, {from:[r,c],to:[r,c]} for moving, {zone,index} for playing a card, {zone,index,cell:[r,c]} for playing a card onto a square (one legal move per card and square; the board lets the player pick the card, then the square). The index is the card's position in that zone as your view lists it.
+- Draw the board the rules describe, not a grid by default. A square board is a grid (board.rows/cols/cells; style "hex" for a hex grid). Anything else — a track, a loop, a map of places and paths, islands, a network — is a map board: board.spaces with x, y in percent, links for the paths (style arrow for one-way, dashed, road, rail, river, bridge), regions for areas, a theme for the table (wood, felt, parchment, space, ocean, forest, ...). Several pieces on one space go in pieces: [...]. See the comet_run reference.
+- Lay out the table: zones carry area "top" | "bottom" | "left" | "right" | "center" (a shared market or discard pile in the center, each player's tableau around the board), and layout "grid" for a market of face-up cards.
+- Give moves ui hints so the board is clickable: {cell:[r,c]} for placing, {from:[r,c],to:[r,c]} for moving, {zone,index} for playing a card, {zone,index,cell:[r,c]} for playing a card onto a square (one legal move per card and square; the board lets the player pick the card, then the square). On a map board, name spaces by id instead: {space:"s4"}, {from:"s4",to:"n2"}, {zone,index,space:"s4"}. The index is the card's position in that zone as your view lists it.
 - Card games: give every card a face the renderer can show richly: title (its name), text (one line of flavour or story, shown in italics), effect (its rules text), kind (a one-word badge such as character, place, event, twist or item) and value or cost when it has one. Cards on the board go in cell.card (same shape). A hidden card is exactly { hidden: true }.
 - A deck of individually designed cards: make the deck DATA, not branches. One top-level constant CARDS array with one entry per card (id, title, text, effect, kind and the numbers its rule needs), and one small handler per distinct effect (canPlay(state, seat, card, cell) and play(state, seat, card, cell)). legal() offers a card on a square only when that card's own canPlay says so; a card whose rule says "only next to X" or "only if Y" must not be offered anywhere else. Before you save, walk the rules document card by card and check that each card's title, numbers, placement condition and effect match its entry and handler exactly.
 - legal() returns at most 512 moves. When one card needs several choices (a square, then a token to move, then where), never multiply them into one move list: play the card onto its square, keep a pending choice in the state (state.pending = { seat, card, step }), and let the same seat answer it with follow-up moves on its next toMove (cells or buttons), with view.prompt saying what to choose.
@@ -118,19 +122,30 @@ const game = {
 ` + "```jsonc" + `
 {
   "title": "Connect Four",
-  "board": {                         // optional
+  "board": {                         // optional. EITHER a grid:
     "rows": 6, "cols": 7,
-    "style": "grid",                 // grid | checker | go | plain | tiles (story/card boards)
+    "style": "grid",                 // grid | checker | go | plain | tiles (story/card boards) | hex (hex grid, odd rows offset)
+    "theme": "wood",                 // optional table: plain wood felt parchment stone night space ocean forest desert snow neon
     "cells": [[ /* row-major; null or Cell */ ]]
   },
-  // Cell = { "piece": { "shape": "disc|square|ring|king|text", "color": "p0..p7|#hex|css",
-  //                      "glyph": "♛", "label": "K" },
-  //          "card": Card,              instead of piece: a card played on the square
+  // OR a map (any board that is not a grid: tracks, routes, islands, networks):
+  // "board": { "theme": "parchment", "aspect": 1.4,          // width / height, 0.4..3
+  //   "spaces": [ { "id": "s1", "x": 12, "y": 80,             // percent of the board, 0..100
+  //                 "shape": "circle|square|hex|diamond|star|rect|pill|none", "size": 1,   // 0.3..4
+  //                 "label": "Harbor", "color": "#c9a",      // + any Cell field below
+  //                 "pieces": [ Piece, Piece ] } ],          // ≤200 spaces
+  //   "links": [ { "from": "s1", "to": "s2", "style": "line|dashed|dotted|arrow|road|rail|river|bridge", "label": "3" } ],
+  //   "regions": [ { "x": 30, "y": 30, "w": 40, "h": 30, "shape": "rect|ellipse|blob", "color": "#3b5bdb", "label": "Forest" } ] }
+  // Cell = { "piece": Piece,             one piece, or "pieces": [Piece, ...] (≤12 sharing the place)
+  //          "card": Card,              instead of pieces: a card played on the square
   //          "mark": "#hex|css",        highlight
   //          "text": "3",
   //          "blocked": true }          sealed / unusable square
+  // Piece = { "shape": "disc|square|ring|king|text|pawn|meeple|cube|ship|star|hex", "color": "p0..p7|#hex|css",
+  //           "glyph": "♛", "label": "K" }
   "zones": [                         // optional: hands, piles, decks
-    { "id": "hand-0", "label": "Your hand", "owner": 0, "layout": "row|fan|stack",
+    { "id": "hand-0", "label": "Your hand", "owner": 0, "layout": "row|fan|stack|grid",
+      "area": "top|bottom|left|right|center",   // optional: where it sits at the table
       "cards": [ Card ] }
   ],
   // Card = { "face": "7♥", "color": "#c33" }                 a plain card, or a rich one:
@@ -148,7 +163,7 @@ const game = {
 }
 ` + "```" + `
 
-Move UI hints (move.ui): {cell:[r,c]} (click a cell), {from:[r,c],to:[r,c]} (select a piece, then a target), {zone:"hand-0",index:2} (click a card), {zone:"hand-0",index:2,cell:[r,c]} (select the card, then a highlighted square; one move per card and square), {zone:"hand-0",index:2,target:"North"} (select the card, then choose among its targets). Every hint must point at a zone, card and cell the mover's own view shows. Moves without hints render as buttons. Player colours p0..p7.
+Move UI hints (move.ui): {cell:[r,c]} (click a cell; on a map board {space:"id"}, and from/to take space ids), {from:[r,c],to:[r,c]} (select a piece, then a target), {zone:"hand-0",index:2} (click a card), {zone:"hand-0",index:2,cell:[r,c]} (select the card, then a highlighted square; one move per card and square), {zone:"hand-0",index:2,target:"North"} (select the card, then choose among its targets). Every hint must point at a zone, card and cell the mover's own view shows. Moves without hints render as buttons. Player colours p0..p7.
 
 ## Text
 

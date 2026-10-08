@@ -125,19 +125,32 @@ which is why hidden-information games must define it.
 ```jsonc
 {
   "title": "Connect Four",
-  "board": {                         // optional
+  "board": {                         // optional: a grid ...
     "rows": 6, "cols": 7,
-    "style": "grid",                 // grid | checker | go | plain | tiles
+    "style": "grid",                 // grid | checker | go | plain | tiles | hex
+    "theme": "wood",                 // optional: plain wood felt parchment stone night space ocean forest desert snow neon
     "cells": [[ /* row-major; null or Cell */ ]]
   },
-  // Cell = { "piece": { "shape": "disc|square|ring|king|text", "color": "p0..p7|#hex|css",
-  //                      "glyph": "♛", "label": "K" },
-  //          "card": Card,              alternative to piece: a card on the square
+  // ... or a map: any board that is not a grid (tracks, routes, islands, networks)
+  // "board": { "theme": "space", "aspect": 1.25,             // width / height, 0.4..3
+  //   "spaces": [ { "id": "s1", "x": 12, "y": 80,             // percent of the board
+  //                 "shape": "circle|square|hex|diamond|star|rect|pill|none", "size": 1,
+  //                 "label": "Dock", "color": "#c9a", ...Cell } ],          // ≤200
+  //   "links": [ { "from": "s1", "to": "s2", "style": "line|dashed|dotted|arrow|road|rail|river|bridge",
+  //                "color": "#fff", "label": "3" } ],                         // ≤400
+  //   "regions": [ { "x": 30, "y": 30, "w": 40, "h": 30, "shape": "rect|ellipse|blob",
+  //                  "color": "#3b5bdb", "label": "Nebula" } ],                // ≤24
+  //   "grid": true }                                                          // faint guide lines
+  // Cell = { "piece": Piece,             or "pieces": [Piece, ...] (≤12 sharing the place)
+  //          "card": Card,              alternative to pieces: a card on the square
   //          "mark": "#hex|css",        highlight
   //          "text": "3",
   //          "blocked": true }          sealed square (hatched; not playable)
-  "zones": [                         // optional: hands, piles, decks
-    { "id": "hand-0", "label": "Your hand", "owner": 0, "layout": "row|fan|stack",
+  // Piece = { "shape": "disc|square|ring|king|text|pawn|meeple|cube|ship|star|hex",
+  //           "color": "p0..p7|#hex|css", "glyph": "♛", "label": "K" }
+  "zones": [                         // optional: hands, piles, decks, markets
+    { "id": "hand-0", "label": "Your hand", "owner": 0, "layout": "row|fan|stack|grid",
+      "area": "top|bottom|left|right|center",   // where it sits at the table
       "cards": [ Card ] }
   ],
   "story": [                         // optional, ordered: the "Story so far" panel
@@ -176,7 +189,8 @@ above the mover's hand only. All strings may use `{s:N}`.
 
 Move UI hints (`MoveSpec.ui`):
 
-- `{cell:[r,c]}`: click a cell.
+- `{cell:[r,c]}`: click a cell. On a map board places are space ids:
+  `{space:"s4"}`, `{from:"s4",to:"n2"}`, `{zone,index,space:"s4"}`.
 - `{from:[r,c],to:[r,c]}`: select a piece, then a target.
 - `{zone:"hand-0",index:2}`: click a card (plays at once).
 - `{zone:"hand-0",index:2,cell:[r,c]}`: play this card onto this cell. One
@@ -186,6 +200,13 @@ Move UI hints (`MoveSpec.ui`):
   target (≤ 40 characters) from a small chooser.
 
 `index` is the card's position in that zone as the mover's view lists it.
+
+A map board draws its regions, then its links (arrows, roads, rails, rivers,
+bridges; each stops at the edge of its spaces), then its spaces at their
+x/y; a space's label sits under it. Pieces that move between spaces glide
+along; several on one place share it in a ring. Zones without an `area` sit
+above the board (others') or below it (the mover's own); `left`/`right` put
+them beside the board, `center` between the board and the players.
 `Check` reports hints pointing at a zone, card or cell the mover's view does
 not show (the move could not be clicked). Moves without hints render as
 buttons (a compact list beyond 12). A `range` renders as a slider + input.
