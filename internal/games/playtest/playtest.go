@@ -196,12 +196,16 @@ func gameSeed(base int64, i int) int64 {
 }
 
 type gameResult struct {
-	played    bool
-	seats     int
-	matchup   Matchup
-	aiSeat    games.Seat // AIVsRandom only; -1 otherwise
-	first     games.Seat // first seat to move
-	moves     int
+	played  bool
+	seats   int
+	matchup Matchup
+	aiSeat  games.Seat // AIVsRandom only; -1 otherwise
+	first   games.Seat // first seat to move
+	moves   int
+	// early: the game ended before every seat had made a move (a start
+	// that decides the game: a destination that is the starting square,
+	// a winning deal).
+	early     bool
 	completed bool
 	aborted   bool
 	outcome   *games.Outcome
@@ -289,6 +293,13 @@ func playOne(ctx context.Context, g games.Game, opt Options, i, seats int, mu Ma
 				return fail(ClassInvalid, -1, nil, nil, fmt.Sprintf("outcome has %d ranks for %d seats", len(o.Rank), seats))
 			}
 			res.completed, res.outcome, res.moves = true, o, move
+			if seats > 1 {
+				moved := map[games.Seat]bool{}
+				for _, h := range history {
+					moved[h.Seat] = true
+				}
+				res.early = len(moved) < seats
+			}
 			return res
 		}
 		if o != nil {

@@ -358,3 +358,27 @@ func TestHiddenInfoWithoutDeterminizerFails(t *testing.T) {
 		t.Fatalf("verdict %v %v", pass, reasons)
 	}
 }
+
+// A game whose start can already decide it: half the deals let the first
+// player "win" on their first move, before the second player ever plays.
+const earlySrc = `const game = {
+  meta: { name: "Early", minSeats: 2, maxSeats: 2 },
+  setup(ctx) { return { n: 0, turn: 0, doomed: ctx.random() < 0.5, over: false } },
+  toMove(s) { return s.over ? [] : [s.turn] },
+  legal(s, seat) { return s.over || seat !== s.turn ? [] : [{ type: "go", label: "Go", args: {} }] },
+  apply(s, seat) { const n = s.n + 1; return { n, turn: 1 - seat, doomed: s.doomed, over: s.doomed || n >= 6 } },
+  view(s) { return { message: "{s:" + s.turn + "} to move" } },
+  outcome(s) { return s.over ? { rank: [1, 2], score: [1, 0], summary: "{s:0} wins" } : null },
+};`
+
+func TestAGameDecidedBeforeEveryoneMovedFails(t *testing.T) {
+	g := load(t, "early", earlySrc, script.Options{})
+	r := Run(context.Background(), g, Options{Games: 40, Mix: Mix{RandomVsRandom: 1}})
+	if r.Early == 0 || r.Early == r.Completed {
+		t.Fatalf("early %d of %d", r.Early, r.Completed)
+	}
+	pass, reasons := r.Verdict()
+	if pass || !strings.Contains(strings.Join(reasons, "\n"), "before every player had made a move") {
+		t.Fatalf("verdict %v %v", pass, reasons)
+	}
+}

@@ -101,7 +101,9 @@ type Report struct {
 	Errors     []Error        `json:"errors"` // the first MaxErrors, by game
 	ByClass    map[string]int `json:"by_class"`
 
-	Length   Dist        `json:"length"` // moves per completed game
+	Length Dist `json:"length"` // moves per completed game
+	// Early counts completed games that ended before every seat had moved.
+	Early    int         `json:"early"`
 	BySeats  []SeatStats `json:"by_seats"`
 	DrawRate float64     `json:"draw_rate"` // completed random-vs-random games ending in a full tie
 	// FirstPlayerAdvantage is the first mover's win share minus the
@@ -176,6 +178,9 @@ func buildReport(meta games.Meta, determinizer bool, opt Options, results []game
 		}
 		r.Completed++
 		lengths = append(lengths, float64(g.moves))
+		if g.early {
+			r.Early++
+		}
 		share := winShares(g.outcome)
 
 		switch g.matchup {
@@ -299,6 +304,7 @@ func latency(ds []time.Duration) Latency {
 // Thresholds of the verdict.
 const (
 	minCompletion   = 0.95
+	maxEarlyShare   = 0.01 // more than this share of games over before every seat played fails
 	maxSeatShare    = 0.80
 	minAIEdge       = 0.10 // AI win share must beat the baseline by this much
 	minSampleGames  = 20   // balance warnings need this many games
@@ -347,6 +353,17 @@ func (r Report) Verdict() (pass bool, reasons []string) {
 	}
 	if c := float64(r.Completed) / float64(r.Run); c < minCompletion {
 		failf("only %.0f%% of games completed (%d aborted at %d moves, %d errored); every game must end", 100*c, r.Aborted, r.Options.MaxMoves, r.Errored)
+	}
+
+	// A game decided before everyone has played is a broken start (a goal
+	// that is already reached, a deal that wins): a player sits down and
+	// loses without a turn.
+	if r.Early > 0 {
+		if share := float64(r.Early) / float64(max(1, r.Completed)); share >= maxEarlyShare {
+			failf("%d of %d games (%.0f%%) ended before every player had made a move: check setup for a start that already decides the game (a destination or goal equal to the starting position, a winning deal) and make every player get at least one turn", r.Early, r.Completed, 100*share)
+		} else {
+			warnf("%d game(s) ended before every player had made a move; check that no start can decide the game", r.Early)
+		}
 	}
 
 	for _, ss := range r.BySeats {
