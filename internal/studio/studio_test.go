@@ -627,7 +627,7 @@ func TestSeedCommunityIsIdempotent(t *testing.T) {
 		}
 	}
 	var n, versions int
-	_ = pool.QueryRow(ctx, `SELECT count(*), (SELECT count(*) FROM game_versions WHERE game_id IN ('tictactoe','connect-four','reversi','lantern-market','story-tiles'))
+	_ = pool.QueryRow(ctx, `SELECT count(*), (SELECT count(*) FROM game_versions WHERE game_id IN ('tictactoe','connect-four','reversi','lantern-market','story-tiles','comet-run'))
 		FROM games WHERE owner_id IS NULL AND kind='script' AND status='published' AND visibility='public'`).Scan(&n, &versions)
 	if n != len(script.Examples()) || versions != n {
 		t.Fatalf("%d seeded games, %d versions", n, versions)

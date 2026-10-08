@@ -297,6 +297,11 @@ var storyWords = []string{"story", "stories", "tale", "narrat", "故事", "叙�
 var cardWords = []string{"card", "deck", "hand", "牌", "卡", "手札", "カード", "デッキ", "카드", "덱"}
 
 // referenceModules picks the two bundled modules the Engineer sees in full.
+// mapWords mark a board that is not a grid: the map reference fits it.
+var mapWords = []string{"track", "route", "path", "map", "island", "race", "journey", "space ", "spaces", "node", "network",
+	"hex", "river", "road", "rail", "region", "territor", "loop", "station", "planet", "city", "cities",
+	"赛道", "路线", "地图", "岛", "节点", "航线", "路径", "区域", "六边形", "트랙", "지도", "경로", "섬", "トラック", "地図", "ルート", "島"}
+
 func referenceModules(spec gameSpec, rules string) []string {
 	low := strings.ToLower(rules)
 	has := func(words []string) bool {
@@ -308,6 +313,8 @@ func referenceModules(spec gameSpec, rules string) []string {
 		return false
 	}
 	switch {
+	case has(mapWords):
+		return []string{"comet_run", "tictactoe"}
 	case has(storyWords):
 		return []string{"tictactoe", "story_tiles"}
 	case spec.HiddenInfo && has(cardWords) && strings.Contains(low, "board"):

@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent } from 'react'
-import { resolveColor, type BoardCard, type BoardCell, type BoardData, type BoardPiece, type Move, type MoveSpec, type TableView } from '../../lib/playApi'
+import { isMapBoard, resolveColor, type BoardCard, type BoardCell, type BoardData, type BoardPiece, type Move, type MoveSpec, type TableView } from '../../lib/playApi'
 import { SayBubble, type Bubbles } from './Bubbles'
+import MapBoard, { stackSlot } from './MapBoard'
 import { Avatar, TimerRing, VoiceWave, ZoneCard } from './parts'
 import { blip } from './sound'
 import { CardBack, CardPeek, isRich, MiniCard, StoryCard, StoryPanel } from './StoryCard'
@@ -12,10 +13,12 @@ const toMove = (m: MoveSpec): Move => ({ type: m.type, args: m.args })
 const sig = (p?: BoardPiece | null) => (p ? `${p.shape || 'disc'}|${p.color || ''}|${p.glyph || ''}|${p.label || ''}` : '')
 const cardSig = (c?: BoardCard | null) => (c ? `${c.title || c.face || ''}|${c.seat ?? ''}|${c.hidden ? 1 : 0}` : '')
 const isCell = (x: unknown): x is [number, number] => Array.isArray(x) && x.length === 2 && x.every((n) => typeof n === 'number')
+const piecesOf = (cell: BoardCell): BoardPiece[] => (cell ? cell.pieces || (cell.piece ? [cell.piece] : []) : [])
 // More hint-less moves than this collapse into a compact list.
 const MAX_BUTTONS = 12
 
 type Peek = { card: BoardCard; rect: DOMRect; k: string }
+type Anim = { kind: 'drop' | 'slide' | 'pop' | 'glide'; dx?: number; dy?: number }
 
 export default function BoardView({
   table,
@@ -37,48 +40,67 @@ export default function BoardView({
   const myTurn = table.legal.length > 0
   const reduced = prefs.motion === 'reduced'
   const b = d.board
+  const map = isMapBoard(b) ? b : null
+  const grid = b && !isMapBoard(b) ? b : null
+
+  // ── places: every square of a grid ("r,c") or space of a map (its id) ──
+  const places = useMemo(() => {
+    const out = new Map<string, { cell: BoardCell; r?: number; c?: number; x?: number; y?: number }>()
+    if (grid) grid.cells?.forEach((row, r) => row?.forEach((cell, c) => out.set(key(r, c), { cell, r, c })))
+    if (map) for (const sp of map.spaces) out.set(sp.id, { cell: sp, x: sp.x, y: sp.y })
+    if (grid) for (let r = 0; r < grid.rows; r++) for (let c = 0; c < grid.cols; c++) if (!out.has(key(r, c))) out.set(key(r, c), { cell: null, r, c })
+    return out
+  }, [b]) // eslint-disable-line react-hooks/exhaustive-deps
+  // The place a hint points at, or null when the view shows no such place.
+  const placeOf = (x: unknown): string | null => {
+    if (grid && isCell(x)) return x[0] >= 0 && x[1] >= 0 && x[0] < grid.rows && x[1] < grid.cols ? key(x[0], x[1]) : null
+    if (map && typeof x === 'string') return places.has(x) ? x : null
+    return null
+  }
 
   // ── classify legal moves by their UI hints ──
   // A hint that points at nothing the view shows falls back to a button, so
   // every legal move stays reachable.
   const { cellMoves, fromMoves, zoneMoves, cardCells, cardTargets, buttons, ranges } = useMemo(() => {
     const cellMoves = new Map<string, MoveSpec>()
-    const fromMoves = new Map<string, { to: [number, number]; m: MoveSpec }[]>()
+    const fromMoves = new Map<string, { to: string; m: MoveSpec }[]>()
     const zoneMoves = new Map<string, MoveSpec>()
     const cardCells = new Map<string, Map<string, MoveSpec>>()
     const cardTargets = new Map<string, MoveSpec[]>()
     const buttons: MoveSpec[] = []
     const ranges: MoveSpec[] = []
-    const onBoard = (x: [number, number]) => !!b && x[0] >= 0 && x[1] >= 0 && x[0] < b.rows && x[1] < b.cols
     const hasCard = (zone: string, i: number) => !!d.zones?.some((z) => z.id === zone && i >= 0 && i < z.cards.length)
     for (const m of table.legal) {
       const ui = m.ui || {}
+      const at = ui.cell ?? ui.space
       if (m.range) ranges.push(m)
       else if (typeof ui.zone === 'string' && typeof ui.index === 'number') {
         const ck = `${ui.zone}:${ui.index}`
         if (!hasCard(ui.zone, ui.index)) buttons.push(m)
-        else if (isCell(ui.cell)) {
-          if (!onBoard(ui.cell)) buttons.push(m)
+        else if (at !== undefined) {
+          const k = placeOf(at)
+          if (!k) buttons.push(m)
           else {
             if (!cardCells.has(ck)) cardCells.set(ck, new Map())
             const cells = cardCells.get(ck)!
-            if (!cells.has(key(ui.cell[0], ui.cell[1]))) cells.set(key(ui.cell[0], ui.cell[1]), m)
+            if (!cells.has(k)) cells.set(k, m)
           }
         } else if (typeof ui.target === 'string') {
           if (!cardTargets.has(ck)) cardTargets.set(ck, [])
           cardTargets.get(ck)!.push(m)
         } else if (!zoneMoves.has(ck)) zoneMoves.set(ck, m)
         else buttons.push(m)
-      } else if (isCell(ui.from) && isCell(ui.to)) {
-        if (!onBoard(ui.from) || !onBoard(ui.to)) buttons.push(m)
+      } else if (ui.from !== undefined && ui.to !== undefined) {
+        const from = placeOf(ui.from)
+        const to = placeOf(ui.to)
+        if (!from || !to) buttons.push(m)
         else {
-          const k = key(ui.from[0], ui.from[1])
-          if (!fromMoves.has(k)) fromMoves.set(k, [])
-          fromMoves.get(k)!.push({ to: [ui.to[0], ui.to[1]], m })
+          if (!fromMoves.has(from)) fromMoves.set(from, [])
+          fromMoves.get(from)!.push({ to, m })
         }
-      } else if (isCell(ui.cell)) {
-        const k = key(ui.cell[0], ui.cell[1])
-        if (!onBoard(ui.cell)) buttons.push(m)
+      } else if (at !== undefined) {
+        const k = placeOf(at)
+        if (!k) buttons.push(m)
         else if (!cellMoves.has(k)) cellMoves.set(k, m)
       } else buttons.push(m)
     }
@@ -91,13 +113,14 @@ export default function BoardView({
       }
     }
     return { cellMoves, fromMoves, zoneMoves, cardCells, cardTargets, buttons, ranges }
-  }, [table.legal, d.zones, b]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [table.legal, d.zones, places]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const [sel, setSel] = useState<string | null>(null) // a piece (from → to)
-  const [selCard, setSelCard] = useState<string | null>(null) // "zone:index" (card → cell / target)
+  const [selCard, setSelCard] = useState<string | null>(null) // "zone:index" (card → place / target)
   const [hoverCard, setHoverCard] = useState<string | null>(null)
   const [peek, setPeek] = useState<Peek | null>(null)
   const [allMoves, setAllMoves] = useState(false)
+  const [mapSize, setMapSize] = useState({ w: 0, h: 0 })
   const boardRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     setSel(null)
@@ -117,44 +140,54 @@ export default function BoardView({
   }, [])
   const targets = useMemo(() => {
     const t = new Map<string, MoveSpec>()
-    if (sel) for (const x of fromMoves.get(sel) || []) if (!t.has(key(...x.to))) t.set(key(...x.to), x.m)
+    if (sel) for (const x of fromMoves.get(sel) || []) if (!t.has(x.to)) t.set(x.to, x.m)
     return t
   }, [sel, fromMoves])
   const cardDest = (selCard && cardCells.get(selCard)) || null
   const preview = (!selCard && hoverCard && cardCells.get(hoverCard)) || null
 
   // ── piece animations: diff against the previous board ──
-  const prevCells = useRef<BoardCell[][] | null>(null)
+  // A piece that left one place and arrived at another slides (a grid) or
+  // glides (a map) between them; anything new drops in or pops up.
+  const prevPlaces = useRef<typeof places | null>(null)
   const { anims, fresh } = useMemo(() => {
-    const out = new Map<string, { kind: 'drop' | 'slide' | 'pop'; dx?: number; dy?: number }>()
+    const out = new Map<string, Map<number, Anim>>()
     const fresh = new Set<string>()
-    const prev = prevCells.current
-    const cur = d.board?.cells
-    if (!prev || !cur || reduced) return { anims: out, fresh }
-    const vacated: [number, number, string][] = []
-    cur.forEach((row, r) =>
-      row.forEach((cell, c) => {
-        const was = prev[r]?.[c]
-        if (sig(was?.piece) && sig(was?.piece) !== sig(cell?.piece)) vacated.push([r, c, sig(was?.piece)])
-        if (cell?.card && cardSig(cell.card) !== cardSig(was?.card)) fresh.add(key(r, c))
-      }),
-    )
-    cur.forEach((row, r) =>
-      row.forEach((cell, c) => {
-        const now = sig(cell?.piece)
-        if (!now || now === sig(prev[r]?.[c]?.piece)) return
-        const i = vacated.findIndex((v) => v[2] === now || v[2].split('|')[1] === now.split('|')[1])
-        if (i >= 0) {
-          const [vr, vc] = vacated.splice(i, 1)[0]
-          out.set(key(r, c), { kind: 'slide', dx: vc - c, dy: vr - r })
-        } else out.set(key(r, c), { kind: d.board?.style === 'grid' ? 'drop' : 'pop', dy: r + 1 })
-      }),
-    )
+    const prev = prevPlaces.current
+    if (!prev || reduced) return { anims: out, fresh }
+    const vacated: { k: string; sig: string }[] = []
+    const arrived: { k: string; i: number; sig: string }[] = []
+    for (const [k, now] of places) {
+      const was = prev.get(k)
+      const before = piecesOf(was?.cell ?? null).map(sig)
+      const after = piecesOf(now.cell).map(sig)
+      const left = [...before]
+      after.forEach((p, i) => {
+        const j = left.indexOf(p)
+        if (j >= 0) left.splice(j, 1)
+        else arrived.push({ k, i, sig: p })
+      })
+      for (const p of left) vacated.push({ k, sig: p })
+      if (now.cell?.card && cardSig(now.cell.card) !== cardSig(was?.cell?.card)) fresh.add(k)
+    }
+    for (const a of arrived) {
+      let j = vacated.findIndex((v) => v.sig === a.sig)
+      if (j < 0) j = vacated.findIndex((v) => v.sig.split('|')[1] === a.sig.split('|')[1])
+      let anim: Anim
+      if (j >= 0) {
+        const from = places.get(vacated.splice(j, 1)[0].k)!
+        const to = places.get(a.k)!
+        if (map) anim = { kind: 'glide', dx: (((from.x ?? 0) - (to.x ?? 0)) / 100) * mapSize.w, dy: (((from.y ?? 0) - (to.y ?? 0)) / 100) * mapSize.h }
+        else anim = { kind: 'slide', dx: (from.c ?? 0) - (to.c ?? 0), dy: (from.r ?? 0) - (to.r ?? 0) }
+      } else anim = { kind: grid?.style === 'grid' ? 'drop' : 'pop', dy: (places.get(a.k)?.r ?? 0) + 1 }
+      if (!out.has(a.k)) out.set(a.k, new Map())
+      out.get(a.k)!.set(a.i, anim)
+    }
     return { anims: out, fresh }
-  }, [d.board?.cells, reduced]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [places, reduced]) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
-    if (prevCells.current && (anims.size || fresh.size)) blip('chips', prefs.sound)
-    prevCells.current = d.board?.cells || null
+    if (prevPlaces.current && (anims.size || fresh.size)) blip('chips', prefs.sound)
+    prevPlaces.current = places
   }, [table.version]) // eslint-disable-line react-hooks/exhaustive-deps
   const wasTurn = useRef(false)
   useEffect(() => {
@@ -170,9 +203,8 @@ export default function BoardView({
     setPeek(null)
   }
 
-  const clickCell = (r: number, c: number, cell: BoardCell, e: ReactMouseEvent<HTMLButtonElement>) => {
+  const clickPlace = (k: string, cell: BoardCell, e: ReactMouseEvent<HTMLButtonElement>) => {
     if (busy) return
-    const k = key(r, c)
     if (cardDest?.has(k)) return play(cardDest.get(k)!)
     if (sel && targets.has(k)) return play(targets.get(k)!)
     if (fromMoves.has(k)) {
@@ -181,7 +213,7 @@ export default function BoardView({
       return
     }
     if (cellMoves.has(k) && !selCard) return play(cellMoves.get(k)!)
-    // nothing to play here: a card on the cell opens (touch) or toggles its peek
+    // nothing to play here: a card on the place opens (touch) or toggles its peek
     if (cell?.card && !cell.card.hidden) {
       setPeek(peek?.k === k ? null : { card: cell.card, rect: e.currentTarget.getBoundingClientRect(), k })
       return
@@ -189,17 +221,18 @@ export default function BoardView({
     setSel(null)
   }
 
-  // Keyboard: arrows move between the board's focusable cells.
+  // Keyboard on a grid: arrows move between the focusable cells. (A map's
+  // spaces are in tab order.)
   const onBoardKey = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     const dir = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] }[e.key]
     const el = e.target as HTMLElement
-    if (!dir || !b || !el.dataset.r) return
+    if (!dir || !grid || !el.dataset.r) return
     let r = Number(el.dataset.r)
     let c = Number(el.dataset.c)
     for (;;) {
       r += dir[0]
       c += dir[1]
-      if (r < 0 || c < 0 || r >= b.rows || c >= b.cols) return
+      if (r < 0 || c < 0 || r >= grid.rows || c >= grid.cols) return
       const next = boardRef.current?.querySelector<HTMLButtonElement>(`[data-r="${r}"][data-c="${c}"]`)
       if (next && !next.disabled) {
         e.preventDefault()
@@ -215,23 +248,25 @@ export default function BoardView({
     setPeek(null)
     const next = selCard === ck ? null : ck
     setSelCard(next)
-    // keyboard users jump to the first square the card can go
+    // keyboard users jump to the first place the card can go
     if (next && viaKeyboard && cardCells.get(next)?.size) {
       const [first] = cardCells.get(next)!.keys()
-      const [r, c] = first.split(',')
-      requestAnimationFrame(() => boardRef.current?.querySelector<HTMLButtonElement>(`[data-r="${r}"][data-c="${c}"]`)?.focus())
+      requestAnimationFrame(() => boardRef.current?.querySelector<HTMLButtonElement>(`[data-k="${CSS.escape(first)}"]`)?.focus())
     }
   }
 
   const players = d.players || []
   const seatColor = (seat: number) => resolveColor(players.find((p) => p.seat === seat)?.color || `p${seat % 8}`)
   const seatName = (seat: number) => table.seats[seat]?.name || `Seat ${seat + 1}`
-  const anyRich = !!d.zones?.some((z) => z.cards.some(isRich)) || !!b?.cells?.some((row) => row?.some((cell) => isRich(cell?.card)))
+  const anyRich = !!d.zones?.some((z) => z.cards.some(isRich)) || [...places.values()].some((p) => isRich(p.cell?.card))
   const storyMode = !!d.story || anyRich
   const selCardData = selCard ? cardAt(d, selCard) : null
-  const otherZones = d.zones?.filter((z) => z.owner === undefined || z.owner !== table.my_seat) || []
-  const myZones = d.zones?.filter((z) => z.owner !== undefined && z.owner === table.my_seat) || []
+  const area = (z: NonNullable<BoardData['zones']>[number]) => z.area || (z.owner !== undefined && z.owner === table.my_seat ? 'bottom' : 'top')
+  const myZones = d.zones?.filter((z) => z.owner !== undefined && z.owner === table.my_seat && area(z) === 'bottom') || []
+  const otherZones = d.zones?.filter((z) => !myZones.includes(z)) || []
+  const zonesAt = (a: string) => otherZones.filter((z) => area(z) === a)
   const chooser = selCard ? cardTargets.get(selCard) : undefined
+  const dims = grid ? { rows: grid.rows, cols: grid.cols } : map ? { rows: 1, cols: map.aspect || 1.4 } : null
 
   let message = d.message
   if (sel) message = `${s.board.pickTarget} · ${s.board.cancel}`
@@ -240,85 +275,101 @@ export default function BoardView({
 
   const zoneProps = { zoneMoves, cardCells, cardTargets, selCard, busy, prefs, seatColor, storyMode, onPlay: play, onSelect: selectCard, onHover: setHoverCard }
 
-  const boardEl = b && (
-    <div className="pw-bg-board-wrap">
-      <div
-        ref={boardRef}
-        className={`pw-bg-board style-${b.style || 'grid'} ${cardDest ? 'is-choosing' : ''}`}
-        style={{ '--rows': b.rows, '--cols': b.cols, aspectRatio: `${b.cols} / ${b.rows}` } as CSSProperties}
-        onKeyDown={onBoardKey}
-        onPointerLeave={() => setPeek((p) => (p ? null : p))}
+  // One place's button: the same for a grid square and a map space; only the
+  // container lays them out differently.
+  const renderPlace = (k: string, cell: BoardCell, base: string, style: CSSProperties | undefined, label: string, extra?: Record<string, string | number>) => {
+    const dest = !!cardDest?.has(k)
+    const clickable = myTurn && (dest || (!selCard && cellMoves.has(k)) || fromMoves.has(k) || targets.has(k))
+    const peekable = !!cell?.card && !cell.card.hidden
+    const pieces = piecesOf(cell)
+    const placeAnims = anims.get(k)
+    const onEnter = (e: ReactPointerEvent<HTMLButtonElement>) => {
+      if (peekable && e.pointerType === 'mouse') setPeek({ card: cell!.card!, rect: e.currentTarget.getBoundingClientRect(), k })
+    }
+    return (
+      <button
+        key={k}
+        type="button"
+        data-k={k}
+        {...extra}
+        className={[
+          base,
+          clickable ? 'is-click' : '',
+          !selCard && cellMoves.has(k) && myTurn ? 'is-target' : '',
+          fromMoves.has(k) && myTurn ? 'is-movable' : '',
+          sel === k ? 'is-sel' : '',
+          targets.has(k) ? 'is-dest' : '',
+          dest ? 'is-card-dest' : '',
+          preview?.has(k) ? 'is-preview' : '',
+          cell?.blocked ? 'is-blocked' : '',
+          cell?.card ? 'has-card' : '',
+          pieces.length > 1 ? 'has-stack' : '',
+          peekable && !clickable ? 'is-peek' : '',
+        ].join(' ')}
+        disabled={busy || (!clickable && !peekable)}
+        aria-disabled={!clickable || undefined}
+        onClick={(e) => clickPlace(k, cell, e)}
+        onPointerEnter={onEnter}
+        onPointerLeave={(e) => e.pointerType === 'mouse' && setPeek(null)}
+        onFocus={(e) => peekable && e.currentTarget.matches(':focus-visible') && setPeek({ card: cell!.card!, rect: e.currentTarget.getBoundingClientRect(), k })}
+        onBlur={() => setPeek(null)}
+        aria-label={[label, cell?.blocked ? s.board.sealed : '', cell?.card?.title || '', pieces.length > 1 ? `×${pieces.length}` : '', dest ? s.board.playHere : ''].filter(Boolean).join(' · ')}
+        title={dest ? s.board.playHere : undefined}
+        style={cell?.mark ? ({ ...style, '--mark': resolveColor(cell.mark) } as CSSProperties) : style}
       >
-        {Array.from({ length: b.rows }, (_, r) =>
-          Array.from({ length: b.cols }, (_, c) => {
-            const cell = b.cells?.[r]?.[c] || null
-            const k = key(r, c)
-            const dest = !!cardDest?.has(k)
-            const clickable = myTurn && (dest || (!selCard && cellMoves.has(k)) || fromMoves.has(k) || targets.has(k))
-            const peekable = !!cell?.card && !cell.card.hidden
-            const dark = (r + c) % 2 === 1
-            const anim = anims.get(k)
-            const onEnter = (e: ReactPointerEvent<HTMLButtonElement>) => {
-              if (peekable && e.pointerType === 'mouse') setPeek({ card: cell!.card!, rect: e.currentTarget.getBoundingClientRect(), k })
-            }
-            return (
-              <button
-                key={k}
-                type="button"
-                data-r={r}
-                data-c={c}
-                className={[
-                  'pw-cell',
-                  dark ? 'is-dark' : 'is-light',
-                  clickable ? 'is-click' : '',
-                  !selCard && cellMoves.has(k) && myTurn ? 'is-target' : '',
-                  fromMoves.has(k) && myTurn ? 'is-movable' : '',
-                  sel === k ? 'is-sel' : '',
-                  targets.has(k) ? 'is-dest' : '',
-                  dest ? 'is-card-dest' : '',
-                  preview?.has(k) ? 'is-preview' : '',
-                  cell?.blocked ? 'is-blocked' : '',
-                  cell?.card ? 'has-card' : '',
-                  peekable && !clickable ? 'is-peek' : '',
-                  r === 0 ? 'r-first' : '',
-                  r === b.rows - 1 ? 'r-last' : '',
-                  c === 0 ? 'c-first' : '',
-                  c === b.cols - 1 ? 'c-last' : '',
-                ].join(' ')}
-                disabled={busy || (!clickable && !peekable)}
-                aria-disabled={!clickable || undefined}
-                onClick={(e) => clickCell(r, c, cell, e)}
-                onPointerEnter={onEnter}
-                onPointerLeave={(e) => e.pointerType === 'mouse' && setPeek(null)}
-                onFocus={(e) => peekable && e.currentTarget.matches(':focus-visible') && setPeek({ card: cell!.card!, rect: e.currentTarget.getBoundingClientRect(), k })}
-                onBlur={() => setPeek(null)}
-                aria-label={[
-                  `r${r + 1} c${c + 1}`,
-                  cell?.blocked ? s.board.sealed : '',
-                  cell?.card?.title || '',
-                  dest ? s.board.playHere : '',
-                ].filter(Boolean).join(' · ')}
-                title={dest ? s.board.playHere : undefined}
-                style={cell?.mark ? ({ '--mark': resolveColor(cell.mark) } as CSSProperties) : undefined}
-              >
-                {cell?.blocked && <span className="pw-cell-sealed" aria-hidden />}
-                {cell?.mark && <span className="pw-cell-mark" />}
-                {cell?.text && <span className="pw-cell-text">{cell.text}</span>}
-                {cell?.piece && <Piece key={`${k}|${sig(cell.piece)}`} piece={cell.piece} anim={anim} />}
-                {cell?.card && (
-                  <MiniCard key={`${k}|${cardSig(cell.card)}`} card={cell.card} seatColor={cell.card.seat !== undefined ? seatColor(cell.card.seat) : undefined} fresh={fresh.has(k)} />
-                )}
-                {!selCard && cellMoves.has(k) && myTurn && !cell?.piece && <span className="pw-cell-hint" style={{ '--pc': seatColor(table.my_seat) } as CSSProperties} />}
-                {targets.has(k) && <span className="pw-cell-hint is-dest" />}
-                {dest && <span className="pw-cell-slot" style={{ '--pc': seatColor(table.my_seat) } as CSSProperties} />}
-                {preview?.has(k) && <span className="pw-cell-hint is-preview" />}
-              </button>
-            )
-          }),
-        )}
+        {cell?.blocked && <span className="pw-cell-sealed" aria-hidden />}
+        {cell?.mark && <span className="pw-cell-mark" />}
+        {cell?.text && <span className="pw-cell-text">{cell.text}</span>}
+        {pieces.map((p, i) => (
+          <Piece key={`${k}|${i}|${sig(p)}`} piece={p} anim={placeAnims?.get(i)} slot={stackSlot(i, pieces.length)} />
+        ))}
+        {cell?.card && <MiniCard key={`${k}|${cardSig(cell.card)}`} card={cell.card} seatColor={cell.card.seat !== undefined ? seatColor(cell.card.seat) : undefined} fresh={fresh.has(k)} />}
+        {!selCard && cellMoves.has(k) && myTurn && !pieces.length && <span className="pw-cell-hint" style={{ '--pc': seatColor(table.my_seat) } as CSSProperties} />}
+        {targets.has(k) && <span className="pw-cell-hint is-dest" />}
+        {dest && <span className="pw-cell-slot" style={{ '--pc': seatColor(table.my_seat) } as CSSProperties} />}
+        {preview?.has(k) && <span className="pw-cell-hint is-preview" />}
+      </button>
+    )
+  }
+
+  const boardEl = map ? (
+    <MapBoard
+      b={map}
+      boardRef={boardRef}
+      size={mapSize}
+      onSize={setMapSize}
+      choosing={!!cardDest}
+      renderSpace={(sp, style, className) => (
+        <div key={sp.id} className="pw-space-wrap" style={style}>
+          {renderPlace(sp.id, sp, `pw-cell ${className}`, undefined, sp.label || sp.id)}
+          {sp.label && <span className="pw-space-label">{sp.label}</span>}
+        </div>
+      )}
+    />
+  ) : (
+    grid && (
+      <div className="pw-bg-board-wrap">
+        <div
+          ref={boardRef}
+          className={`pw-bg-board style-${grid.style || 'grid'} ${grid.theme ? `theme-${grid.theme}` : ''} ${cardDest ? 'is-choosing' : ''}`}
+          style={{ '--rows': grid.rows, '--cols': grid.cols, aspectRatio: grid.style === 'hex' ? undefined : `${grid.cols} / ${grid.rows}` } as CSSProperties}
+          onKeyDown={onBoardKey}
+          onPointerLeave={() => setPeek((p) => (p ? null : p))}
+        >
+          {Array.from({ length: grid.rows }, (_, r) =>
+            Array.from({ length: grid.cols }, (_, c) => {
+              const cell = grid.cells?.[r]?.[c] || null
+              const cls = ['pw-cell', (r + c) % 2 === 1 ? 'is-dark' : 'is-light', r === 0 ? 'r-first' : '', r === grid.rows - 1 ? 'r-last' : '', c === 0 ? 'c-first' : '', c === grid.cols - 1 ? 'c-last' : '', r % 2 ? 'r-odd' : ''].join(' ')
+              const style = grid.style === 'hex' ? ({ gridRow: r + 1, gridColumn: `${c * 2 + (r % 2) + 1} / span 2` } as CSSProperties) : undefined
+              return renderPlace(key(r, c), cell, cls, style, `r${r + 1} c${c + 1}`, { 'data-r': r, 'data-c': c })
+            }),
+          )}
+        </div>
       </div>
-    </div>
+    )
   )
+  const sideZones = (a: 'left' | 'right') => zonesAt(a).length > 0 && <Zones zones={zonesAt(a)} {...zoneProps} side />
+  const centerZones = zonesAt('center').length > 0 && <Zones zones={zonesAt('center')} {...zoneProps} center />
 
   return (
     <div className={`pw-boardgame ${reduced ? 'is-reduced' : ''} ${storyMode ? 'is-story' : ''}`}>
@@ -373,7 +424,7 @@ export default function BoardView({
 
       {storyMode ? (
         <div className="pw-bg-main is-story">
-          <div className={`pw-bg-stage ${b ? '' : 'no-board'}`} style={b ? ({ '--rows': b.rows, '--cols': b.cols } as CSSProperties) : undefined}>
+          <div className={`pw-bg-stage ${b ? '' : 'no-board'}`} style={dims ? ({ '--rows': dims.rows, '--cols': dims.cols } as CSSProperties) : undefined}>
             <div className="pw-bg-center">{boardEl}</div>
             <aside className="pw-bg-side">
               {otherZones.length > 0 && <Zones zones={otherZones} {...zoneProps} compact />}
@@ -398,9 +449,19 @@ export default function BoardView({
         </div>
       ) : (
         <div className={`pw-bg-main ${b ? '' : `no-board felt-${prefs.felt}`}`}>
-          {/* zones above the board: those not owned by me */}
-          {otherZones.length > 0 && <Zones zones={otherZones} {...zoneProps} />}
-          {boardEl}
+          {/* the table: other players' zones above, shared ones beside or in
+              the middle, the board, then my own */}
+          {zonesAt('top').length > 0 && <Zones zones={zonesAt('top')} {...zoneProps} />}
+          <div className={`pw-table-row ${zonesAt('left').length ? 'has-left' : ''} ${zonesAt('right').length ? 'has-right' : ''}`}>
+            {sideZones('left')}
+            <div className="pw-table-mid">
+              {centerZones}
+              {boardEl}
+            </div>
+            {sideZones('right')}
+          </div>
+          {zonesAt('bottom').length > 0 && <Zones zones={zonesAt('bottom')} {...zoneProps} />}
+          {myTurn && d.prompt && myZones.length > 0 && <p className={`pw-hand-prompt ${selCard ? 'is-sel' : ''}`}>{d.prompt}</p>}
           {myZones.length > 0 && <Zones zones={myZones} {...zoneProps} mine />}
         </div>
       )}
@@ -467,16 +528,34 @@ function cardAt(d: BoardData, ck: string): BoardCard | null {
   return z?.cards[Number(ck.slice(i + 1))] || null
 }
 
-function Piece({ piece, anim }: { piece: BoardPiece; anim?: { kind: string; dx?: number; dy?: number } }) {
+// Shapes drawn as figures rather than discs: a silhouette in the player's
+// colour, lit from the top left.
+const FIGURES: Record<string, string> = {
+  pawn: 'M50 8a15 15 0 0 1 9 27c9 5 14 14 15 25H26c1-11 6-20 15-25a15 15 0 0 1 9-27zM18 74h64l6 18H12z',
+  meeple: 'M50 6c9 0 15 7 15 15 0 6-3 10-6 12 14 2 33 7 33 17 0 6-8 7-16 6l10 30c1 4-2 6-6 6H66L50 70 34 92H20c-4 0-7-2-6-6l10-30c-8 1-16 0-16-6 0-10 19-15 33-17-3-2-6-6-6-12 0-8 6-15 15-15z',
+  cube: 'M50 6l40 20v48L50 94 10 74V26zM50 50L10 28M50 50l40-22M50 50v44',
+  ship: 'M50 4c10 12 16 28 16 46l14 18-4 12-12-6-6 14H42l-6-14-12 6-4-12 14-18c0-18 6-34 16-46z',
+  star: 'M50 4l13 30 32 3-24 22 7 32-28-17-28 17 7-32L5 37l32-3z',
+  hex: 'M27 8h46l23 42-23 42H27L4 50z',
+}
+
+function Piece({ piece, anim, slot }: { piece: BoardPiece; anim?: Anim; slot?: CSSProperties }) {
   const shape = piece.shape || 'disc'
   const col = resolveColor(piece.color, '#e6e6e6')
+  const fig = FIGURES[shape]
   const style = {
+    ...slot,
     '--pc': col,
-    '--dx': anim?.dx ?? 0,
-    '--dy': anim?.dy ?? 0,
+    '--dx': anim?.kind === 'glide' ? `${anim.dx ?? 0}px` : (anim?.dx ?? 0),
+    '--dy': anim?.kind === 'glide' ? `${anim.dy ?? 0}px` : (anim?.dy ?? 0),
   } as CSSProperties
   return (
-    <span className={`pw-piece shape-${shape} ${anim ? `anim-${anim.kind}` : ''}`} style={style}>
+    <span className={`pw-piece shape-${shape} ${fig ? 'is-figure' : ''} ${anim ? `anim-${anim.kind}` : ''}`} style={style}>
+      {fig && (
+        <svg viewBox="0 0 100 100" aria-hidden>
+          <path d={fig} />
+        </svg>
+      )}
       {(piece.glyph || piece.label) && <span className="pw-piece-glyph">{piece.glyph || piece.label}</span>}
     </span>
   )
@@ -498,6 +577,8 @@ function Zones({
   mine = false,
   compact = false,
   tray = false,
+  side = false,
+  center = false,
 }: {
   zones: NonNullable<BoardData['zones']>
   zoneMoves: Map<string, MoveSpec>
@@ -514,11 +595,13 @@ function Zones({
   mine?: boolean
   compact?: boolean
   tray?: boolean
+  side?: boolean
+  center?: boolean
 }) {
   const { s } = usePlayT()
   if (!zones.length) return null
   return (
-    <div className={`pw-zones ${mine ? 'is-mine' : ''} ${compact ? 'is-compact' : ''} ${tray ? 'is-tray' : ''}`}>
+    <div className={`pw-zones ${mine ? 'is-mine' : ''} ${compact ? 'is-compact' : ''} ${tray ? 'is-tray' : ''} ${side ? 'is-side' : ''} ${center ? 'is-center' : ''}`}>
       {zones.map((z) => {
         const rich = storyMode && (z.cards.some(isRich) || z.cards.every((c) => c.hidden))
         return (
@@ -545,7 +628,7 @@ function Zones({
                   '--rot': fan ? `${(i - mid) * Math.min(rich ? 4 : 8, 40 / Math.max(1, z.cards.length))}deg` : '0deg',
                   '--lift': fan ? `${Math.abs(i - mid) * (rich ? 5 : 3)}px` : '0px',
                 } as CSSProperties
-                const size = mine ? 'lg' : compact ? 'sm' : z.owner === undefined ? 'md' : 'sm'
+                const size = mine ? 'lg' : compact || side ? 'sm' : z.owner === undefined ? 'md' : 'sm'
                 return (
                   <button
                     key={`${i}-${c.title || c.face || 'x'}`}

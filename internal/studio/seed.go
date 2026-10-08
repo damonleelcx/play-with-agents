@@ -57,6 +57,17 @@ Do one thing: take a market lantern (everyone sees it), draw blind from the deck
 
 ## End
 When the deck and the market are both empty, every other player gets one last chance to sell, then the game ends. Each unsold lantern costs 1 point. Highest score wins.`,
+	"comet-run": `## Overview
+A race for 2–4 players on a map of space. Each player flies two ships around the planet Vesta and back to the dock; the first to bring both ships home wins.
+
+## Board
+A loop of 20 spaces around the planet, starting and ending at the Dock. At the Fork (space 5) a shortcut leaves the loop through the Nebula (three spaces) and rejoins it at space 12: four steps instead of seven.
+
+## Turns
+At the start of your turn you roll a die (1–4). Move one of your ships exactly that many spaces forward along the arrows; at the Fork you choose the loop or the Nebula. Passing or reaching the Dock brings the ship home. If your ship lands on a space with exactly one rival ship, that ship is bumped back to the Dock. If none of your ships can move, you pass.
+
+## End
+The first player with both ships home wins.`,
 	"story-tiles": `## Overview
 A storytelling tile game for 2 players with hidden hands. Twelve unique story cards (characters, places, events and twists) are played onto a 5×5 board; the story so far is the story lines of the cards played, in order.
 
