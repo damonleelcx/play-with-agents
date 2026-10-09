@@ -547,3 +547,26 @@ func TestRouteNormalize(t *testing.T) {
 		t.Fatalf("%+v", r)
 	}
 }
+
+func TestReviseFindsTheirGameNamedInTheMessageWhenTheRouterLeftItOut(t *testing.T) {
+	r, _, _ := fullRig(t, map[string]any{"intent": "revise_game", "confidence": 0.95, "prompt": "give it a custom layout"}, nil)
+	studio := r.agent.Studio.(*fakeStudio)
+	meta := r.turn(t, "Revise Moon Tiles: give it a custom layout with the board in the middle")
+	if studio.base != "moon-tiles" {
+		t.Fatalf("base %q, meta %v", studio.base, meta)
+	}
+	// A router guess that is not theirs falls back to the name in the message too.
+	studio.base = ""
+	r.fake.setRoute(map[string]any{"intent": "revise_game", "confidence": 0.95, "game_id": "star-race", "prompt": "bigger board"})
+	r.turn(t, "make the board bigger in Dragon Chess")
+	if studio.base != "dragon-chess" {
+		t.Fatalf("base %q", studio.base)
+	}
+	// Someone else's game named in the message is not revised.
+	studio.base = ""
+	r.fake.setRoute(map[string]any{"intent": "revise_game", "confidence": 0.95})
+	r.turn(t, "change Star Race to 6 players")
+	if studio.base != "" {
+		t.Fatalf("revised someone else's game: %q", studio.base)
+	}
+}
