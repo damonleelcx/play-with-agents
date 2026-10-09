@@ -703,16 +703,18 @@ select.pw-input option { background: var(--navy-800, #111b33); }
 /* the story layout: board + side column (other zones, story), hand below */
 .pw-bg-main.is-story { align-items: stretch; gap: 16px; }
 /* board first: the board takes the height the screen has; the side column stays narrow */
-.pw-bg-stage { --board-w: min(calc((100dvh - 290px) * var(--cols, 1) / var(--rows, 1)), 1040px); flex: 1 0 auto; display: grid; grid-template-columns: minmax(300px, var(--board-w)) minmax(220px, 300px); justify-content: center; gap: 20px; align-items: start; width: 100%; }
+.pw-bg-stage { --board-w: min(calc((100dvh - 170px - var(--tray-h, 0px)) * var(--cols, 1) / var(--rows, 1)), 1040px); flex: 1 0 auto; display: grid; grid-template-columns: minmax(300px, var(--board-w)) minmax(220px, 300px); justify-content: center; gap: 20px; align-items: start; width: 100%; }
 .pw-bg-stage.no-board { grid-template-columns: minmax(0, 1fr); max-width: 640px; }
 .pw-bg-stage.no-side { grid-template-columns: minmax(260px, var(--board-w)); }
 .pw-bg-stage.no-side .pw-bg-side { display: none; }
 .pw-bg-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .is-story .pw-bg-board { width: 100%; min-width: 0; }
 .pw-bg-side .pw-story { max-height: max(220px, calc(100dvh - 520px)); }
-/* the hand tray: sticky at the bottom, cards peek up and rise on hover,
-   focus or selection; the rise space overlaps the content above */
-.pw-hand-area { --rise: 66px; --peek: 128px; position: sticky; bottom: -24px; z-index: 8; display: grid; justify-items: center; gap: 2px; width: calc(100% + 2 * clamp(12px, 3vw, 32px)); margin: calc(-1 * var(--rise)) calc(-1 * clamp(12px, 3vw, 32px)) -24px; padding: 0 12px; pointer-events: none;
+/* the hand tray: sticky at the bottom, every card shown whole (title, art,
+   story line and effect) and lifted a little on hover, focus or selection.
+   The board is sized to end where the tray begins (--tray-h). */
+.pw-boardgame.has-tray { --tray-h: 262px; }
+.pw-hand-area { --rise: 18px; --peek: calc(var(--hw, 136px) * 1.42 + 16px); position: sticky; bottom: -24px; z-index: 8; display: grid; justify-items: center; gap: 2px; width: calc(100% + 2 * clamp(12px, 3vw, 32px)); margin: calc(-1 * var(--rise)) calc(-1 * clamp(12px, 3vw, 32px)) -24px; padding: 0 12px; pointer-events: none;
   background: linear-gradient(180deg, rgba(7,11,24,0) 0, rgba(7,11,24,0) var(--rise), rgba(7,11,24,.88) calc(var(--rise) + 40px), rgba(7,11,24,.97)); }
 .pw-hand-caption { position: relative; z-index: 2; display: grid; justify-items: center; gap: 4px; min-height: 26px; padding-top: calc(var(--rise) - 4px); pointer-events: auto; }
 .pw-hand-effect { padding: 3px 12px; border-radius: 999px; font: 600 12px var(--font-body); color: #2a1d10; background: linear-gradient(180deg, #f6ebcf, #e5cf9f); box-shadow: 0 0 0 1px rgba(242,200,107,.6), 0 4px 12px rgba(0,0,0,.4); animation: pw-rise .2s var(--pw-ease); max-width: min(560px, 92vw); text-align: center; }
@@ -722,8 +724,9 @@ select.pw-input option { background: var(--navy-800, #111b33); }
 .pw-zones.is-tray .pw-zone-label { display: none; }
 .pw-zones.is-tray .pw-zone-cards { overflow: visible clip; height: calc(var(--rise) + var(--peek)); padding-top: var(--rise); margin-top: calc(-1 * var(--rise)); align-items: flex-start; }
 .pw-zones.is-tray .pw-zone-card { pointer-events: auto; }
-.pw-zones.is-tray .pw-zone-card.is-rich:hover, .pw-zones.is-tray .pw-zone-card.is-rich:focus-visible { transform: translateY(calc(var(--rise) * -1 + 12px)) rotate(0deg) scale(1.05); transform-origin: 50% 100%; z-index: 6; }
-.pw-zones.is-tray .pw-zone-card.is-rich.is-sel { transform: translateY(calc(var(--rise) * -1 + 2px)) rotate(0deg); z-index: 5; }
+.pw-zones.is-tray .pw-sc { --w: var(--hw, 136px); }
+.pw-zones.is-tray .pw-zone-card.is-rich:hover, .pw-zones.is-tray .pw-zone-card.is-rich:focus-visible { transform: translateY(calc(var(--rise) * -1)) rotate(0deg) scale(1.04); transform-origin: 50% 100%; z-index: 6; }
+.pw-zones.is-tray .pw-zone-card.is-rich.is-sel { transform: translateY(calc(var(--rise) * -1)) rotate(0deg); z-index: 5; }
 .pw-hand-caption.is-sel { visibility: hidden; }
 .pw-hand-prompt { display: flex; align-items: center; gap: 12px; margin: 0; font: italic 500 18px/1.2 var(--font-serif); color: #f0dba8; text-align: center; }
 .pw-hand-prompt::before, .pw-hand-prompt::after { content: ""; width: 36px; height: 1px; background: linear-gradient(90deg, transparent, rgba(242,200,107,.6)); }
@@ -734,9 +737,9 @@ select.pw-input option { background: var(--navy-800, #111b33); }
   .pw-bg-stage { --board-w: 100%; grid-template-columns: minmax(0, 1fr); }
   .is-story .pw-bg-board { width: min(100%, 560px); margin: 0 auto; }
   .pw-bg-side .pw-story { max-height: 60dvh; }
-  .pw-hand-area { --rise: 10px; --peek: 104px; background: linear-gradient(180deg, rgba(7,11,24,0), rgba(9,14,30,.98) 9px); box-shadow: 0 -14px 24px -10px rgba(0,0,0,.6); }
+  .pw-boardgame.has-tray { --tray-h: 190px; }
+  .pw-hand-area { --rise: 10px; --hw: 94px; background: linear-gradient(180deg, rgba(7,11,24,0), rgba(9,14,30,.98) 9px); box-shadow: 0 -14px 24px -10px rgba(0,0,0,.6); }
   .pw-hand-caption { padding-top: 10px; }
-  .pw-zones.is-tray .pw-sc { --w: 94px; }
   .pw-zones.is-tray .layout-fan .pw-zone-card.is-rich + .pw-zone-card.is-rich { margin-left: -14px; }
   .pw-zones.is-tray .pw-zone-card.is-rich:hover { transform: translateY(var(--lift, 0)) rotate(var(--rot, 0deg)); }
   .pw-zones.is-tray .pw-zone-card.is-rich.is-sel { transform: translateY(-6px) rotate(0deg); }
@@ -1355,11 +1358,23 @@ select.pw-input option { background: var(--navy-800, #111b33); }
 .pw-free-area > .pw-zones, .pw-free-area > .pw-story { width: 100%; }
 .pw-free-area .pw-bg-board-wrap { width: 100%; }
 /* The board fills its area, as large as the screen's height allows. */
-.pw-free .pw-bg-board, .pw-free .pw-map { --fit: calc((100dvh - 270px) * var(--cols, 1) / var(--rows, 1)); width: min(100%, var(--fit)); max-width: none; min-width: 0; }
+.pw-free .pw-bg-board, .pw-free .pw-map { --fit: calc((100dvh - 160px - var(--tray-h, 0px)) * var(--cols, 1) / var(--rows, 1)); width: min(100%, var(--fit)); max-width: none; min-width: 0; }
 .pw-free.board-large .pw-bg-board, .pw-free.board-large .pw-map { width: min(88%, var(--fit)); }
 .pw-free.board-medium .pw-bg-board, .pw-free.board-medium .pw-map { width: min(68%, var(--fit)); }
 .pw-free.board-small .pw-bg-board, .pw-free.board-small .pw-map { width: min(48%, var(--fit)); }
 .pw-free .pw-story { max-height: max(240px, calc(100dvh - 420px)); }
+/* Wide screens: the table fits the window. The grid takes the height
+   between the players' row and the hand tray; side areas scroll inside
+   themselves instead of growing the page, so the board never scrolls away. */
+@media (min-width: 861px) {
+  .pw-free-grid { height: calc(100dvh - 196px - var(--tray-h, 0px)); min-height: 320px; flex: none; align-items: stretch; }
+  .pw-free-area { min-height: 0; }
+  .pw-free-area:not(.has-board) { overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; align-items: stretch; }
+  .pw-free-area:not(.has-board) > .pw-zones { justify-content: center; }
+  .pw-free .pw-story { max-height: none; }
+  .pw-free-area.has-board { justify-content: center; }
+  .pw-bg-side { max-height: calc(100dvh - 196px - var(--tray-h, 0px)); overflow-y: auto; scrollbar-width: thin; }
+}
 /* Zones fit their area: a row of cards wraps instead of running off a narrow column. */
 .pw-free-area .pw-zone { max-width: 100%; min-width: 0; }
 .pw-free-area .layout-row .pw-zone-cards, .pw-free-area .layout-grid .pw-zone-cards { flex-wrap: wrap; justify-content: center; gap: 8px; }

@@ -462,7 +462,7 @@ export default function BoardView({
   const centerZones = zonesAt('center').length > 0 && <Zones zones={zonesAt('center')} {...zoneProps} center />
 
   return (
-    <div className={`pw-boardgame ${reduced ? 'is-reduced' : ''} ${storyMode ? 'is-story' : ''}`}>
+    <div className={`pw-boardgame ${reduced ? 'is-reduced' : ''} ${storyMode ? 'is-story' : ''} ${myZones.length > 0 && (layout ? handInTray : storyMode) ? 'has-tray' : ''}`}>
       {/* players + counters */}
       <div className="pw-bg-top">
         <div className="pw-bg-players">
@@ -537,7 +537,7 @@ export default function BoardView({
                   const others = zs.filter((z) => !myZones.includes(z) && (!layout.place?.[z.id] || faceDown(z)))
                   return (
                     <>
-                      {named.length > 0 && <Zones zones={named} {...zoneProps} />}
+                      {named.length > 0 && <Zones zones={named} {...zoneProps} small={!(placeOfItem('board') === area)} />}
                       {others.length > 0 && <Zones zones={others} {...zoneProps} compact={storyMode} />}
                       {mine.length > 0 && <Zones zones={mine} {...zoneProps} mine />}
                     </>
@@ -752,6 +752,7 @@ function Zones({
   tray = false,
   side = false,
   center = false,
+  small = false,
 }: {
   zones: NonNullable<BoardData['zones']>
   zoneMoves: Map<string, MoveSpec>
@@ -770,6 +771,7 @@ function Zones({
   tray?: boolean
   side?: boolean
   center?: boolean
+  small?: boolean // a layout's narrow area: smaller cards
 }) {
   const { s } = usePlayT()
   if (!zones.length) return null
@@ -801,7 +803,7 @@ function Zones({
                   '--rot': fan ? `${(i - mid) * Math.min(rich ? 4 : 8, 40 / Math.max(1, z.cards.length))}deg` : '0deg',
                   '--lift': fan ? `${Math.abs(i - mid) * (rich ? 5 : 3)}px` : '0px',
                 } as CSSProperties
-                const size = mine ? 'lg' : compact || side ? 'sm' : z.owner === undefined ? 'md' : 'sm'
+                const size = mine ? 'lg' : compact || side || small ? 'sm' : z.owner === undefined ? 'md' : 'sm'
                 return (
                   <button
                     key={`${i}-${c.title || c.face || 'x'}`}
