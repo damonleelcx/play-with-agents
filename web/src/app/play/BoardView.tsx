@@ -530,8 +530,11 @@ export default function BoardView({
                   const mine = zs.filter((z) => myZones.includes(z))
                   // A zone the layout placed by name gets full-size cards
                   // (a market, a tableau); the rest stay compact.
-                  const named = zs.filter((z) => !myZones.includes(z) && layout.place?.[z.id])
-                  const others = zs.filter((z) => !myZones.includes(z) && !layout.place?.[z.id])
+                  // ...except face-down piles and rivals' hands: their backs say
+                  // nothing, so they stay compact and fit a narrow column.
+                  const faceDown = (z: (typeof zs)[number]) => z.cards.length > 0 && z.cards.every((c) => c.hidden)
+                  const named = zs.filter((z) => !myZones.includes(z) && layout.place?.[z.id] && !faceDown(z))
+                  const others = zs.filter((z) => !myZones.includes(z) && (!layout.place?.[z.id] || faceDown(z)))
                   return (
                     <>
                       {named.length > 0 && <Zones zones={named} {...zoneProps} />}
