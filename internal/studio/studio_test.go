@@ -621,16 +621,25 @@ func TestRevisionOfOwnedGame(t *testing.T) {
 func TestSeedCommunityIsIdempotent(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()
-	for i := 0; i < 2; i++ {
-		if err := SeedCommunity(ctx, pool); err != nil {
-			t.Fatal(err)
-		}
+	count := func() (games, versions int) {
+		_ = pool.QueryRow(ctx, `SELECT count(*), (SELECT count(*) FROM game_versions v JOIN games g ON g.id = v.game_id
+				WHERE g.owner_id IS NULL AND g.kind='script')
+			FROM games WHERE owner_id IS NULL AND kind='script' AND status='published' AND visibility='public'`).Scan(&games, &versions)
+		return
 	}
-	var n, versions int
-	_ = pool.QueryRow(ctx, `SELECT count(*), (SELECT count(*) FROM game_versions WHERE game_id IN ('tictactoe','connect-four','reversi','lantern-market','story-tiles','comet-run'))
-		FROM games WHERE owner_id IS NULL AND kind='script' AND status='published' AND visibility='public'`).Scan(&n, &versions)
-	if n != len(script.Examples()) || versions != n {
-		t.Fatalf("%d seeded games, %d versions", n, versions)
+	if err := SeedCommunity(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	n, v := count()
+	if n != len(script.Examples()) || v < n {
+		t.Fatalf("%d seeded games, %d versions", n, v)
+	}
+	// Seeding again, with nothing changed, adds nothing.
+	if err := SeedCommunity(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	if n2, v2 := count(); n2 != n || v2 != v {
+		t.Fatalf("a second seed changed the shelf: %d/%d games, %d/%d versions", n2, n, v2, v)
 	}
 }
 

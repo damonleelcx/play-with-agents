@@ -422,6 +422,42 @@ export default function BoardView({
       </div>
     )
   )
+  // The player's hand as a tray along the bottom edge (the default).
+  const handTray = (
+    <div className="pw-hand-area">
+      <div className={`pw-hand-caption ${selCard ? 'is-sel' : ''}`}>
+        {myTurn && (d.prompt || cardCells.size > 0 || zoneMoves.size > 0) ? (
+          <p className={`pw-hand-prompt ${selCard ? 'is-sel' : ''}`}>
+            {selCard && selCardData ? f(s.board.pickSquare, { title: selCardData.title || selCardData.face || '' }) : d.prompt || s.board.chooseCard}
+          </p>
+        ) : (
+          <p className="pw-hand-prompt is-idle">{myZones.map((z) => z.label).filter(Boolean).join(' · ')}</p>
+        )}
+        {selCardData?.effect && <span className="pw-hand-effect">{selCardData.effect}</span>}
+      </div>
+      <Zones zones={myZones} {...zoneProps} mine tray />
+    </div>
+  )
+
+  // ── the game's own layout (view.layout) ──
+  const layout = d.layout && Array.isArray(d.layout.areas) && d.layout.areas.length > 0 ? d.layout : null
+  const freeAreas = layout ? [...new Set(layout.areas.flatMap((r) => r.trim().split(/\s+/)).filter((x) => x && x !== '.'))] : []
+  const placeOfItem = (item: string): string => {
+    const want = layout?.place?.[item]
+    if (want && freeAreas.includes(want)) return want
+    if (freeAreas.includes(item)) return item
+    if (item === 'board') return freeAreas[0]
+    if (item === 'story' || item === 'others') return freeAreas.find((x) => x !== placeOfItem('board')) || freeAreas[0]
+    return ''
+  }
+  const handInTray = !layout || layout.hand !== 'area' || !placeOfItem('hand')
+  const zoneArea = (z: NonNullable<BoardData['zones']>[number]): string => {
+    const own = layout?.place?.[z.id]
+    if (own && freeAreas.includes(own)) return own
+    if (myZones.includes(z)) return handInTray ? '' : placeOfItem('hand')
+    return placeOfItem('others')
+  }
+
   const sideZones = (a: 'left' | 'right') => zonesAt(a).length > 0 && <Zones zones={zonesAt(a)} {...zoneProps} side />
   const centerZones = zonesAt('center').length > 0 && <Zones zones={zonesAt('center')} {...zoneProps} center />
 
@@ -457,6 +493,13 @@ export default function BoardView({
             )
           })}
         </div>
+        {/* the status sits in the players' row: the board gets the height */}
+        {message && (
+          <div className={`pw-bg-message ${myTurn ? 'is-turn' : ''}`} role="status">
+            {myTurn && <span className="pw-wait-dot is-me" />}
+            {message}
+          </div>
+        )}
         {!!d.counters?.length && (
           <div className="pw-bg-counters">
             {d.counters.map((c, i) => (
@@ -469,14 +512,40 @@ export default function BoardView({
         )}
       </div>
 
-      {message && (
-        <div className={`pw-bg-message ${myTurn ? 'is-turn' : ''}`} role="status">
-          {myTurn && <span className="pw-wait-dot is-me" />}
-          {message}
+      {layout ? (
+        // The game's own table: its areas, its placement, its board size.
+        <div className={`pw-bg-main pw-free ${storyMode ? 'is-story' : ''} board-${layout.board || 'fill'}`}>
+          <div
+            className="pw-free-grid"
+            style={{ gridTemplateAreas: layout.areas.map((r) => `"${r}"`).join(' '), gridTemplateColumns: layout.columns, gridTemplateRows: layout.rows } as CSSProperties}
+          >
+            {freeAreas.map((area) => (
+              <div key={area} className={`pw-free-area area-${area} ${placeOfItem('board') === area ? 'has-board' : ''}`} style={{ gridArea: area, '--rows': dims?.rows ?? 1, '--cols': dims?.cols ?? 1 } as CSSProperties}>
+                {placeOfItem('board') === area && boardEl}
+                {placeOfItem('story') === area && d.story && (d.story.length > 0 || cardsOnBoard) && (
+                  <StoryPanel story={d.story} seatColor={seatColor} seatName={seatName} reduced={reduced} />
+                )}
+                {(() => {
+                  const zs = (d.zones || []).filter((z) => zoneArea(z) === area)
+                  const mine = zs.filter((z) => myZones.includes(z))
+                  // A zone the layout placed by name gets full-size cards
+                  // (a market, a tableau); the rest stay compact.
+                  const named = zs.filter((z) => !myZones.includes(z) && layout.place?.[z.id])
+                  const others = zs.filter((z) => !myZones.includes(z) && !layout.place?.[z.id])
+                  return (
+                    <>
+                      {named.length > 0 && <Zones zones={named} {...zoneProps} />}
+                      {others.length > 0 && <Zones zones={others} {...zoneProps} compact={storyMode} />}
+                      {mine.length > 0 && <Zones zones={mine} {...zoneProps} mine />}
+                    </>
+                  )
+                })()}
+              </div>
+            ))}
+          </div>
+          {handInTray && myZones.length > 0 && handTray}
         </div>
-      )}
-
-      {storyMode ? (
+      ) : storyMode ? (
         <div className="pw-bg-main is-story">
           <div className={`pw-bg-stage ${b ? '' : 'no-board'} ${otherZones.length === 0 && !(d.story && (d.story.length > 0 || cardsOnBoard)) ? 'no-side' : ''}`} style={dims ? ({ '--rows': dims.rows, '--cols': dims.cols } as CSSProperties) : undefined}>
             <div className="pw-bg-center">{boardEl}</div>
@@ -485,21 +554,7 @@ export default function BoardView({
               {d.story && (d.story.length > 0 || cardsOnBoard) && <StoryPanel story={d.story} seatColor={seatColor} seatName={seatName} reduced={reduced} />}
             </aside>
           </div>
-          {myZones.length > 0 && (
-            <div className="pw-hand-area">
-              <div className={`pw-hand-caption ${selCard ? 'is-sel' : ''}`}>
-                {myTurn && (d.prompt || cardCells.size > 0 || zoneMoves.size > 0) ? (
-                  <p className={`pw-hand-prompt ${selCard ? 'is-sel' : ''}`}>
-                    {selCard && selCardData ? f(s.board.pickSquare, { title: selCardData.title || selCardData.face || '' }) : d.prompt || s.board.chooseCard}
-                  </p>
-                ) : (
-                  <p className="pw-hand-prompt is-idle">{myZones.map((z) => z.label).filter(Boolean).join(' · ')}</p>
-                )}
-                {selCardData?.effect && <span className="pw-hand-effect">{selCardData.effect}</span>}
-              </div>
-              <Zones zones={myZones} {...zoneProps} mine tray />
-            </div>
-          )}
+          {myZones.length > 0 && handTray}
         </div>
       ) : (
         <div className={`pw-bg-main ${b ? '' : `no-board felt-${prefs.felt}`}`}>

@@ -518,13 +518,15 @@ select.pw-input option { background: var(--navy-800, #111b33); }
 .pw-counter { display: grid; padding: 5px 12px; border-radius: 12px; background: rgba(13,21,40,.8); border: 1px solid var(--line); line-height: 1.15; }
 .pw-counter small { font: 600 9.5px var(--font-mono); letter-spacing: .12em; text-transform: uppercase; color: var(--text-3); }
 .pw-counter b { font: 700 15px var(--font-mono); }
+.pw-bg-top .pw-bg-message { flex: 0 1 auto; margin: 0 auto; max-width: min(560px, 100%); }
+@media (max-width: 900px) { .pw-bg-top .pw-bg-message { order: 3; flex-basis: 100%; justify-content: center; } }
 .pw-bg-message { align-self: center; display: inline-flex; align-items: center; gap: 10px; padding: 8px 18px; border-radius: 999px; background: rgba(6,10,20,.6); border: 1px solid var(--line); font: 500 14px var(--font-head); color: var(--text-2); text-align: center; }
 .pw-bg-message.is-turn { color: #ffd9bd; border-color: rgba(255,138,61,.35); background: rgba(255,138,61,.08); }
 .pw-bg-main { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 18px; min-height: 0; }
 .pw-bg-board-wrap { width: 100%; display: grid; place-items: center; }
 .pw-bg-board {
   --gap: 0px; position: relative; display: grid; grid-template-columns: repeat(var(--cols), 1fr); grid-template-rows: repeat(var(--rows), 1fr); gap: var(--gap);
-  width: min(100%, calc((100dvh - 330px) * var(--cols) / var(--rows)), 760px); min-width: 240px;
+  width: min(100%, calc((100dvh - 300px) * var(--cols) / var(--rows)), 1000px); min-width: 240px;
   border-radius: 16px; padding: 10px; background: #0d1528; box-shadow: 0 30px 70px rgba(0,0,0,.5), 0 0 0 1px rgba(143,182,255,.14);
 }
 .pw-cell { position: relative; border: 0; padding: 0; margin: 0; background: transparent; aspect-ratio: 1; cursor: default; color: inherit; }
@@ -695,10 +697,13 @@ select.pw-input option { background: var(--navy-800, #111b33); }
 .pw-zones.is-compact .pw-zone-card.is-rich + .pw-zone-card.is-rich { margin-left: -16px; }
 .pw-zones.is-compact .pw-sc-back-medal { display: none; }
 .pw-zones.is-compact .pw-zone-label { white-space: nowrap; }
+/* The side column is narrow: one compact zone per line, so labels and card fans never overlap. */
+.pw-bg-side .pw-zones.is-compact .pw-zone, .pw-free-area .pw-zones.is-compact .pw-zone { flex-basis: 100%; }
 
 /* the story layout: board + side column (other zones, story), hand below */
 .pw-bg-main.is-story { align-items: stretch; gap: 16px; }
-.pw-bg-stage { --board-w: min(calc((100dvh - 430px) * var(--cols, 1) / var(--rows, 1)), 600px); flex: 1 0 auto; display: grid; grid-template-columns: minmax(260px, var(--board-w)) minmax(260px, 340px); justify-content: center; gap: 24px; align-items: start; width: 100%; }
+/* board first: the board takes the height the screen has; the side column stays narrow */
+.pw-bg-stage { --board-w: min(calc((100dvh - 290px) * var(--cols, 1) / var(--rows, 1)), 1040px); flex: 1 0 auto; display: grid; grid-template-columns: minmax(300px, var(--board-w)) minmax(220px, 300px); justify-content: center; gap: 20px; align-items: start; width: 100%; }
 .pw-bg-stage.no-board { grid-template-columns: minmax(0, 1fr); max-width: 640px; }
 .pw-bg-stage.no-side { grid-template-columns: minmax(260px, var(--board-w)); }
 .pw-bg-stage.no-side .pw-bg-side { display: none; }
@@ -707,7 +712,7 @@ select.pw-input option { background: var(--navy-800, #111b33); }
 .pw-bg-side .pw-story { max-height: max(220px, calc(100dvh - 520px)); }
 /* the hand tray: sticky at the bottom, cards peek up and rise on hover,
    focus or selection; the rise space overlaps the content above */
-.pw-hand-area { --rise: 66px; --peek: 160px; position: sticky; bottom: -24px; z-index: 8; display: grid; justify-items: center; gap: 2px; width: calc(100% + 2 * clamp(12px, 3vw, 32px)); margin: calc(-1 * var(--rise)) calc(-1 * clamp(12px, 3vw, 32px)) -24px; padding: 0 12px; pointer-events: none;
+.pw-hand-area { --rise: 66px; --peek: 128px; position: sticky; bottom: -24px; z-index: 8; display: grid; justify-items: center; gap: 2px; width: calc(100% + 2 * clamp(12px, 3vw, 32px)); margin: calc(-1 * var(--rise)) calc(-1 * clamp(12px, 3vw, 32px)) -24px; padding: 0 12px; pointer-events: none;
   background: linear-gradient(180deg, rgba(7,11,24,0) 0, rgba(7,11,24,0) var(--rise), rgba(7,11,24,.88) calc(var(--rise) + 40px), rgba(7,11,24,.97)); }
 .pw-hand-caption { position: relative; z-index: 2; display: grid; justify-items: center; gap: 4px; min-height: 26px; padding-top: calc(var(--rise) - 4px); pointer-events: auto; }
 .pw-hand-effect { padding: 3px 12px; border-radius: 999px; font: 600 12px var(--font-body); color: #2a1d10; background: linear-gradient(180deg, #f6ebcf, #e5cf9f); box-shadow: 0 0 0 1px rgba(242,200,107,.6), 0 4px 12px rgba(0,0,0,.4); animation: pw-rise .2s var(--pw-ease); max-width: min(560px, 92vw); text-align: center; }
@@ -1342,3 +1347,26 @@ select.pw-input option { background: var(--navy-800, #111b33); }
 .pw-pager { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-top: 12px; }
 .pw-pager-info { font: 500 12px var(--font-mono); color: var(--text-3); }
 .pw-pager .pw-btn:disabled { opacity: .4; cursor: default; }
+
+/* ── a game's own table layout (view.layout) ────────────────────────────── */
+.pw-free { align-items: stretch; }
+.pw-free-grid { display: grid; gap: 16px; width: 100%; min-height: 0; flex: 1 0 auto; align-items: start; }
+.pw-free-area { min-width: 0; display: flex; flex-direction: column; gap: 12px; align-items: center; }
+.pw-free-area > .pw-zones, .pw-free-area > .pw-story { width: 100%; }
+.pw-free-area .pw-bg-board-wrap { width: 100%; }
+/* The board fills its area, as large as the screen's height allows. */
+.pw-free .pw-bg-board, .pw-free .pw-map { --fit: calc((100dvh - 270px) * var(--cols, 1) / var(--rows, 1)); width: min(100%, var(--fit)); max-width: none; min-width: 0; }
+.pw-free.board-large .pw-bg-board, .pw-free.board-large .pw-map { width: min(88%, var(--fit)); }
+.pw-free.board-medium .pw-bg-board, .pw-free.board-medium .pw-map { width: min(68%, var(--fit)); }
+.pw-free.board-small .pw-bg-board, .pw-free.board-small .pw-map { width: min(48%, var(--fit)); }
+.pw-free .pw-story { max-height: max(240px, calc(100dvh - 420px)); }
+/* Zones fit their area: a row of cards wraps instead of running off a narrow column. */
+.pw-free-area .pw-zone { max-width: 100%; min-width: 0; }
+.pw-free-area .layout-row .pw-zone-cards, .pw-free-area .layout-grid .pw-zone-cards { flex-wrap: wrap; justify-content: center; gap: 8px; }
+.pw-free-area .layout-row .pw-zone-card + .pw-zone-card { margin-left: 0; }
+@media (max-width: 860px) {
+  /* Phones: the areas stack in the order the layout names them. */
+  .pw-free-grid { display: flex; flex-direction: column; align-items: stretch; }
+  .pw-free-area.has-board { order: -1; }
+  .pw-free .pw-bg-board, .pw-free .pw-map { width: 100%; }
+}

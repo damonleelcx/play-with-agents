@@ -157,6 +157,12 @@ which is why hidden-information games must define it.
     { "text": "Every dusk he climbed the hill.", "seat": 0, "title": "The Lamplighter" }
   ],
   "prompt": "Choose a card, then a square",   // optional, above the mover's hand
+  "layout": {                                  // optional: the game's own table layout
+    "areas": ["rival board story", "deck board story"],   // CSS grid areas, ≤8×6, "." empty
+    "columns": "200px minmax(0, 1fr) 280px", "rows": "auto 1fr",
+    "place": { "story": "story", "deck": "deck" },         // board | story | hand | others | zone id → area
+    "board": "fill|large|medium|small", "hand": "tray|area"
+  },
   "players": [ { "seat": 0, "score": 3, "info": "Red", "color": "p0" } ],
   "counters": [ { "label": "Round", "value": "2 / 5" } ],
   "message": "Red to move"

@@ -214,6 +214,19 @@ export type BoardData = {
   message?: string
   story?: StoryLine[]
   prompt?: string
+  layout?: TableLayout
+}
+
+// A game's own table layout: named areas as a floor plan (CSS grid areas),
+// what goes in each, and how big the board is. Without one the renderer
+// uses its board-first default.
+export type TableLayout = {
+  areas: string[] // rows of area names, e.g. ["rivals rivals", "board side", "board hand"]; "." is empty
+  columns?: string
+  rows?: string
+  place?: Record<string, string> // board | story | hand | others | a zone id → area
+  board?: 'fill' | 'large' | 'medium' | 'small'
+  hand?: 'tray' | 'area'
 }
 
 export type TablePage = { tables: TableSummary[]; total: number; offset: number; limit: number }

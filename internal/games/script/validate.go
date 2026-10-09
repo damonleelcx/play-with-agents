@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"regexp"
 	"slices"
 	"sort"
 	"strings"
@@ -567,7 +568,7 @@ func validateView(raw string, seats, maxBytes int) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if err := keys(fn, "view", o, "title", "board", "zones", "players", "counters", "message", "story", "prompt"); err != nil {
+	if err := keys(fn, "view", o, "title", "board", "zones", "players", "counters", "message", "story", "prompt", "layout"); err != nil {
 		return "", err
 	}
 	if err := optString(fn, "view", o, "title"); err != nil {
@@ -590,6 +591,11 @@ func validateView(raw string, seats, maxBytes int) (string, error) {
 	}
 	if b, ok := o["board"]; ok && b != nil {
 		if err := validateBoard(b, seats); err != nil {
+			return "", err
+		}
+	}
+	if l, ok := o["layout"]; ok && l != nil {
+		if err := validateLayout(l); err != nil {
 			return "", err
 		}
 	}
@@ -1157,4 +1163,92 @@ func validateCounters(v any) error {
 		}
 	}
 	return nil
+}
+
+// Layout limits: a floor plan of the table, not a page builder.
+const (
+	maxLayoutRows  = 8
+	maxLayoutCols  = 6
+	maxTrackLen    = 120
+	maxLayoutPlace = 24
+)
+
+var (
+	areaName  = regexp.MustCompile(`^([a-z][a-z0-9-]{0,23}|\.)$`)
+	trackList = regexp.MustCompile(`^[0-9a-z.%(), -]+$`)
+)
+
+// validateLayout checks view.layout: the game's own table, as named areas
+// (CSS grid areas), track sizes, what goes where and the board's size.
+func validateLayout(v any) error {
+	const fn = "view"
+	l, err := object(fn, "view.layout", v)
+	if err != nil {
+		return err
+	}
+	if err := keys(fn, "view.layout", l, "areas", "columns", "rows", "place", "board", "hand"); err != nil {
+		return err
+	}
+	rows, err := array(fn, "view.layout.areas", l["areas"])
+	if err != nil {
+		return err
+	}
+	if len(rows) == 0 || len(rows) > maxLayoutRows {
+		return outErr(fn, "view.layout.areas", "has %d rows; a layout needs 1..%d", len(rows), maxLayoutRows)
+	}
+	names := map[string]bool{}
+	width := -1
+	for i, rv := range rows {
+		p := fmt.Sprintf("view.layout.areas[%d]", i)
+		r, ok := rv.(string)
+		if !ok {
+			return outErr(fn, p, "must be a string of area names, got %s", typeName(rv))
+		}
+		cells := strings.Fields(r)
+		if len(cells) == 0 || len(cells) > maxLayoutCols {
+			return outErr(fn, p, "has %d columns; each row needs 1..%d area names", len(cells), maxLayoutCols)
+		}
+		if width >= 0 && len(cells) != width {
+			return outErr(fn, p, "has %d columns but the rows above have %d; every row names the same number of cells", len(cells), width)
+		}
+		width = len(cells)
+		for _, c := range cells {
+			if !areaName.MatchString(c) {
+				return outErr(fn, p, "names area %q; use lowercase names like board, side, hand (or . for an empty cell)", c)
+			}
+			if c != "." {
+				names[c] = true
+			}
+		}
+	}
+	if len(names) == 0 {
+		return outErr(fn, "view.layout.areas", "names no areas")
+	}
+	for _, k := range []string{"columns", "rows"} {
+		if tv, ok := l[k]; ok && tv != nil {
+			t, isStr := tv.(string)
+			if !isStr || len(t) > maxTrackLen || !trackList.MatchString(t) {
+				return outErr(fn, "view.layout."+k, "must be CSS track sizes such as \"minmax(0, 3fr) 280px\" (at most %d characters), got %v", maxTrackLen, tv)
+			}
+		}
+	}
+	if pv, ok := l["place"]; ok && pv != nil {
+		pl, err := object(fn, "view.layout.place", pv)
+		if err != nil {
+			return err
+		}
+		if len(pl) > maxLayoutPlace {
+			return outErr(fn, "view.layout.place", "places %d items, over the limit of %d", len(pl), maxLayoutPlace)
+		}
+		for item, av := range pl {
+			a, isStr := av.(string)
+			if !isStr || !names[a] {
+				return outErr(fn, "view.layout.place."+item, "must name one of the layout's areas, got %v", av)
+			}
+		}
+	}
+	if err := optEnum(fn, "view.layout", l, "board", "fill", "large", "medium", "small"); err != nil {
+		return err
+	}
+	return optEnum(fn, "view.layout", l, "hand", "tray", "area")
 }
