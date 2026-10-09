@@ -48,6 +48,19 @@ func (a *Agent) revise(ctx context.Context, t *turn) outcome {
 	if change == "" {
 		change = t.text
 	}
+	// The router sometimes leaves the game out; one of their own games named
+	// in the message is the one they mean.
+	var mine []GameInfo
+	for _, g := range t.games {
+		if g.Mine {
+			mine = append(mine, g)
+		}
+	}
+	if r.GameID == "" && r.GoalID == "" {
+		if g, ok := gameInText(mine, t.text); ok {
+			r.GameID = g.ID
+		}
+	}
 	// 1. A build still running: the change goes into its plan.
 	var target *engine.Goal
 	for _, g := range t.open {
@@ -74,6 +87,9 @@ func (a *Agent) revise(ctx context.Context, t *turn) outcome {
 	if r.GameID != "" {
 		g, ok := a.resolveGame(ctx, t, r.GameID)
 		if !ok || !g.Mine {
+			g, ok = gameInText(mine, t.text) // the router named it wrongly
+		}
+		if !ok {
 			return outcome{mood: persona.Neutral, note: "The player wants to change a game you could not find among their own games. Ask which of their games they mean."}
 		}
 		if a.Studio == nil {
