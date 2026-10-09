@@ -1372,6 +1372,11 @@ select.pw-input option { background: var(--navy-800, #111b33); }
   .pw-free-area:not(.has-board) { overflow-y: auto; overflow-x: hidden; scrollbar-width: thin; align-items: stretch; }
   .pw-free-area:not(.has-board) > .pw-zones { justify-content: center; }
   .pw-free .pw-story { max-height: none; }
+  /* In a side column the zones come first and keep their size; the story
+     goes under them and takes the room left, never less than a few lines.
+     The column scrolls when it runs out. */
+  .pw-free-area:not(.has-board) > * { flex-shrink: 0; }
+  .pw-free-area:not(.has-board) > .pw-story { order: 1; flex: 1 1 0; min-height: min(220px, 40dvh); }
   .pw-free-area.has-board { justify-content: center; }
   .pw-bg-side { max-height: calc(100dvh - 196px - var(--tray-h, 0px)); overflow-y: auto; scrollbar-width: thin; }
 }
