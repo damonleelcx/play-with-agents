@@ -38,7 +38,7 @@ def save(img, path, q=84, limit_kb=None):
 
 
 # --- generated, reference-image based ---------------------------------------
-save(Image.open(RAW / 'full-w4.png').convert('RGB'), AOI / 'aoi-full.webp', 90, 440)
+# aoi-full.webp is cut from the sheet itself: see full_from_sheet.py.
 save(Image.open(RAW / 'portrait-clean.png').convert('RGB'), AOI / 'aoi-portrait.webp', 90, 300)
 save(Image.open(RAW / 'card.png').convert('RGB'), AOI / 'aoi-card.webp', 90, 340)
 
