@@ -2,12 +2,12 @@
 
 Source: `docs/assets/aoi-character-sheet.webp`, Aoi's official character sheet.
 Generation: DashScope (Alibaba Model Studio). Scripts are in `scripts/gen-art/`.
-Run them in this order: `gen.py portrait-clean`, `gen_full.py`, `gen.py card table av-ren av-mika av-bram av-nova av-lin face-smile face2-neutral face2-wink face2-surprised face2-angry face2-sad outfit-default outfit-casual outfit-combat outfit-summer`, `post.py`.
+Run them in this order: `gen.py portrait-clean`, `gen.py card table av-ren av-mika av-bram av-nova av-lin face-smile face2-neutral face2-wink face2-surprised face2-angry face2-sad outfit-default outfit-casual outfit-combat outfit-summer`, `post.py`, then `full_from_sheet.py` (no generation).
 The key comes from `PLAY_IMAGE_API_KEY`. In total, 37 generation calls were made.
 
 | File | How it was made |
 |---|---|
-| aoi/aoi-full.webp | **wan2.5-i2i-preview** (reference model, 896x1792). The references were the FRONT turnaround crop (sheet 436,58–586,594, 3x Lanczos, on a seamless navy canvas) and the face from the cleaned portrait. The prompt asked for the same girl and outfit, standing front view, deep navy (#0a1020) background and blue rim light. |
+| aoi/aoi-full.webp | **No generation.** The sheet's own FRONT turnaround (sheet 420,50–600,600), masked off its panel, upscaled ~2.9x (Lanczos + light unsharp), transparent background (896x1792). Made by `scripts/gen-art/full_from_sheet.py`. |
 | aoi/aoi-portrait.webp | **qwen-image-edit** on the left portrait (sheet 0,0–432,656, 2x). The instruction removed the HEROES AGENT logo, the Japanese text and the "Player" signature. Everything else was kept. |
 | aoi/aoi-card.webp | **wan2.5-i2i-preview** with references to the cleaned portrait and face (1024x1536). The prompt asked for upper body, a fan of playing cards, a blue rim light, a warm ember glow and floating embers on a dark background. |
 | aoi/aoi-face-*.webp | **wan2.5-i2i-preview**, 1024², best of 2, then the same square crop for all six and export at 768x768. The smile master (`face-smile`) used two references: the cleaned HD portrait for identity and the sheet's Smile tile (4x) for the expression. The other five (`face2-*`) used two references: that smile master, for the same rendering, framing and outfit, and the matching sheet tile. The prompt changed only the expression. "Angry" is a playful pout. |
