@@ -274,10 +274,10 @@
 .meet-full {
   position: absolute; z-index: 1; left: 50%; bottom: 0; transform: translateX(-50%);
   height: 100%; width: auto; max-width: none;
-  /* the art may sit on a dark plate or be transparent: feather all four edges */
-  -webkit-mask-image: linear-gradient(90deg, transparent, #000 24%, #000 76%, transparent), linear-gradient(180deg, transparent 2%, #000 14%, #000 90%, transparent);
+  /* the art may sit on a dark plate or be transparent: feather the edges, outside the figure (16%-84% across, 7%-93% down) */
+  -webkit-mask-image: linear-gradient(90deg, transparent, #000 15%, #000 85%, transparent), linear-gradient(180deg, transparent 2%, #000 7%, #000 94%, transparent);
   -webkit-mask-composite: source-in;
-  mask-image: linear-gradient(90deg, transparent, #000 24%, #000 76%, transparent), linear-gradient(180deg, transparent 2%, #000 14%, #000 90%, transparent);
+  mask-image: linear-gradient(90deg, transparent, #000 15%, #000 85%, transparent), linear-gradient(180deg, transparent 2%, #000 7%, #000 94%, transparent);
   mask-composite: intersect;
 }
 .meet-full-fb {
@@ -286,7 +286,7 @@
   border: 1px solid var(--line-strong); display: grid; place-items: center;
 }
 .meet-full-fb span { font-family: var(--font-serif); font-size: 160px; color: var(--ice-50); text-shadow: 0 0 40px var(--blue-500); }
-.meet-verbs { position: absolute; z-index: 2; right: 0; bottom: 8%; list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; justify-items: end; }
+.meet-verbs { position: absolute; z-index: 2; right: 0; bottom: 22%; list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; justify-items: end; }
 .meet-verbs li {
   padding: 8px 18px; border-radius: 999px; background: rgba(10, 16, 32, .72); border: 1px solid var(--line-strong);
   -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px);
@@ -727,8 +727,8 @@
   .pk { aspect-ratio: 4 / 5; --cw: min(10.5cqw, 9cqh); }
   .pk-felt { left: 5%; right: 5%; top: 12%; bottom: 12%; }
   .pk-tip { max-width: 84%; }
-  .meet-verbs { right: 0; bottom: 2%; }
-  .meet-verbs li { font-size: 11px; padding: 6px 12px; }
+  .meet-verbs { right: 0; }
+  .meet-verbs li { font-size: 11px; padding: 6px 12px; transform: translateX(calc(var(--i) * -6px)); }
 }
 @media (max-width: 520px) {
   .roster { grid-template-columns: 1fr; }
